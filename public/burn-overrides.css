@@ -1,0 +1,55 @@
+/* Burn dashboard visual override: strong white translucent/glass treatment while keeping the artwork visible underneath. */
+.burn-stats-section,
+.burn-desk-section {
+  position: relative;
+  overflow: hidden;
+}
+
+.burn-stats-section .enhanced-bg,
+.burn-desk-section .enhanced-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+}
+
+.burn-stats-section::before,
+.burn-desk-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(255,255,255,.70);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.burn-stats-section .container,
+.burn-desk-section .container {
+  position: relative;
+  z-index: 3;
+  color: #000;
+}
+
+.burn-stats-section .burn-stat-grid,
+.burn-desk-section .surface-card {
+  position: relative;
+  z-index: 4;
+  color: #000;
+}
+
+.burn-stats-section .surface-card *,
+.burn-desk-section .surface-card *,
+.burn-stats-section .container *,
+.burn-desk-section .container * {
+  color: #000;
+}
+
+@media (max-width: 600px) {
+  .burn-stats-section::before,
+  .burn-desk-section::before {
+    background: rgba(255,255,255,.70);
+  }
+}

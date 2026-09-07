@@ -1,0 +1,28 @@
+/* Burn dashboard: preserve the artwork, but add the same visible white translucent/glass treatment used by the rest of the site. */
+.burn-stats-section .enhanced-bg,
+.burn-desk-section .enhanced-bg{
+  position:absolute;
+  inset:0;
+  z-index:0;
+  background-size:cover;
+  background-position:center;
+  opacity:1;
+}
+
+.burn-stats-section .enhanced-bg::after,
+.burn-desk-section .enhanced-bg::after{
+  content:'';
+  position:absolute;
+  inset:0;
+  background:rgba(255,255,255,.58);
+  backdrop-filter:blur(1.5px);
+  -webkit-backdrop-filter:blur(1.5px);
+  pointer-events:none;
+}
+
+/* Keep the dashboard content above the translucent layer. */
+.burn-stats-section > .container,
+.burn-desk-section > .container{
+  position:relative;
+  z-index:3;
+}

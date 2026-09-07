@@ -1,0 +1,1323 @@
+/* ============================================================
+   RONIN SWAP page — matches the approved design mockup.
+   Uses the existing RONIN tokens (--red, --ink, --cream, --mono,
+   --display) so it stays inside the site's visual language.
+   ============================================================ */
+
+.swap-page {
+  background: #fbf8f3;
+}
+
+/* ---------------- HERO ---------------- */
+/* Full-bleed artwork sits behind the headline + copy, exactly as in the
+   approved design. The swap widget floats on the right over the mist. */
+.swap-hero-section {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #131114;
+}
+
+.swap-hero-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.swap-hero-bg img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: left center;
+}
+
+/* No cream wash — the hero is an evenly lit dark panel. */
+
+/* One flat, even dim across the entire hero. Because it is uniform there is
+   no dark patch or halo sitting behind the text — the whole panel simply
+   reads as a dark cinematic section, like the stats and purpose bands. */
+.swap-hero-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: rgba(17, 15, 18, .8);
+}
+
+.swap-hero-section::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 110px;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(0deg, #fbf8f3 0%, rgba(251, 248, 243, .55) 48%, transparent 100%);
+}
+
+.swap-hero-inner {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(370px, .82fr);
+  align-items: start;
+  gap: 0 34px;
+  width: min(100% - 32px, 1320px);
+  margin-inline: auto;
+  min-height: 700px;
+  padding: 26px 0 34px;
+}
+
+/* --- hero copy column --- */
+.swap-hero-copy {
+  grid-column: 1;
+  padding: 8px 0 0;
+  min-width: 0;
+  /* Pushed right so the headline clears the samurai in the artwork. */
+  padding-left: clamp(0px, 17vw, 250px);
+}
+
+.swap-hero-title {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: .78;
+  text-align: center;
+}
+
+.swap-hero-title-black,
+.swap-hero-title-red {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(62px, 7.6vw, 112px);
+  letter-spacing: .005em;
+  transform: skewX(-7deg);
+}
+
+.swap-hero-title-black {
+  color: #ffffff;
+}
+
+.swap-hero-title-red {
+  /* Brightened red: the deep --red goes muddy against the dark scrim. */
+  color: #ff5c5c;
+  font-size: clamp(74px, 9.4vw, 136px);
+  margin-top: -.05em;
+}
+
+.swap-hero-powered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 18px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .16em;
+  color: rgba(255, 255, 255, .8);
+}
+
+.swap-hero-powered b { color: #fff; font-weight: 800; }
+.swap-hero-powered i { width: 26px; height: 1px; background: rgba(255, 255, 255, .3); }
+
+.jupiter-mark {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.swap-hero-sub {
+  margin: 32px 0 14px;
+  font-family: var(--sans);
+  font-size: clamp(21px, 2.1vw, 29px);
+  font-weight: 800;
+  line-height: 1.24;
+  color: #ffffff;
+}
+
+.swap-hero-sub em { font-style: normal; color: #ff7b7b; }
+
+.swap-hero-text {
+  margin: 0 0 28px;
+  max-width: 38ch;
+  font-size: 14px;
+  line-height: 1.72;
+  color: rgba(255, 255, 255, .9);
+}
+
+.swap-hero-points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 36ch;
+}
+
+.swap-hero-points li { display: flex; align-items: flex-start; gap: 12px; }
+
+.swap-point-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(185, 28, 28, .26);
+}
+
+.swap-point-icon-kanji { font-size: 14px; font-weight: 700; }
+
+.swap-hero-points strong { display: block; font-size: 14px; font-weight: 800; color: #ffffff; }
+.swap-hero-points p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.55; color: rgba(255, 255, 255, .84); }
+
+/* --- clan bar, overlaid on the artwork bottom-left --- */
+.swap-hero-clanbar {
+  position: absolute;
+  z-index: 2;
+  left: max(16px, calc(50% - 660px));
+  bottom: 26px;
+  width: min(390px, calc(100% - 32px));
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(15, 14, 16, .9);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .26);
+}
+
+.swap-clanbar-seal {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.swap-hero-clanbar strong {
+  display: block;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  color: #fff;
+}
+
+.swap-hero-clanbar p {
+  margin: 5px 0 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, .74);
+}
+
+/* ---------------- SWAP WIDGET ---------------- */
+
+.swap-widget {
+  position: relative;
+  z-index: 3;
+  grid-column: 2;
+  margin: 4px 0 0;
+  padding: 22px 22px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 28px 66px rgba(0, 0, 0, .3), 0 2px 8px rgba(0, 0, 0, .14);
+  min-width: 0;
+}
+
+.swap-widget-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.swap-widget-head h3 {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: var(--ink);
+}
+
+.swap-widget-powered {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--muted, #6b6560);
+}
+
+.swap-widget-powered b { color: var(--ink); font-weight: 700; }
+
+.swap-widget-gear {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted, #6b6560);
+  transition: background .2s, color .2s;
+}
+
+.swap-widget-gear:hover:not(:disabled) { background: var(--cream); color: var(--ink); }
+.swap-widget-gear:disabled { cursor: not-allowed; opacity: .5; }
+
+.swap-widget-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+
+.swap-widget-tabs button {
+  position: relative;
+  padding: 11px 4px 12px;
+  border: 0;
+  background: none;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  color: var(--muted, #6b6560);
+  cursor: pointer;
+  transition: color .2s;
+}
+
+.swap-widget-tabs button.active { color: var(--red); }
+
+.swap-widget-tabs button.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--red);
+}
+
+.swap-widget-tabs button:disabled { cursor: not-allowed; opacity: .8; }
+
+.swap-soon-chip {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 20px;
+  background: var(--cream-deep, #e8ddd0);
+  color: var(--muted, #6b6560);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: .1em;
+  vertical-align: middle;
+}
+
+.swap-widget-coming-soon { margin: 0 0 14px; }
+
+/* --- amount fields --- */
+.swap-field {
+  padding: 14px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fcfaf7;
+}
+
+.swap-field-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: .16em;
+  color: var(--muted, #6b6560);
+  margin-bottom: 8px;
+}
+
+.swap-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.swap-field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: none;
+  outline: none;
+  font-family: var(--sans);
+  font-size: 27px;
+  font-weight: 700;
+  color: var(--ink);
+  padding: 0;
+}
+
+.swap-field-input::placeholder { color: #b9b2aa; }
+.swap-field-input:disabled { cursor: not-allowed; color: #b9b2aa; -webkit-text-fill-color: #b9b2aa; opacity: 1; }
+
+.swap-token-select {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px 7px 7px;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.swap-token-select:hover:not(:disabled) { border-color: var(--line-strong); }
+.swap-token-select:disabled { cursor: not-allowed; opacity: .85; }
+.swap-token-select-empty { color: var(--muted, #6b6560); font-weight: 700; font-size: 12.5px; }
+
+.swap-token-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(25, 20, 17, .56);
+}
+
+.swap-token-picker {
+  width: min(100%, 410px);
+  max-height: min(640px, calc(100vh - 36px));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(25, 20, 17, .28);
+}
+
+.swap-token-picker-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.swap-token-picker-head strong { display: block; margin-top: 4px; font-size: 20px; }
+.swap-token-picker-close { border: 0; background: none; color: var(--muted); font-size: 25px; line-height: 1; cursor: pointer; }
+.swap-token-search { width: 100%; min-width: 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--cream); color: var(--ink); font: 13px var(--sans); outline: none; }
+.swap-token-search:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(157, 45, 39, .1); }
+.swap-token-picker-sections { display: grid; gap: 13px; padding: 16px 0 10px; }
+.swap-token-section-title { display: block; margin-bottom: 7px; color: var(--muted); font: 700 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.swap-token-quick-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.swap-token-quick-row button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px 6px 6px; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); color: var(--ink); font: 700 11px var(--sans); cursor: pointer; }
+.swap-token-quick-row button:hover { border-color: var(--red); }
+.swap-token-results { overflow-y: auto; min-height: 0; padding-top: 5px; }
+.swap-token-result { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.swap-token-result:hover { background: var(--cream); }
+.swap-token-result-copy { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.swap-token-result-copy strong { font-size: 13px; }
+.swap-token-result-copy small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.swap-token-trust { color: var(--red); font: 700 9px var(--mono); text-transform: uppercase; }
+.swap-token-empty-state { padding: 22px 4px; color: var(--muted); font-size: 12px; text-align: center; }
+.swap-token-logo { object-fit: cover; }
+.swap-token { border: 0; background: none; color: inherit; cursor: pointer; }
+.swap-quick-pairs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.swap-quick-pairs button { padding: 8px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: inherit; font: 700 10px var(--mono); cursor: pointer; }
+.swap-quick-pairs button:hover { border-color: var(--red); color: var(--red); }
+
+.swap-token-dot {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+.tok-sol { background: linear-gradient(135deg, #9945ff, #14f195); }
+.tok-usdc { background: #2775ca; }
+.tok-usdt { background: #26a17b; }
+.tok-bonk { background: #f5a623; }
+.tok-jup { background: #0f1115; }
+.tok-pyth { background: #4b1fa8; }
+.tok-ray { background: #fff; color: #4f7cff; border: 1px solid var(--line); }
+.tok-meme { background: #f0c07a; }
+.tok-wif { background: #c99b6d; }
+.tok-ronin { background: var(--red); }
+.tok-empty { background: var(--cream-deep, #e8ddd0); color: var(--muted, #6b6560); }
+
+.swap-field-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--muted, #6b6560);
+}
+
+.swap-max {
+  margin-left: 6px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--red);
+  cursor: pointer;
+}
+
+.swap-max:disabled { cursor: not-allowed; opacity: .7; }
+
+/* --- flip button --- */
+.swap-flip-row {
+  display: flex;
+  justify-content: center;
+  margin: -11px 0;
+  position: relative;
+  z-index: 2;
+}
+
+.swap-flip {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .07);
+  transition: border-color .2s, color .2s, transform .2s;
+}
+
+.swap-flip:hover:not(:disabled) { border-color: var(--red); color: var(--red); transform: rotate(180deg); }
+.swap-flip:disabled { cursor: not-allowed; opacity: .6; }
+
+/* --- CTA --- */
+.swap-cta {
+  width: 100%;
+  margin: 16px 0 0;
+  padding: 15px 18px;
+  border: 0;
+  border-radius: 9px;
+  background: #dd8a86;
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  cursor: pointer;
+  transition: background .2s, box-shadow .2s;
+}
+
+.swap-cta:hover:not(:disabled) { background: var(--red); box-shadow: 0 8px 22px rgba(185, 28, 28, .25); }
+.swap-cta:disabled { cursor: not-allowed; background: #dd8a86; opacity: .95; }
+
+/* --- quote box --- */
+.swap-quote-box {
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fcfaf7;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.swap-quote-rate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.swap-quote-refresh {
+  border: 0;
+  background: none;
+  color: var(--muted, #6b6560);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 2px;
+}
+
+.swap-quote-refresh:hover:not(:disabled) { color: var(--red); }
+.swap-quote-refresh:disabled { cursor: not-allowed; opacity: .6; }
+
+.swap-quote-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted, #6b6560);
+}
+
+.swap-quote-row span { display: inline-flex; align-items: center; gap: 5px; }
+.swap-quote-row span svg { opacity: .55; }
+.swap-quote-row strong { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); font-weight: 700; }
+.swap-quote-row strong svg { opacity: .5; }
+
+.swap-widget-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  font-size: 10px;
+  color: var(--muted-light, #9b948d);
+}
+
+/* ---------------- BENEFITS ---------------- */
+.swap-benefits-section {
+  width: min(100% - 32px, 1320px);
+  margin: 0 auto 20px;
+}
+
+.swap-benefits-card {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 8px 30px rgba(20, 19, 22, .05);
+  overflow: hidden;
+}
+
+.swap-benefit {
+  padding: 30px 22px 28px;
+  text-align: center;
+  border-right: 1px solid var(--line);
+}
+
+.swap-benefit:last-child { border-right: 0; }
+
+.swap-benefit-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(185, 28, 28, .22);
+}
+
+.swap-benefit strong {
+  display: block;
+  margin-bottom: 9px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  color: var(--ink);
+}
+
+.swap-benefit p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted, #6b6560);
+}
+
+/* ---------------- LIVE STATS ---------------- */
+.swap-stats-section {
+  width: min(100% - 32px, 1320px);
+  margin: 0 auto 20px;
+}
+
+.swap-stats-card {
+  padding: 22px 24px 24px;
+  border-radius: 12px;
+  background:
+    radial-gradient(90% 130% at 50% 0%, rgba(185, 28, 28, .18), transparent 62%),
+    #131114;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, .22);
+}
+
+.swap-stats-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 21px;
+  letter-spacing: .16em;
+  color: #f5f1e9;
+}
+
+.swap-stats-title span { color: var(--red-ink, #e8b4b1); font-size: 14px; }
+
+.swap-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.swap-stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  padding: 4px 16px;
+  border-right: 1px solid rgba(255, 255, 255, .1);
+  text-align: left;
+}
+
+.swap-stat:last-child { border-right: 0; }
+
+.swap-stat-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--red-ink, #e8b4b1);
+}
+
+.swap-stat-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: .12em;
+  color: rgba(255, 255, 255, .58);
+  margin-bottom: 4px;
+}
+
+.swap-stat-note {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: .08em;
+  color: rgba(255, 255, 255, .4);
+}
+
+.swap-stat-value {
+  display: block;
+  font-family: var(--sans);
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+}
+
+/* ---------------- POPULAR TOKENS ---------------- */
+.swap-tokens-section {
+  width: min(100% - 32px, 1320px);
+  margin: 0 auto 26px;
+}
+
+.swap-tokens-card {
+  padding: 20px 24px 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 8px 30px rgba(20, 19, 22, .05);
+}
+
+.swap-tokens-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.swap-tokens-head h3 {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: var(--ink);
+}
+
+.swap-token-filters {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.swap-token-filters::-webkit-scrollbar { display: none; }
+
+.swap-token-filters button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font: 700 9px var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.swap-token-filters button.active,
+.swap-token-filters button:hover { border-color: var(--red); color: var(--red); }
+
+.swap-tokens-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 13px;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: var(--paper);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .1em;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .2s, color .2s;
+  white-space: nowrap;
+}
+
+.swap-tokens-all:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.swap-tokens-all:disabled { cursor: not-allowed; opacity: .7; }
+
+.swap-tokens-row {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 2px 8px;
+}
+
+.swap-token {
+  flex: 0 0 74px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 2px;
+  text-align: center;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.swap-token .swap-token-dot {
+  width: 42px;
+  height: 42px;
+  font-size: 18px;
+}
+
+.swap-token strong {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.swap-token small {
+  font-size: 9.5px;
+  color: var(--muted-light, #9b948d);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ---------------- PURPOSE BANNER ---------------- */
+.swap-purpose-section {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(70% 130% at 82% 50%, rgba(185, 28, 28, .3), transparent 62%),
+    #131114;
+}
+
+.swap-purpose-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  width: min(100% - 32px, 1320px);
+  margin-inline: auto;
+  padding: 34px 0;
+}
+
+.swap-purpose-seal {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border: 1px solid rgba(232, 180, 177, .3);
+  border-radius: 50%;
+  background: rgba(185, 28, 28, .18);
+  color: var(--red-ink, #e8b4b1);
+  font-size: 32px;
+}
+
+.swap-purpose-title {
+  flex: 0 0 auto;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: .88;
+}
+
+.swap-purpose-title span,
+.swap-purpose-title em {
+  font-family: var(--display);
+  font-weight: 400;
+  font-style: normal;
+  font-size: clamp(30px, 3.6vw, 48px);
+  letter-spacing: .01em;
+  transform: skewX(-6deg);
+}
+
+.swap-purpose-title span { color: #f5f1e9; }
+.swap-purpose-title em { color: var(--red); text-shadow: 0 4px 20px rgba(185, 28, 28, .35); }
+
+.swap-purpose-inner > p {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, .8);
+}
+
+.swap-purpose-torii {
+  margin-left: auto;
+  font-size: 68px;
+  line-height: 1;
+  color: rgba(232, 180, 177, .32);
+}
+
+.swap-purpose-petals { position: absolute; inset: 0; z-index: 0; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+/* Laptop / small desktop */
+@media (max-width: 1240px) {
+  .swap-hero-inner {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, .8fr);
+    gap: 0 24px;
+    min-height: 640px;
+  }
+  .swap-hero-copy { padding-left: clamp(0px, 15vw, 200px); }
+  .swap-tokens-row { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+}
+
+@media (max-width: 1100px) {
+  .swap-benefits-card { grid-template-columns: repeat(3, 1fr); }
+  .swap-benefit:nth-child(3) { border-right: 0; }
+  .swap-benefit:nth-child(n+4) { border-top: 1px solid var(--line); }
+  .swap-stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .swap-stat:nth-child(3) { border-right: 0; }
+  .swap-stat:nth-child(n+4) { border-top: 1px solid rgba(255, 255, 255, .1); padding-top: 18px; margin-top: 14px; }
+}
+
+/* ---- 801–900px: keep the previous stacked banner layout so the
+   desktop→overlay handoff has no dead zone. ---- */
+@media (min-width: 801px) and (max-width: 900px) {
+  .swap-hero-section { padding-top: 0; background: #131114; }
+  .swap-hero-section::after { height: 40px; }
+
+  .swap-hero-scrim {
+    background: linear-gradient(180deg, rgba(17, 15, 18, .55) 0%, rgba(17, 15, 18, .82) 40%, #131114 70%);
+  }
+
+  .swap-hero-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    min-height: 0;
+    padding: 0 0 26px;
+  }
+
+  .swap-hero-bg {
+    position: relative;
+    height: 300px;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    width: 100vw;
+    z-index: 0;
+  }
+  .swap-hero-bg img { object-position: 26% center; }
+  .swap-hero-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(0deg, #131114 1%, rgba(19, 17, 20, .3) 46%, transparent 100%);
+  }
+
+  .swap-hero-copy {
+    grid-column: 1;
+    padding: 22px 0 24px;
+    padding-left: 0;
+    text-align: center;
+  }
+  .swap-hero-sub { text-align: center; }
+  .swap-hero-text { margin-inline: auto; max-width: 42ch; }
+  .swap-hero-points { margin-inline: auto; text-align: left; max-width: 30ch; }
+
+  .swap-hero-clanbar {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    width: min(100% - 32px, 460px);
+    margin: -34px auto 0;
+    z-index: 3;
+  }
+
+  .swap-widget { grid-column: 1; margin: 0 auto 8px; max-width: 460px; width: 100%; }
+
+  .swap-purpose-inner { flex-direction: column; align-items: flex-start; gap: 16px; padding: 30px 0; }
+  .swap-purpose-torii { margin: 0; font-size: 52px; }
+  .swap-purpose-inner > p { max-width: none; }
+}
+
+/* ============================================================
+   MOBILE HERO — IMAGE OVERLAY (800px → 200px)
+   The samurai artwork becomes the hero BACKGROUND (absolutely
+   positioned, covering the whole section) and every piece of hero
+   copy sits directly ON TOP of it, like a cinematic poster.
+   The Jupiter swap UI moves below the poster.
+   Desktop (>800px) is untouched.
+   ============================================================ */
+@media (max-width: 800px) {
+  .swap-hero-section {
+    position: relative;          /* overlay anchor */
+    display: flex;
+    flex-direction: column;
+    padding-top: 0;
+    background: #131114;
+    overflow: hidden;
+  }
+  .swap-hero-section::after { display: none; }
+
+  /* --- BACKGROUND LAYER: artwork fills the entire hero --- */
+  .swap-hero-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    z-index: 0;
+  }
+  .swap-hero-bg img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* Anchors the samurai to the left so the right stays open for text. */
+    object-position: 18% top;
+  }
+  .swap-hero-bg::after { content: none; }
+
+  /* Readability veil over the artwork — dark enough for white type,
+     light enough that the samurai stays clearly visible. */
+  .swap-hero-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background:
+      linear-gradient(90deg, rgba(14, 12, 15, .34) 0%, rgba(14, 12, 15, .52) 32%, rgba(14, 12, 15, .78) 62%, rgba(14, 12, 15, .84) 100%),
+      linear-gradient(180deg, rgba(14, 12, 15, .35) 0%, rgba(14, 12, 15, .5) 45%, rgba(14, 12, 15, .72) 100%),
+      radial-gradient(70% 55% at 72% 46%, rgba(185, 28, 28, .12), transparent 72%);
+  }
+
+  /* --- OVERLAY CONTENT: sits on the image ---
+     `display: contents` dissolves this wrapper so the hero copy, the clan bar
+     and the swap card all become direct flex children of the hero section and
+     can be ordered independently: copy -> clan bar -> swap card. */
+  .swap-hero-inner {
+    display: contents;
+  }
+
+  /* Copy sits on the RIGHT of the artwork, clear of the samurai who
+     occupies the left of the frame. Below 430px the column widens to
+     the full width (still right-aligned) so nothing gets cramped. */
+  .swap-hero-copy {
+    grid-column: 1;
+    order: 1;
+    position: relative;
+    z-index: 2;                  /* above image + scrim */
+    padding: clamp(28px, 10vw, 70px) clamp(12px, 4.5vw, 28px) clamp(22px, 7vw, 52px);
+    width: 100%;
+    max-width: 100%;
+    margin-left: auto;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    min-width: 0;
+  }
+
+
+
+  /* --- fluid type: scales smoothly all the way down to 200px --- */
+  .swap-hero-title { text-align: right; width: 100%; align-items: flex-end; }
+  .swap-hero-title-black { font-size: clamp(30px, 13vw, 78px); }
+  .swap-hero-title-red   { font-size: clamp(34px, 15vw, 92px); }
+
+  .swap-hero-powered {
+    margin-top: clamp(8px, 2.6vw, 16px);
+    font-size: clamp(6.5px, 2.1vw, 12px);
+    letter-spacing: .12em;
+    gap: clamp(4px, 1.6vw, 9px);
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    width: 100%;
+  }
+  /* Drop the leading rule so the row ends flush with the right edge. */
+  .swap-hero-powered i { width: clamp(8px, 3.5vw, 26px); }
+  .swap-hero-powered i:first-child { display: none; }
+  .swap-hero-powered .jupiter-mark { flex: 0 0 auto; }
+
+  .swap-hero-sub {
+    margin: clamp(14px, 4.5vw, 30px) 0 clamp(7px, 2vw, 14px);
+    font-size: clamp(12px, 4.4vw, 27px);
+    text-align: right;
+  }
+
+  .swap-hero-text {
+    margin: 0 0 clamp(14px, 4.5vw, 28px) auto;
+    max-width: 44ch;
+    font-size: clamp(8.5px, 2.7vw, 14px);
+    line-height: 1.6;
+    text-align: right;
+  }
+
+  .swap-hero-points {
+    margin: 0 0 0 auto;
+    text-align: right;
+    max-width: min(34ch, 100%);
+    width: 100%;
+    gap: clamp(8px, 2.8vw, 16px);
+    align-items: flex-end;
+  }
+  .swap-hero-points li {
+    gap: clamp(6px, 2.4vw, 12px);
+    align-items: flex-start;
+    flex-direction: row-reverse;   /* icon to the right of the text */
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .swap-point-icon {
+    width: clamp(17px, 5.6vw, 30px);
+    height: clamp(17px, 5.6vw, 30px);
+  }
+  .swap-point-icon svg { width: 52%; height: 52%; }
+  .swap-point-icon-kanji { font-size: clamp(8px, 2.7vw, 14px); }
+  .swap-hero-points strong { font-size: clamp(8.5px, 2.7vw, 14px); }
+  .swap-hero-points p { font-size: clamp(7.5px, 2.4vw, 12.5px); line-height: 1.45; margin-top: 2px; }
+
+  /* Clan bar stays on the artwork, closing the poster. */
+  .swap-hero-clanbar {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    z-index: 2;
+    order: 2;                      /* after the copy, before the swap card */
+    width: min(100% - clamp(16px, 8vw, 40px), 460px);
+    margin: 0 clamp(8px, 4.5vw, 28px) clamp(20px, 7vw, 40px) auto;
+    padding: clamp(8px, 3vw, 15px) clamp(9px, 3.4vw, 17px);
+    gap: clamp(7px, 2.6vw, 12px);
+  }
+  .swap-clanbar-seal {
+    width: clamp(20px, 6.4vw, 34px);
+    height: clamp(20px, 6.4vw, 34px);
+    font-size: clamp(9px, 3vw, 16px);
+  }
+  .swap-hero-clanbar strong { font-size: clamp(7.5px, 2.4vw, 11.5px); letter-spacing: .07em; }
+  .swap-hero-clanbar p { font-size: clamp(6.5px, 2.1vw, 10.5px); margin-top: 3px; line-height: 1.45; }
+
+  /* --- The Jupiter swap panel sits below the poster and the clan bar --- */
+  .swap-widget {
+    grid-column: 1;
+    order: 3;
+    position: relative;
+    z-index: 2;
+    margin: 0 auto clamp(30px, 9vw, 52px);
+    max-width: 460px;
+    width: calc(100% - 24px);
+  }
+
+  /* Belt-and-braces: nothing in the poster may ever push the page wide. */
+  .swap-hero-section,
+  .swap-hero-inner,
+  .swap-hero-copy,
+  .swap-hero-points,
+  .swap-hero-points li { max-width: 100%; min-width: 0; }
+  .swap-hero-copy > *, .swap-hero-points p, .swap-hero-points strong { overflow-wrap: anywhere; }
+
+  .swap-purpose-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 30px 0;
+  }
+  .swap-purpose-torii { margin: 0; font-size: 52px; }
+  .swap-purpose-inner > p { max-width: none; }
+}
+
+/* Reserve the left of the frame for the samurai on wider mobile widths. */
+@media (min-width: 431px) and (max-width: 800px) {
+  .swap-hero-copy { width: 64%; }
+}
+@media (min-width: 561px) and (max-width: 800px) {
+  .swap-hero-copy { width: 60%; }
+}
+
+/* ---- 834px / 768px : iPad + tablet ---- */
+@media (max-width: 834px) {
+  .swap-benefits-card { grid-template-columns: repeat(3, 1fr); }
+  .swap-benefit:nth-child(3) { border-right: 0; }
+  .swap-benefit:nth-child(n+4) { border-top: 1px solid var(--line); }
+}
+
+@media (max-width: 768px) {
+  /* Stats reflow into a horizontally scrollable rail rather than
+     cramming five columns into a narrow viewport. */
+  .swap-stats-grid {
+    display: flex;
+    grid-template-columns: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 -6px;
+    padding: 0 6px 4px;
+  }
+  .swap-stats-grid::-webkit-scrollbar { display: none; }
+  .swap-stat {
+    flex: 0 0 auto;
+    min-width: 168px;
+    scroll-snap-align: start;
+    border-right: 1px solid rgba(255, 255, 255, .1);
+    margin-top: 0;
+    padding-top: 4px;
+  }
+  .swap-stat:last-child { border-right: 0; }
+
+  /* Popular tokens become a horizontal scroll rail. */
+  .swap-tokens-row {
+    display: flex;
+    grid-template-columns: none;
+    gap: 18px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 -4px;
+    padding: 0 4px 6px;
+  }
+  .swap-tokens-row::-webkit-scrollbar { display: none; }
+  .swap-token { flex: 0 0 auto; width: 68px; scroll-snap-align: start; }
+}
+
+/* ---- 700px ---- */
+@media (max-width: 700px) {
+  .swap-benefits-card { grid-template-columns: repeat(2, 1fr); }
+  .swap-benefit { border-right: 1px solid var(--line); }
+  .swap-benefit:nth-child(2n) { border-right: 0; }
+  .swap-benefit:nth-child(3) { border-right: 1px solid var(--line); }
+  .swap-benefit:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+
+/* ---- 560px / 430-375px : mobile ---- */
+@media (max-width: 560px) {
+  .swap-benefits-section,
+  .swap-stats-section,
+  .swap-tokens-section,
+  .swap-purpose-inner { width: calc(100% - 24px); }
+
+  /* Hero is handled by the mobile overlay block above (fluid clamps). */
+
+  .swap-widget { padding: 18px 15px 15px; border-radius: 12px; }
+  .swap-widget-head h3 { font-size: 17px; }
+  .swap-field { padding: 12px 12px 10px; }
+  .swap-field-input { font-size: 23px; }
+  .swap-token-select { font-size: 12px; padding: 6px 9px 6px 6px; }
+  .swap-token-select .swap-token-dot { width: 22px; height: 22px; font-size: 11px; }
+  .swap-token-picker-backdrop { align-items: end; padding: 8px; }
+  .swap-token-picker { max-height: min(620px, calc(100vh - 16px)); padding: 16px; border-radius: 12px 12px 8px 8px; }
+  .swap-token-picker-head strong { font-size: 18px; }
+  .swap-cta { padding: 14px; font-size: 11.5px; }
+
+  /* One column of feature cards — proper reflow, not a shrink. */
+  .swap-benefits-card { grid-template-columns: 1fr; }
+  .swap-benefit { border-right: 0 !important; padding: 22px 16px 20px; }
+  .swap-benefit:not(:first-child) { border-top: 1px solid var(--line); }
+  .swap-benefit-icon { width: 44px; height: 44px; margin-bottom: 12px; }
+  .swap-benefit strong { font-size: 11.5px; }
+  .swap-benefit p { font-size: 11px; }
+
+  .swap-stats-card { padding: 18px 14px 20px; }
+  .swap-stats-title { font-size: 16px; letter-spacing: .1em; gap: 8px; }
+  .swap-stat { min-width: 150px; padding: 4px 12px; }
+  .swap-stat-value { font-size: 18px; }
+
+  .swap-tokens-card { padding: 16px 14px 18px; }
+  .swap-tokens-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .swap-token { width: 62px; }
+  .swap-token .swap-token-dot { width: 38px; height: 38px; font-size: 16px; }
+  .swap-token strong { font-size: 10.5px; }
+  .swap-token small { font-size: 8.5px; }
+
+  .swap-purpose-seal { width: 58px; height: 58px; font-size: 25px; }
+  .swap-purpose-inner > p { font-size: 12px; }
+}
+
+/* ---- 390 / 375 / 360px ---- */
+@media (max-width: 390px) {
+  .swap-widget { padding: 16px 13px 14px; }
+  .swap-field-input { font-size: 21px; }
+  .swap-widget-tabs button { font-size: 10px; letter-spacing: .05em; }
+  .swap-soon-chip { font-size: 7px; padding: 2px 4px; margin-left: 4px; }
+  .swap-quote-row { font-size: 10.5px; }
+}
+
+/* ---- 320px : smallest supported ---- */
+@media (max-width: 340px) {
+  .swap-field-input { font-size: 19px; }
+  .swap-token-select { font-size: 11px; }
+  .swap-token-select strong { max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .swap-cta { font-size: 10.5px; letter-spacing: .08em; }
+  .swap-stat { min-width: 140px; }
+}

@@ -1,0 +1,180 @@
+/* ============================================================
+   SWAP nav item + COMING SOON state
+   Loaded last. Only touches navigation density and the paused
+   swap/buy surfaces — the existing RONIN design language
+   (mono kickers, red seal, cream cards, sakura) is reused.
+   ============================================================ */
+
+/* ---------- NAVBAR: fit 9 items without overflow ---------- */
+.nav-shell {
+  min-width: 0;
+}
+
+.nav-links {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+@media (min-width: 861px) {
+  /* Fluid gap + type so HOME…COMMUNITY + SWAP never push the
+     Connect Wallet button off-screen on laptops or small desktops. */
+  .nav-links {
+    gap: clamp(12px, 1.55vw, 28px);
+  }
+  .nav-links > a {
+    font-size: clamp(9px, 0.78vw, 10px);
+    letter-spacing: clamp(.06em, .12vw, .14em);
+    white-space: nowrap;
+  }
+  .nav-actions {
+    flex: 0 0 auto;
+  }
+}
+
+@media (min-width: 861px) and (max-width: 1024px) {
+  /* Tablet landscape / small laptop: keep the brand tight so the
+     nav row and wallet button both stay on one line. */
+  .brand-copy small {
+    display: none;
+  }
+  .nav-shell {
+    gap: 12px;
+  }
+}
+
+/* Mobile / hamburger menu: SWAP is part of navItems so it renders
+   inside the existing drawer automatically. Keep it scrollable on
+   short screens now that the list is one item longer. */
+@media (max-width: 860px) {
+  .nav-links.is-open {
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ---------- COMING SOON block ---------- */
+.coming-soon-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 26px 20px 22px;
+  margin: 6px 0 14px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius, 10px);
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(185, 28, 28, .07), transparent 62%),
+    var(--cream);
+  box-shadow: 0 0 0 1px rgba(185, 28, 28, .05), 0 10px 30px rgba(0, 0, 0, .05);
+  overflow: hidden;
+}
+
+.coming-soon-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 40px rgba(185, 28, 28, .06);
+  animation: comingSoonGlow 4.5s ease-in-out infinite;
+}
+
+@keyframes comingSoonGlow {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+
+.coming-soon-seal {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(185, 28, 28, .3);
+  border-radius: 50%;
+  color: var(--red);
+  font-size: 17px;
+  line-height: 1;
+  background: rgba(185, 28, 28, .05);
+}
+
+.coming-soon-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--red);
+}
+
+.coming-soon-title {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(26px, 6vw, 40px);
+  line-height: .95;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.coming-soon-text {
+  margin: 0;
+  max-width: 46ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.coming-soon-note {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  line-height: 1.5;
+  letter-spacing: .04em;
+  color: var(--muted);
+  text-align: left;
+}
+
+.coming-soon-note svg { flex: 0 0 auto; color: var(--red); }
+
+.coming-soon-block-compact {
+  padding: 20px 16px 18px;
+  gap: 6px;
+}
+.coming-soon-block-compact .coming-soon-title { font-size: clamp(24px, 7vw, 32px); }
+.coming-soon-block-compact .coming-soon-text { font-size: 11.5px; }
+
+/* ---------- Paused BUY button ---------- */
+.buy-btn-paused {
+  position: relative;
+  opacity: .82;
+  cursor: not-allowed;
+}
+
+.buy-btn-paused-tag {
+  margin-left: 7px;
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: .12em;
+  line-height: 1.2;
+  opacity: .85;
+}
+
+@media (max-width: 360px) {
+  .buy-btn-paused-tag { display: none; }
+}

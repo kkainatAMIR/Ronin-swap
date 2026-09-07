@@ -1,0 +1,413 @@
+
+@media (max-width:400px){
+  .home-hero-ref{
+    position:relative!important;
+    overflow:hidden!important
+  }
+
+  .home-hero-ref-bg{
+    position:absolute!important;
+    inset:0 0 auto!important;
+    width:100%!important;
+    height:clamp(205px,78vw,310px)!important;
+    z-index:0!important;
+    background:#000!important
+  }
+
+  .home-hero-ref-bg img{
+    width:100%!important;
+    height:100%!important;
+    object-fit:contain!important;
+    object-position:center center!important;
+    display:block!important
+  }
+
+  .home-hero-ref-overlay{
+    z-index:1!important
+  }
+
+  .home-hero-ref-inner{
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:center!important;
+    position:relative!important;
+    z-index:3!important;
+    padding:clamp(92px,25vw,126px) 0 6px!important
+  }
+
+  .ref-title,
+  .ref-subtitle,
+  .ref-desc,
+  .ref-actions .ref-btn-primary,
+  .ref-connect,
+  .ref-actions .ref-btn-outline,
+  .home-hero-ref-inner>div[style]{
+    position:relative!important;
+    z-index:4!important;
+    left:auto!important;
+    top:auto!important;
+    right:auto!important;
+    bottom:auto!important;
+    transform:none!important
+  }
+
+  .ref-title{
+    order:1!important;
+    width:calc(100% - 8px)!important;
+    margin:0 auto!important;
+    padding:0!important;
+    text-align:center!important;
+    text-shadow:0 2px 8px rgba(255,255,255,.95)!important
+  }
+
+  .ref-title-black,
+  .ref-title-red{
+    width:100%!important;
+    font-size:clamp(8px,9.8vw,37px)!important;
+    line-height:.86!important;
+    white-space:nowrap!important
+  }
+
+  .ref-subtitle{
+    order:2!important;
+    margin:8px auto 0!important;
+    font-size:clamp(4.5px,2.15vw,8.5px)!important
+  }
+
+  .ref-desc{
+    order:3!important;
+    margin:6px auto 0!important;
+    font-size:clamp(6px,2.65vw,10.5px)!important;
+    text-align:center!important
+  }
+
+  .ref-actions{
+    display:contents!important
+  }
+
+  .ref-actions .ref-btn-primary{
+    order:4!important;
+    width:calc(100% - 12px)!important;
+    min-height:clamp(32px,10vw,46px)!important;
+    margin:11px auto 0!important;
+    font-size:clamp(6.5px,2.35vw,9.5px)!important
+  }
+
+  .ref-connect{
+    order:5!important;
+    width:calc(100% - 12px)!important;
+    min-height:clamp(32px,10vw,44px)!important;
+    margin:6px auto 0!important;
+    font-size:clamp(6px,2.15vw,8.5px)!important
+  }
+
+  .ref-actions .ref-btn-outline{
+    order:6!important;
+    width:calc(100% - 12px)!important;
+    min-height:clamp(30px,9vw,42px)!important;
+    margin:6px auto 0!important;
+    font-size:clamp(5.5px,2vw,8.5px)!important
+  }
+
+  .home-hero-ref-inner>div[style]{
+    order:7!important;
+    width:calc(100% - 12px)!important;
+    margin:7px auto 0!important;
+    font-size:clamp(4.5px,1.75vw,7.5px)!important;
+    text-align:center!important
+  }
+
+  .home-hero-ref>.ref-stats-wrap{
+    order:8!important;
+    position:relative!important;
+    left:auto!important;
+    right:auto!important;
+    bottom:auto!important;
+    width:calc(100% - 10px)!important;
+    margin:14px auto 0!important;
+    transform:none!important
+  }
+
+  .ref-stats-card{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important
+  }
+
+  .ref-stat{
+    min-width:0!important;
+    min-height:clamp(48px,15vw,68px)!important;
+    padding:5px 2px!important
+  }
+
+  .ref-stat-label{
+    font-size:clamp(4px,1.55vw,6.5px)!important
+  }
+
+  .ref-stat-value{
+    font-size:clamp(7px,2.7vw,11px)!important
+  }
+}
+
+@media(max-width:200px){
+  .site-header{
+    height:50px!important
+  }
+
+  .nav-shell{
+    width:calc(100% - 6px)!important
+  }
+
+  .brand-seal{
+    width:19px!important;
+    height:19px!important
+  }
+
+  .brand-copy strong{
+    font-size:7px!important
+  }
+
+  .brand-copy small{
+    font-size:3.5px!important
+  }
+
+  .home-hero-ref-bg{
+    height:160px!important;
+    background:#000!important
+  }
+
+  .home-hero-ref-bg img{
+    object-fit:contain!important;
+    object-position:center center!important
+  }
+
+  .home-hero-ref-inner{
+    padding-top:72px!important
+  }
+
+  .ref-title-black,
+  .ref-title-red{
+    font-size:clamp(7px,9.5vw,18px)!important
+  }
+
+  .ref-subtitle{
+    font-size:4px!important
+  }
+
+  .ref-desc{
+    font-size:5px!important
+  }
+
+  .ref-actions .ref-btn-primary,
+  .ref-connect,
+  .ref-actions .ref-btn-outline{
+    width:calc(100% - 6px)!important;
+    min-height:27px!important;
+    font-size:4.5px!important
+  }
+
+  .home-hero-ref>.ref-stats-wrap{
+    width:calc(100% - 6px)!important
+  }
+
+  .ref-stat{
+    min-height:42px!important
+  }
+
+  .ref-stat-label{
+    font-size:3.5px!important
+  }
+
+  .ref-stat-value{
+    font-size:6px!important
+  }
+}
+
+
+/* HERO IMAGE + TEXT — ONLY 401px TO 501px */
+@media (min-width:401px) and (max-width:501px){
+
+  .home-hero-ref{
+    position:relative!important;
+    display:flex!important;
+    flex-direction:column!important;
+    overflow:visible!important
+  }
+
+  .home-hero-ref-bg{
+    order:1!important;
+    position:relative!important;
+    inset:auto!important;
+    width:100%!important;
+    height:auto!important;
+    z-index:1!important;
+    overflow:hidden!important
+  }
+
+  .home-hero-ref-bg img{
+    display:block!important;
+    width:100%!important;
+    height:auto!important;
+    object-fit:contain!important;
+    object-position:center center!important
+  }
+
+  .home-hero-ref-overlay{
+    position:absolute!important;
+    inset:0!important;
+    z-index:2!important
+  }
+
+  .home-hero-ref-inner{
+    display:contents!important
+  }
+
+
+  /* RUGGED / BUT WE RISE */
+  .home-hero-ref .ref-title{
+    position:absolute!important;
+    top:clamp(55px,13vw,75px)!important;
+    left:50%!important;
+    right:auto!important;
+    z-index:5!important;
+    width:max-content!important;
+    max-width:none!important;
+    margin:0!important;
+    padding:0!important;
+    transform:translateX(-50%)!important;
+    text-align:left!important;
+    overflow:visible!important
+  }
+
+  .home-hero-ref .ref-title-black,
+  .home-hero-ref .ref-title-red{
+    display:block!important;
+    width:max-content!important;
+    max-width:none!important;
+    font-size:clamp(38px,10.5vw,53px)!important;
+    line-height:.84!important;
+    white-space:nowrap!important;
+    text-align:left!important;
+    text-shadow:0 2px 7px rgba(255,255,255,.5)!important;
+    overflow:visible!important
+  }
+
+  .home-hero-ref .ref-title-red{
+    margin-top:3px!important
+  }
+
+
+  /* MASTERLESS / SAMURAI LINE */
+  .home-hero-ref .ref-subtitle{
+    position:absolute!important;
+    top:clamp(138px,34vw,172px)!important;
+    left:35%!important;
+    right:auto!important;
+    transform:none!important;
+    z-index:5!important;
+    width:max-content!important;
+    margin:0!important;
+    padding:0!important;
+    font-size:clamp(7px,2.1vw,10px)!important;
+    line-height:1.3!important;
+    letter-spacing:.16em!important;
+    text-align:left!important
+  }
+
+
+  /* DESCRIPTION */
+  .home-hero-ref .ref-desc{
+    position:absolute!important;
+    top:clamp(158px,39vw,195px)!important;
+    left:50%!important;
+    right:auto!important;
+    transform:none!important;
+    z-index:5!important;
+    width:240px!important;
+    max-width:240px!important;
+    margin:0!important;
+    padding:0!important;
+    font-size:clamp(9px,2.8vw,12px)!important;
+    line-height:1.45!important;
+    text-align:left!important
+  }
+
+
+  /* BUTTONS BELOW IMAGE */
+  .home-hero-ref .ref-actions{
+    display:contents!important
+  }
+
+  .home-hero-ref .ref-actions .ref-btn-primary{
+    order:2!important;
+    width:auto!important;
+    align-self:center!important;
+    min-width:0!important;
+    max-width:none!important;
+    min-height:42px!important;
+    margin:14px auto 0!important;
+    padding:0 16px!important;
+    font-size:clamp(8px,2.2vw,10px)!important
+  }
+
+  .home-hero-ref .ref-connect{
+    order:3!important;
+    width:auto!important;
+    align-self:center!important;
+    min-height:40px!important;
+    margin:8px auto 0!important;
+    padding:0 14px!important;
+    font-size:clamp(8px,2vw,9px)!important
+  }
+
+  .home-hero-ref .ref-actions .ref-btn-outline{
+    order:4!important;
+    width:auto!important;
+    align-self:center!important;
+    min-width:0!important;
+    max-width:none!important;
+    min-height:40px!important;
+    margin:8px auto 0!important;
+    padding:0 14px!important;
+    font-size:clamp(8px,2vw,9px)!important
+  }
+
+  .home-hero-ref .home-hero-ref-inner>div[style]{
+    order:5!important;
+    width:auto!important;
+    max-width:280px!important;
+    margin:8px auto 0!important;
+    padding:0!important;
+    font-size:clamp(5px,1.5vw,7px)!important;
+    text-align:center!important
+  }
+
+
+  /* DASHBOARD */
+  .home-hero-ref>.ref-stats-wrap{
+    order:6!important;
+    position:relative!important;
+    left:auto!important;
+    right:auto!important;
+    bottom:auto!important;
+    z-index:3!important;
+    width:min(420px,calc(100% - 24px))!important;
+    margin:26px auto 0!important;
+    transform:none!important
+  }
+}
+
+@media (min-width:401px) and (max-width:501px){
+  .home-hero-ref .ref-subtitle{
+    text-align:center!important;
+    left:50%!important;
+    transform:translateX(-50%)!important;
+    width:max-content!important;
+  }
+
+  .home-hero-ref .ref-desc{
+    text-align:center!important;
+    left:50%!important;
+    transform:translateX(-50%)!important;
+    width:calc(100% - 24px)!important;
+    max-width:240px!important;
+  }
+}

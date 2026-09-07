@@ -1,0 +1,849 @@
+/*
+ * Responsive corrections
+ *
+ * The desktop home hero intentionally remains unchanged.  The mobile hero
+ * uses the same DOM and artwork, but changes the flow so the artwork is a
+ * real, in-flow media block instead of a full-height background layer.  That
+ * prevents `object-fit: cover`, fixed heights, and absolute positioning from
+ * cropping the artwork or putting copy on top of it.
+ */
+
+/* Sakura is a Home-page-only visual.  AppChrome marks the active route so
+   the shared footer, page heroes, cards, and modals cannot animate petals on
+   Shield, NFT, Game, Burn, or any other non-Home page. */
+.app-shell:not(.app-route-home) .sakura {
+  display: none !important;
+}
+
+@media (max-width: 600px) {
+  /* The global stylesheet has a 320px minimum for larger layouts.  Remove it
+     here so the requested 300px viewport can size itself without a scrollbar. */
+  html,
+  body,
+  #root,
+  .app-shell {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-width: 0;
+  }
+
+  /* Keep the existing header/navigation treatment, while making the compact
+     brand and menu fit the narrowest viewport. */
+  .site-header {
+    height: 60px;
+  }
+
+  .nav-shell {
+    width: calc(100% - 24px) !important;
+    max-width: none;
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .brand-copy {
+    display: flex;
+    min-width: 0;
+  }
+
+  .brand-copy strong {
+    font-size: 14px;
+  }
+
+  .brand-copy small {
+    font-size: 6px;
+  }
+
+  .nav-actions {
+    flex: 0 0 auto;
+  }
+
+  .nav-links {
+    top: 60px !important;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-width: none;
+  }
+
+  /* HOME HERO ---------------------------------------------------------- */
+  .home-hero-ref {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    width: 100%;
+    min-width: 0;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 0 0 32px !important;
+    overflow: hidden !important;
+    isolation: isolate;
+  }
+
+  /* The image is the first in-flow item.  Its natural aspect ratio is used,
+     so all of the source artwork remains visible at 600, 500, and below. */
+  .home-hero-ref-bg {
+    order: 1;
+    position: relative !important;
+    inset: auto !important;
+    z-index: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    flex: 0 0 auto;
+    background: #e9e1d5;
+  }
+
+  .home-hero-ref-bg img {
+    position: relative !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+    transform: none !important;
+  }
+
+  .home-hero-ref-overlay {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 1 !important;
+    pointer-events: none !important;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(255, 250, 243, .18)),
+      linear-gradient(90deg, rgba(255, 182, 193, .06), transparent 28%, transparent 72%, rgba(255, 182, 193, .08)) !important;
+  }
+
+  .hero-ref-petals {
+    z-index: 2 !important;
+    pointer-events: none !important;
+  }
+
+  /* Flatten the existing inner wrapper only at this breakpoint.  Its
+     children then become flex items of the hero and can be ordered without
+     duplicating the Home page. */
+  .home-hero-ref-inner {
+    display: contents !important;
+  }
+
+  .ref-title {
+    order: 2;
+    position: relative;
+    z-index: 3;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: clamp(22px, 5vw, 32px) auto 0 !important;
+    padding: 0 12px;
+    text-align: center !important;
+    overflow: visible;
+  }
+
+  .ref-title-black,
+  .ref-title-red {
+    display: block !important;
+    max-width: 100%;
+    font-size: clamp(34px, 11vw, 60px) !important;
+    line-height: .88 !important;
+    letter-spacing: .01em;
+    white-space: nowrap !important;
+    transform-origin: center center;
+  }
+
+  .ref-title-red {
+    margin-top: 3px;
+  }
+
+  .ref-subtitle {
+    order: 3;
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    margin: 12px auto 0 !important;
+    padding: 0 12px;
+    font-size: clamp(8px, 2.2vw, 11px) !important;
+    line-height: 1.3 !important;
+    letter-spacing: .18em;
+    text-align: center;
+  }
+
+  .ref-desc {
+    order: 4;
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    max-width: 320px !important;
+    margin: 10px auto 0 !important;
+    padding: 0 12px;
+    font-size: clamp(10px, 3.1vw, 14px) !important;
+    line-height: 1.5 !important;
+    text-align: center;
+  }
+
+  /* Make the action wrapper transparent to layout so the two controls can
+     be ordered individually: BUY, CONNECT WALLET, then the existing explore
+     link.  No action or functionality is removed. */
+  .ref-actions {
+    display: contents !important;
+  }
+
+  .ref-actions .ref-btn-primary {
+    order: 5;
+    position: relative;
+    z-index: 3;
+    width: min(320px, calc(100% - 32px)) !important;
+    min-width: 0 !important;
+    max-width: calc(100% - 32px) !important;
+    min-height: 50px;
+    margin: 20px auto 0 !important;
+    padding: 0 16px !important;
+    font-size: clamp(10px, 2.7vw, 11.5px) !important;
+  }
+
+  .ref-connect {
+    order: 6;
+    position: relative !important;
+    z-index: 3;
+    width: min(320px, calc(100% - 32px)) !important;
+    min-width: 0;
+    min-height: 48px;
+    margin: 10px auto 0 !important;
+    padding: 0 14px;
+    justify-content: center !important;
+    font-size: clamp(9px, 2.5vw, 10px) !important;
+  }
+
+  .ref-actions .ref-btn-outline {
+    order: 7;
+    position: relative;
+    z-index: 3;
+    width: min(320px, calc(100% - 32px)) !important;
+    min-width: 0 !important;
+    max-width: calc(100% - 32px) !important;
+    min-height: 46px;
+    margin: 10px auto 0 !important;
+    padding: 0 14px !important;
+    font-size: clamp(9px, 2.5vw, 10px) !important;
+  }
+
+  /* Live status remains in the hero, after both required wallet actions. */
+  .home-hero-ref-inner > div[style] {
+    order: 8;
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    max-width: 100%;
+    margin: 14px auto 0 !important;
+    padding: 0 16px;
+    text-align: center;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  /* The dashboard is in flow after the hero actions, rather than being
+     absolutely translated over a fixed-height hero. */
+  .home-hero-ref > .ref-stats-wrap {
+    order: 9;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    z-index: 3;
+    width: min(420px, calc(100% - 24px)) !important;
+    max-width: calc(100% - 24px);
+    margin: 26px auto 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+  }
+
+  .ref-stats-card {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    max-width: 100%;
+    overflow: hidden;
+    border-radius: 14px;
+  }
+
+  .ref-stat {
+    min-width: 0 !important;
+    min-height: 84px !important;
+    padding: 14px 8px 12px !important;
+    gap: 5px;
+    border-right: 0 !important;
+    border-bottom: 1px solid #f5e8d0;
+  }
+
+  .ref-stat:nth-child(odd) {
+    border-right: 1px solid #f5e8d0 !important;
+  }
+
+  .ref-stat:last-child {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    min-height: 60px !important;
+    border-right: 0 !important;
+    border-bottom: 0;
+    border-top: 1px solid #f5e8d0;
+  }
+
+  .ref-stat-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .ref-stat-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .ref-stat-label,
+  .ref-stat-value {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  .ref-stat-label {
+    margin-top: 5px;
+    font-size: clamp(7px, 2vw, 8px);
+    letter-spacing: .1em;
+    line-height: 1.25;
+  }
+
+  .ref-stat-value {
+    margin-top: 2px;
+    font-size: 14px;
+  }
+
+  .ref-stat:last-child .ref-stat-label,
+  .ref-stat:last-child .ref-stat-value {
+    margin-top: 0;
+  }
+
+  /* Keep the next section below the complete dashboard. */
+  .story-ref-section {
+    position: relative;
+    clear: both;
+    padding-top: 58px !important;
+  }
+}
+
+/* Extra-small phones use the same flow and artwork; only type and controls
+   get smaller so nothing can force horizontal overflow. */
+@media (max-width: 400px) {
+  .ref-title-black,
+  .ref-title-red {
+    font-size: clamp(31px, 11vw, 42px) !important;
+  }
+
+  .ref-subtitle {
+    font-size: clamp(8px, 2.2vw, 9px) !important;
+    letter-spacing: .15em;
+  }
+
+  .ref-desc {
+    font-size: clamp(10px, 3.1vw, 12px) !important;
+  }
+
+  .ref-actions .ref-btn-primary,
+  .ref-actions .ref-btn-outline,
+  .ref-connect {
+    width: calc(100% - 24px) !important;
+    max-width: calc(100% - 24px) !important;
+  }
+
+  .ref-stat-label {
+    font-size: 7px;
+    letter-spacing: .07em;
+  }
+
+  .ref-stat-value {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 320px) {
+  .nav-shell {
+    width: calc(100% - 16px) !important;
+  }
+
+  .brand-copy strong {
+    font-size: 13px;
+  }
+
+  .brand-copy small {
+    font-size: 5.5px;
+  }
+
+  .ref-title-black,
+  .ref-title-red {
+    font-size: 30px !important;
+  }
+
+  .ref-desc {
+    font-size: 10px !important;
+  }
+
+  .ref-actions .ref-btn-primary,
+  .ref-actions .ref-btn-outline,
+  .ref-connect {
+    width: calc(100% - 20px) !important;
+    max-width: calc(100% - 20px) !important;
+  }
+
+  .ref-stat-label {
+    font-size: 6.5px;
+  }
+}
+
+/* Existing Shield narrow-layout guardrails.  These are unrelated to the
+   Home hero, but remain here so this shared responsive-fixes file does not
+   regress the scanner's small-screen tables. */
+@media (max-width: 600px) {
+  .shield-tx-list,
+  .shield-token-list,
+  .shield-analysis-grid,
+  .shield-connect-grid,
+  .shield-stats-grid,
+  .shield-checklist-grid {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* The transaction ledger stacks into full-width readable rows on phones.
+     A fixed desktop min-width (720px) used to be forced onto every row here,
+     which pushed the table far past a 430px iPhone 15 Pro Max viewport and
+     made mobile Safari shrink the entire Shield page to fit it. Rows now
+     stay inside the viewport: no horizontal shrinking, no tiny cards, and
+     the explorer link stays a full tappable target. */
+  .shield-tx-list {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .shield-tx-grid {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .shield-tx-grid.table-head {
+    display: none !important;
+  }
+
+  .shield-tx-grid.table-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 5px 12px !important;
+    align-items: center !important;
+    padding: 13px 16px !important;
+  }
+
+  /* 1 type/description — full width */
+  .shield-tx-grid.table-row > :nth-child(1) { grid-column: 1 / -1; }
+  /* 2 transfers/fee — left, 4 status tag — right */
+  .shield-tx-grid.table-row > :nth-child(2) { grid-column: 1; grid-row: 2; }
+  .shield-tx-grid.table-row > :nth-child(4) { grid-column: 2; grid-row: 2; align-self: start; }
+  /* 3 timestamp — left */
+  .shield-tx-grid.table-row > :nth-child(3) { grid-column: 1; grid-row: 3; }
+  /* 5 signature — left, 6 explorer link — right */
+  .shield-tx-grid.table-row > :nth-child(5) { grid-column: 1; grid-row: 4; }
+  .shield-tx-grid.table-row > :nth-child(6) { grid-column: 2; grid-row: 4; justify-self: end; }
+
+  .shield-tx-type small {
+    max-width: 100% !important;
+    white-space: normal !important;
+  }
+
+  .shield-tx-grid.table-row .explorer-button {
+    min-height: 32px;
+    padding: 0 12px;
+  }
+
+  .shield-token-card,
+  .shield-stat-card,
+  .shield-connect-card,
+  .shield-scan-preview {
+    min-width: 0 !important;
+  }
+
+  .shield-warning-card {
+    align-items: flex-start !important;
+  }
+}
+
+/* Between 400px and 500px the requested poster treatment keeps the main
+   title copy over the artwork.  The image itself stays an in-flow,
+   natural-ratio block, so the overlay is intentional and the controls still
+   remain below it with normal document flow. */
+@media (min-width: 400px) and (max-width: 500px) {
+  .ref-title {
+    position: absolute;
+    top: clamp(18px, 5vw, 26px);
+    left: 50%;
+    margin: 0 !important;
+    transform: translateX(-50%);
+    text-shadow: 0 2px 10px rgba(255, 255, 255, .8);
+  }
+
+  .ref-title-black,
+  .ref-title-red {
+    font-size: clamp(34px, 11vw, 55px) !important;
+  }
+
+  .ref-subtitle {
+    position: absolute;
+    top: clamp(122px, 30vw, 150px);
+    left: 50%;
+    margin: 0 !important;
+    transform: translateX(-50%);
+    text-shadow: 0 1px 7px rgba(255, 255, 255, .95);
+  }
+
+  .ref-desc {
+    position: absolute;
+    top: clamp(152px, 38vw, 190px);
+    left: 50%;
+    margin: 0 !important;
+    transform: translateX(-50%);
+    text-shadow: 0 1px 7px rgba(255, 255, 255, .95);
+  }
+
+  .home-hero-ref-overlay {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .2), rgba(255, 250, 243, .18)),
+      linear-gradient(90deg, rgba(255, 182, 193, .1), transparent 28%, transparent 72%, rgba(255, 182, 193, .12)) !important;
+  }
+}
+
+/* From 600px through 700px, keep the same responsive natural-ratio image
+   while moving the title copy onto it.  Controls and dashboard stay in flow
+   below the artwork so the image cannot be cropped by the copy. */
+@media (min-width: 600px) and (max-width: 700px) {
+  .home-hero-ref {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    width: 100%;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 0 0 32px !important;
+    overflow: hidden !important;
+  }
+
+  .home-hero-ref-bg {
+    order: 1;
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    flex: 0 0 auto;
+    overflow: hidden !important;
+  }
+
+  .home-hero-ref-bg img {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+    transform: none !important;
+  }
+
+  .home-hero-ref-inner {
+    display: contents !important;
+  }
+
+  .ref-title {
+    order: 2;
+    position: absolute;
+    top: clamp(20px, 4vw, 28px);
+    left: 50%;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 16px;
+    transform: translateX(-50%);
+    text-align: center !important;
+    text-shadow: 0 2px 10px rgba(255, 255, 255, .82);
+  }
+
+  .ref-title-black,
+  .ref-title-red {
+    font-size: clamp(56px, 9vw, 64px) !important;
+  }
+
+  .ref-subtitle {
+    order: 3;
+    position: absolute;
+    top: clamp(145px, 24vw, 170px);
+    left: 50%;
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 16px;
+    transform: translateX(-50%);
+    text-align: center;
+    text-shadow: 0 1px 7px rgba(255, 255, 255, .95);
+  }
+
+  .ref-desc {
+    order: 4;
+    position: absolute;
+    top: clamp(180px, 30vw, 220px);
+    left: 50%;
+    width: 100%;
+    max-width: 360px !important;
+    margin: 0 !important;
+    padding: 0 16px;
+    transform: translateX(-50%);
+    text-align: center;
+    text-shadow: 0 1px 7px rgba(255, 255, 255, .95);
+  }
+
+  .home-hero-ref-overlay {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .2), rgba(255, 250, 243, .2)),
+      linear-gradient(90deg, rgba(255, 182, 193, .1), transparent 28%, transparent 72%, rgba(255, 182, 193, .12)) !important;
+  }
+
+  .ref-actions {
+    display: contents !important;
+  }
+
+  .ref-actions .ref-btn-primary,
+  .ref-actions .ref-btn-outline,
+  .ref-connect {
+    position: relative;
+    z-index: 3;
+    width: min(360px, calc(100% - 40px)) !important;
+    max-width: calc(100% - 40px) !important;
+    min-width: 0;
+    margin-inline: auto;
+  }
+
+  .ref-actions .ref-btn-primary {
+    order: 5;
+    margin-top: 20px !important;
+  }
+
+  .ref-connect {
+    order: 6;
+    margin-top: 10px !important;
+  }
+
+  .ref-actions .ref-btn-outline {
+    order: 7;
+    margin-top: 10px !important;
+  }
+
+  .home-hero-ref-inner > div[style] {
+    order: 8;
+    width: 100%;
+    margin: 14px auto 0 !important;
+    padding: 0 16px;
+    text-align: center;
+  }
+
+  .home-hero-ref > .ref-stats-wrap {
+    order: 9;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: min(420px, calc(100% - 24px)) !important;
+    margin: 26px auto 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+  }
+
+  .ref-stats-card {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* At tablet widths, keep the complete Home hero as a poster: the artwork
+   fills the hero and all Home copy and actions sit on top of that artwork.
+   This is intentionally limited to 600–800px; desktop widths are untouched,
+   while the narrower phone layout above still keeps the artwork in flow. */
+@media (min-width: 600px) and (max-width: 800px) {
+  .home-hero-ref {
+    position: relative !important;
+    display: block !important;
+    min-height: clamp(620px, 86vw, 700px) !important;
+    height: clamp(620px, 86vw, 700px) !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .home-hero-ref-bg {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .home-hero-ref-bg img {
+    position: relative !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    object-position: center 26% !important;
+    transform: none !important;
+  }
+
+  .home-hero-ref-overlay {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, .42) 0%, rgba(255, 255, 255, .16) 36%, rgba(255, 250, 243, .2) 100%),
+      linear-gradient(90deg, rgba(255, 182, 193, .1), transparent 28%, transparent 72%, rgba(255, 182, 193, .12)) !important;
+  }
+
+  .home-hero-ref-inner {
+    position: relative !important;
+    z-index: 2;
+    display: block !important;
+    width: min(calc(100% - 48px), 1280px) !important;
+    max-width: 1280px !important;
+    margin-inline: auto !important;
+    padding: clamp(74px, 10vw, 104px) 16px 140px !important;
+    text-align: center !important;
+  }
+
+  .ref-title {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+    text-align: center !important;
+    text-shadow: 0 2px 10px rgba(255, 255, 255, .84);
+  }
+
+  .ref-title-black,
+  .ref-title-red {
+    font-size: clamp(56px, 9vw, 84px) !important;
+    line-height: .88 !important;
+    transform-origin: center center !important;
+  }
+
+  .ref-subtitle {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    margin: 18px auto 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+    text-align: center !important;
+    text-shadow: 0 1px 7px rgba(255, 255, 255, .95);
+  }
+
+  .ref-desc {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    max-width: 420px !important;
+    margin: 14px auto 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+    text-align: center !important;
+    text-shadow: 0 1px 7px rgba(255, 255, 255, .95);
+  }
+
+  .ref-actions {
+    display: flex !important;
+    position: relative !important;
+    z-index: 3;
+    align-items: center;
+    justify-content: center !important;
+    gap: 12px;
+    width: 100% !important;
+    margin: 28px auto 0 !important;
+    padding: 0 !important;
+  }
+
+  .ref-actions .ref-btn-primary,
+  .ref-actions .ref-btn-outline {
+    position: relative !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  .ref-actions .ref-btn-primary {
+    order: 1 !important;
+  }
+
+  .ref-actions .ref-btn-outline {
+    order: 2 !important;
+  }
+
+  .ref-connect {
+    position: relative !important;
+    z-index: 3;
+    width: auto !important;
+    min-width: 180px;
+    min-height: 40px;
+    margin: 16px auto 0 !important;
+    justify-content: center !important;
+    background: rgba(255, 255, 255, .84);
+    text-align: center;
+  }
+
+  .home-hero-ref-inner > div[style] {
+    position: relative !important;
+    z-index: 3;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 14px auto 0 !important;
+    padding: 0 !important;
+    text-align: center;
+  }
+
+  .home-hero-ref > .ref-stats-wrap {
+    position: absolute !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: 0 !important;
+    z-index: 3;
+    width: min(calc(100% - 24px), 1240px) !important;
+    max-width: calc(100% - 24px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: translate(-50%, 52%) !important;
+  }
+
+  .story-ref-section {
+    padding-top: 116px !important;
+  }
+}
