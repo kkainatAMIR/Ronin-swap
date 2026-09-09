@@ -424,6 +424,7 @@ export default function Swap() {
               <div>
                 <h3>RONIN SWAP</h3>
                 <span className="swap-widget-powered">Powered by <JupiterMark size={15} /> <b>Jupiter</b></span>
+                <span className="swap-contract-status">CONTRACT IN DEVELOPMENT</span>
               </div>
               <button type="button" className="swap-widget-gear" onClick={handleSwapAction} aria-label="Swap settings" aria-disabled={paused ? 'true' : undefined} disabled={paused}>
                 <Icon name="settings" size={18} />

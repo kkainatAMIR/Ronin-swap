@@ -9,6 +9,7 @@ import jupiterExecute from './api/jupiter/execute.mjs'
 import jupiterQuote from './api/jupiter/quote.mjs'
 import jupiterSwap from './api/jupiter/swap.mjs'
 import roninStats from './api/ronin/stats.mjs'
+import burnHistory from './api/ronin/burn-history.mjs'
 import shieldStats from './api/ronin/shield-stats.mjs'
 import shieldScan from './api/ronin/shield-scan.mjs'
 import shieldContribution from './api/ronin/shield-contribution.mjs'
@@ -27,6 +28,7 @@ const routes = new Map([
   ['GET /api/jupiter/quote', jupiterQuote],
   ['POST /api/jupiter/swap', jupiterSwap],
   ['GET /api/ronin/stats', roninStats],
+  ['GET /api/ronin/burn-history', burnHistory],
   ['GET /api/ronin/shield-stats', shieldStats],
   ['GET /api/ronin/shield-scan', shieldScan],
   ['POST /api/ronin/shield-scan', shieldScan],

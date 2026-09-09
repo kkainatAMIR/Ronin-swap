@@ -6,7 +6,7 @@ export const RONIN_TOKEN_URL = `https://solscan.io/token/${RONIN_MINT}#holders`
 
 export const navItems = [
   { id: 'home', label: 'Home' },
-  { id: 'yield', label: 'Yield' },
+  { id: 'yield', label: 'RONIN LOCK' },
   { id: 'swap', label: 'Swap' },
   { id: 'burn', label: 'Burn' },
   { id: 'game', label: 'Game' },
@@ -25,10 +25,10 @@ export const timeline = [
 ]
 
 export const yieldDurations = [
-  { id: '30d', label: 'EX 30 DAYS', days: 30, apy: 2.0, boost: '1.0×' },
-  { id: '90d', label: 'EX 90 DAYS', days: 90, apy: 5.0, boost: '1.25×' },
-  { id: '180d', label: 'EX 180 DAYS', days: 180, apy: 11.0, boost: '1.5×' },
-  { id: '1y', label: 'EX 365 DAYS', days: 365, apy: 25.0, boost: '2.0×' },
+  { id: '30d', label: '30 DAYS', days: 30, multiplier: '1.0x' },
+  { id: '90d', label: '90 DAYS', days: 90, multiplier: '1.25x' },
+  { id: '180d', label: '180 DAYS', days: 180, multiplier: '1.5x' },
+  { id: '1y', label: '365 DAYS', days: 365, multiplier: '2.0x' },
 ]
 
 export const gameFeatures = [
