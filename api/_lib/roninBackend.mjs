@@ -15,6 +15,7 @@ const SOL_INCINERATOR_API_KEY = runtimeEnv.SOL_INCINERATOR_API_KEY || ''
 // The same address is defined once for the frontend in src/data.js.
 const DEFAULT_RONIN_MINT = '2JVEVXoRsskapZ8T56MjMNJq6Dk3feEUYSRmzkkipump'
 const RONIN_MINT = runtimeEnv.RONIN_MINT_ADDRESS || DEFAULT_RONIN_MINT
+const rateBuckets = new Map()
 
 export function json(res, status, body) {
   return res.status(status).json(body)
@@ -22,6 +23,18 @@ export function json(res, status, body) {
 
 export function apiError(res, status, code, message) {
   return json(res, status, { error: message, code })
+}
+
+export function rateLimit(req, key, max = 60, windowMs = 60_000) {
+  const now = Date.now()
+  const identity = `${key}:${req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'}`
+  const current = rateBuckets.get(identity)
+  if (!current || current.expiresAt <= now) {
+    rateBuckets.set(identity, { count: 1, expiresAt: now + windowMs })
+    return true
+  }
+  current.count += 1
+  return current.count <= max
 }
 
 export function jupiterHeaders(extra = {}) {
@@ -69,7 +82,7 @@ export function isJupiterConfigured() {
 
 export function isValidAmount(value) {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) return true
-  return typeof value === 'string' && /^[1-9]\d*$/.test(value)
+  return typeof value === 'string' && /^[1-9]\d{0,77}$/.test(value)
 }
 
 export function isValidSlippageBps(value) {

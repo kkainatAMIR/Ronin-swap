@@ -14,8 +14,26 @@ import shieldStats from './api/ronin/shield-stats.mjs'
 import shieldScan from './api/ronin/shield-scan.mjs'
 import shieldContribution from './api/ronin/shield-contribution.mjs'
 import solanaRpc from './api/solana/rpc.mjs'
+import swapVerify from './api/swap/verify.mjs'
+import swapRecord from './api/swap/record.mjs'
+import swapHistory from './api/swap/history.mjs'
+import swapPoints from './api/swap/points.mjs'
+import leaderboard from './api/leaderboard.mjs'
+import adminSamurai from './api/admin/samurai.mjs'
+import currentSeason from './api/samurai/season.mjs'
+import adminSeasons from './api/admin/seasons.mjs'
+import adminDashboard from './api/admin/dashboard.mjs'
+import adminAuth from './api/admin/auth.mjs'
 import burnBuild from './api/burn/build.mjs'
 import burnPreview from './api/burn/preview.mjs'
+import evmQuote from './api/evm/quote.mjs'
+import evmComplete from './api/evm/complete.mjs'
+import lifiConfig from './api/lifi/config.mjs'
+import lifiQuote from './api/lifi/quote.mjs'
+import lifiStatus from './api/lifi/status.mjs'
+import lifiComplete from './api/lifi/complete.mjs'
+import robinhoodTrending from './api/robinhood/trending.mjs'
+import robinhoodTokens from './api/robinhood/tokens.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,8 +52,37 @@ const routes = new Map([
   ['POST /api/ronin/shield-scan', shieldScan],
   ['POST /api/ronin/shield-contribution', shieldContribution],
   ['POST /api/solana/rpc', solanaRpc],
+  ['POST /api/swap/verify', swapVerify],
+  ['POST /api/swap/record', swapRecord],
+  ['GET /api/swap/history', swapHistory],
+  ['POST /api/swap/points', swapPoints],
+  ['GET /api/leaderboard', leaderboard],
+  ['GET /api/samurai/season/current', currentSeason],
+  ['GET /api/admin/samurai/seasons', adminSeasons],
+  ['POST /api/admin/samurai/seasons', adminSeasons],
+  ['POST /api/admin/samurai/season-action', adminSeasons],
+  ['GET /api/admin/samurai/flags', adminSamurai],
+  ['GET /api/admin/samurai/transactions', adminSamurai],
+  ['GET /api/admin/samurai/wallet', adminSamurai],
+  ['POST /api/admin/samurai/flag', adminSamurai],
+  ['POST /api/admin/samurai/exclude', adminSamurai],
+  ['POST /api/admin/samurai/restore', adminSamurai],
+  ['POST /api/admin/samurai/recalculate', adminSamurai],
+  ['GET /api/admin/dashboard', adminDashboard],
+  ['PATCH /api/admin/dashboard', adminDashboard],
+  ['POST /api/admin/dashboard', adminDashboard],
+  ['POST /api/admin/auth', adminAuth],
+  ['GET /api/admin/auth', adminAuth],
   ['POST /api/burn/build', burnBuild],
   ['POST /api/burn/preview', burnPreview],
+  ['POST /api/evm/quote', evmQuote],
+  ['POST /api/evm/complete', evmComplete],
+  ['GET /api/lifi/config', lifiConfig],
+  ['POST /api/lifi/quote', lifiQuote],
+  ['POST /api/lifi/status', lifiStatus],
+  ['POST /api/lifi/complete', lifiComplete],
+  ['GET /api/robinhood/trending', robinhoodTrending],
+  ['GET /api/robinhood/tokens', robinhoodTokens],
 ])
 
 function createResponse(res) {

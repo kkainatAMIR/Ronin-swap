@@ -17,6 +17,29 @@ const LOCAL_API_HANDLERS = {
   '/api/jupiter/swap': '/api/jupiter/swap.mjs',
   '/api/jupiter/order': '/api/jupiter/order.mjs',
   '/api/jupiter/execute': '/api/jupiter/execute.mjs',
+  '/api/evm/quote': '/api/evm/quote.mjs',
+  '/api/evm/complete': '/api/evm/complete.mjs',
+  '/api/lifi/config': '/api/lifi/config.mjs',
+  '/api/lifi/quote': '/api/lifi/quote.mjs',
+  '/api/lifi/status': '/api/lifi/status.mjs',
+  '/api/lifi/complete': '/api/lifi/complete.mjs',
+  '/api/robinhood/trending': '/api/robinhood/trending.mjs',
+  '/api/robinhood/tokens': '/api/robinhood/tokens.mjs',
+  '/api/swap/verify': '/api/swap/verify.mjs',
+  '/api/swap/record': '/api/swap/record.mjs',
+  '/api/swap/history': '/api/swap/history.mjs',
+  '/api/swap/points': '/api/swap/points.mjs',
+  '/api/leaderboard': '/api/leaderboard.mjs',
+  '/api/samurai/season/current': '/api/samurai/season.mjs',
+  '/api/admin/samurai/seasons': '/api/admin/seasons.mjs',
+  '/api/admin/samurai/season-action': '/api/admin/seasons.mjs',
+  '/api/admin/samurai/flags': '/api/admin/samurai.mjs',
+  '/api/admin/samurai/transactions': '/api/admin/samurai.mjs',
+  '/api/admin/samurai/wallet': '/api/admin/samurai.mjs',
+  '/api/admin/samurai/flag': '/api/admin/samurai.mjs',
+  '/api/admin/samurai/exclude': '/api/admin/samurai.mjs',
+  '/api/admin/samurai/restore': '/api/admin/samurai.mjs',
+  '/api/admin/samurai/recalculate': '/api/admin/samurai.mjs',
   '/api/ronin/shield-stats': '/api/ronin/shield-stats.mjs',
   '/api/ronin/shield-scan': '/api/ronin/shield-scan.mjs',
   '/api/ronin/shield-contribution': '/api/ronin/shield-contribution.mjs',
@@ -88,7 +111,7 @@ function localApiPlugin(env) {
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = { ...process.env, ...loadEnv(mode, process.cwd(), '') }
 
   return {
     plugins: [localApiPlugin(env), react(), nodePolyfills({ include: ['buffer'] })],

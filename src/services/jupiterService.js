@@ -73,6 +73,9 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
     throw new JupiterApiError(body?.error || 'Jupiter could not price this swap right now.', { status: response.status, detail: body })
   }
 
+  if (body?.errorCode != null || body?.error || body?.errorMessage || !body?.transaction) {
+    throw new JupiterApiError(body?.errorMessage || body?.error || 'Jupiter could not prepare a signable transaction for this swap.', { detail: body })
+  }
   if (!body?.inAmount || !body?.outAmount) throw new JupiterApiError('No route is currently available for this swap. Please try again shortly.', { detail: body })
   return body
 }
@@ -92,6 +95,50 @@ export async function executeJupiterOrder({ signedTransaction, requestId, lastVa
   if (!response.ok || (!body?.signature && body?.status !== 'Success')) {
     throw new JupiterApiError(body?.error || body?.message || 'The swap could not be executed.', { status: response.status, detail: body })
   }
+  return body
+}
+
+export async function verifySwapTransaction({ signature, wallet, signal }) {
+  if (!signature || !wallet) throw new JupiterApiError('A transaction signature and wallet are required for verification.')
+
+  const response = await fetch('/api/swap/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature, wallet }),
+    signal,
+  })
+
+  const body = await parseJsonSafely(response)
+  if (!response.ok && body?.reason !== 'TRANSACTION_NOT_FOUND' && body?.reason !== 'TRANSACTION_PENDING' && body?.reason !== 'TRANSACTION_FAILED' && body?.reason !== 'WALLET_MISMATCH') {
+    throw new JupiterApiError(body?.error || body?.message || 'The transaction could not be verified.', { status: response.status, detail: body })
+  }
+  return body
+}
+
+export async function recordVerifiedSwap({ signature, wallet, signal }) {
+  if (!signature || !wallet) throw new JupiterApiError('A transaction signature and wallet are required for persistence.')
+
+  const response = await fetch('/api/swap/record', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature, wallet }),
+    signal,
+  })
+  const body = await parseJsonSafely(response)
+  if (!response.ok) throw new JupiterApiError(body?.error || 'The verified swap could not be persisted.', { status: response.status, detail: body })
+  return body
+}
+
+export async function processSamuraiPoints({ signature, signal }) {
+  if (!signature) throw new JupiterApiError('A transaction signature is required for Samurai Points processing.')
+  const response = await fetch('/api/swap/points', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature }),
+    signal,
+  })
+  const body = await parseJsonSafely(response)
+  if (!response.ok) throw new JupiterApiError(body?.error || 'Samurai Points could not be processed.', { status: response.status, detail: body })
   return body
 }
 

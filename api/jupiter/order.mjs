@@ -9,14 +9,18 @@
   isValidSlippageBps,
   json,
   readUpstream,
+  rateLimit,
 } from '../_lib/roninBackend.mjs'
 import { isValidMintAddress, isValidPublicKey } from '../_lib/solanaValidation.mjs'
 
 const DEFAULT_SLIPPAGE_BPS = 100 // 1%
 export default async function handler(req, res) {
   if (req.method !== 'GET') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
+  if (!rateLimit(req, 'solana-order', 30)) return apiError(res, 429, 'RATE_LIMITED', 'Too many swap preparation requests. Try again shortly.')
 
-  const { inputMint, outputMint, amount, taker, slippageBps } = req.query || {}
+  const { inputMint, outputMint, amount, taker, slippageBps, chainId, provider } = req.query || {}
+  if (chainId != null && String(chainId) !== '101') return apiError(res, 400, 'INVALID_CHAIN', 'Solana orders require the Solana chain identifier.')
+  if (provider != null && provider !== 'jupiter') return apiError(res, 400, 'PROVIDER_CHAIN_MISMATCH', 'Solana uses the Jupiter provider.')
   if (!isValidMintAddress(inputMint)) return apiError(res, 400, 'INVALID_INPUT_MINT', 'inputMint must be a valid Solana mint address.')
   if (!isValidMintAddress(outputMint)) return apiError(res, 400, 'INVALID_OUTPUT_MINT', 'outputMint must be a valid Solana mint address.')
   if (inputMint === outputMint) return apiError(res, 400, 'SAME_MINT', 'inputMint and outputMint must be different.')
@@ -50,6 +54,9 @@ export default async function handler(req, res) {
         return apiError(res, upstream.status, 'JUPITER_REFERRAL_NOT_INITIALIZED', 'Jupiter referral setup is not initialized for Swap V2.')
       }
       return apiError(res, upstream.status >= 500 ? 502 : upstream.status, 'JUPITER_API_ERROR', body?.error || body?.message || 'Jupiter order request failed.')
+    }
+    if (body?.errorCode != null || body?.error || body?.errorMessage || !body?.transaction) {
+      return apiError(res, 400, 'JUPITER_ORDER_ERROR', body?.errorMessage || body?.error || 'Jupiter could not prepare a signable transaction for this swap.')
     }
     return json(res, 200, body)
   } catch (error) {

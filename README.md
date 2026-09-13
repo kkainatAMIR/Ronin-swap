@@ -74,7 +74,30 @@ JUPITER_REFERRAL_FEE_BPS=50
 SOL_INCINERATOR_API_KEY=...    # server-only
 SOL_INCINERATOR_BASE_URL=https://v2.api.sol-incinerator.com
 RONIN_SHIELD_TREASURY_ADDRESS=... # server-only public treasury address for optional native SOL support
+VITE_ROBINHOOD_RPC_URL=...       # public RPC URL used by MetaMask add/switch support
+VITE_ROBINHOOD_EXPLORER_URL=...  # optional public block explorer URL
+VITE_ROBINHOOD_NETWORK_NAME=Robinhood Chain
+LIFI_BASE_URL=https://li.quest/v1
+LIFI_INTEGRATOR=RoninSamurai
+LIFI_API_KEY=...                  # server-only; optional for higher LI.FI limits
 ```
+
+## Multi-chain swap foundation
+
+The swap architecture is chain-aware through `src/config/chains.js` and
+`src/services/providerRouter.js`:
+
+- Solana-only routes keep the existing Jupiter implementation.
+- Ethereum-only routes keep the existing 0x/MetaMask implementation.
+- Routes involving Robinhood Chain select LI.FI.
+- Base and Arbitrum metadata are reserved for future EVM support.
+
+Robinhood Chain is configured as EVM chain `4663` with ETH gas and MetaMask.
+Its candidate symbols are listed in `src/config/robinhoodRegistry.js`, but no
+addresses are guessed: every candidate remains unverified and disabled until
+confirmed from live LI.FI/Robinhood sources. LI.FI configuration is exposed
+server-side at `/api/lifi/config`; quotes and execution are intentionally not
+enabled in this foundation release.
 
 RONIN Shield support is optional and uses a standard native SOL transfer signed
 by the connected wallet. The treasury address is displayed before approval;
@@ -156,5 +179,6 @@ Import the GitHub repository into Vercel. Use the Vite framework preset,
 Add the server-only variables above in Vercel Project Settings for the
 Production, Preview, and Development environments as needed. Never commit
 `.env.local` or real credentials.
-#   r o n i n P - 2  
+#   r o n i n P - 2 
+ 
  

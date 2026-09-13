@@ -3,6 +3,8 @@ import { formatCompact, formatNumber, getCurrentRank, getNextRank, getRankProgre
 import { useWallet } from '../context/WalletContext'
 import Icon from '../components/Icon'
 import { Button, Eyebrow, PageHero, ProgressBar, SectionHeading, Tag } from '../components/Layout'
+import { getCurrentSeason, getLeaderboard } from '../services/leaderboardService'
+import { getEthereumProvider } from '../services/ethereumService'
 
 const iconForRank = (id) => {
   if (id === 'gashira') return 'crown'
@@ -23,6 +25,12 @@ const holdingRequirement = (rank) => typeof rank.minBalance === 'number' ? `${fo
 
 export default function Rank() {
   const { wallet, profile, walletDataState, walletDataError, openWalletModal } = useWallet()
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState('season')
+  const [leaderboard, setLeaderboard] = useState({ entries: [], pagination: { total: 0 }, wallet: null })
+  const [leaderboardState, setLeaderboardState] = useState('idle')
+  const [currentSeason, setCurrentSeason] = useState(null)
+  const [ethereumWallet, setEthereumWallet] = useState('')
+  const leaderboardWallet = wallet?.address || ethereumWallet
   const isGashiraWallet = wallet?.address === '3xfHXYiPMJQUYqF23cHJUMPkQEjoQ6W2f9L5i1XPXb7r'
   const currentRank = isGashiraWallet ? ranks.find((rank) => rank.id === 'gashira') : getCurrentRank(profile)
   const nextRank = isGashiraWallet ? null : getNextRank(profile)
@@ -38,6 +46,41 @@ export default function Rank() {
   useEffect(() => {
     setIsPortraitFlipped(false)
   }, [selectedId])
+
+  useEffect(() => {
+    const provider = getEthereumProvider()
+    if (!provider) return undefined
+    const refresh = async () => {
+      try {
+        const accounts = await provider.request({ method: 'eth_accounts' })
+        setEthereumWallet(accounts?.[0] || '')
+      } catch {
+        setEthereumWallet('')
+      }
+    }
+    const handleAccountsChanged = (accounts) => setEthereumWallet(accounts?.[0] || '')
+    refresh()
+    provider.on?.('accountsChanged', handleAccountsChanged)
+    return () => provider.removeListener?.('accountsChanged', handleAccountsChanged)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    setLeaderboardState('loading')
+    getCurrentSeason().then((season) => {
+      if (!cancelled) setCurrentSeason(season)
+      return getLeaderboard({ period: leaderboardPeriod, page: 1, limit: 100, wallet: leaderboardWallet, seasonId: season?.id })
+    }).then((result) => {
+        if (!cancelled) {
+          setLeaderboard(result)
+          setLeaderboardState('ready')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLeaderboardState('error')
+      })
+    return () => { cancelled = true }
+  }, [leaderboardPeriod, leaderboardWallet])
 
   const selectedRank = useMemo(() => ranks.find((rank) => rank.id === selectedId) || ranks[1], [selectedId])
   const isSelectedCurrent = currentRank?.id === selectedRank.id
@@ -83,6 +126,30 @@ export default function Rank() {
       <section className="section section-cream rank-progress-section">
         <div className="progress-quote"><span className="quote-mark">“</span><blockquote>The blade is not made by one strike.<br /><em>Neither is a legend.</em></blockquote><span className="quote-attribution">— the Ronin code</span></div>
         <div className="progress-card surface-card"><div className="panel-heading"><div><Eyebrow>{profile ? 'Your live preview' : 'Your future profile'}</Eyebrow><h3>{profile ? 'The next mark is in sight.' : 'Your place is waiting.'}</h3></div><Icon name="trend" size={18} /></div>{profile ? <><div className="next-rank-head"><span>{currentRank?.name || 'Unranked'}</span><Icon name="arrowRight" size={14} /><strong>{nextRank?.name || 'Gashira'}</strong></div><ProgressBar value={hasNextThreshold ? currentProgress : 0} label="Progress to next rank" rightLabel={hasNextThreshold ? `${currentProgress}%` : 'TBA'} /><div className="remaining-grid"><div><span>Holding gap</span><strong>{nextRank && hasNextThreshold ? formatCompact(Math.max(0, nextRank.minBalance - profile.balance)) : '—'}</strong><small>{hasNextThreshold ? '$RONIN' : 'Threshold TBA'}</small></div><div><span>XP gap</span><strong>{nextRank && hasValue('xp') ? formatNumber(Math.max(0, nextRank.minXp - profile.xp)) : '—'}</strong><small>{hasValue('xp') ? 'XP' : 'Indexer pending'}</small></div><div><span>NFT gap</span><strong>{nextRank && hasValue('nfts') ? Math.max(0, nextRank.minNfts - profile.nfts) : '—'}</strong><small>{hasValue('nfts') ? 'NFTs' : 'Indexer pending'}</small></div></div></> : <><p className="progress-empty">Connect a wallet to see exactly what remains between you and the next rank.</p><Button onClick={openWalletModal} icon="wallet">Connect wallet</Button></>}</div>
+      </section>
+
+      <section className="section" id="samurai-leaderboard">
+        <div className="section-row" style={{ alignItems: 'end', gap: '20px' }}>
+          <SectionHeading eyebrow="Verified activity" title="Samurai leaderboard." text={currentSeason ? `${currentSeason.name} · ${new Date(currentSeason.startAt).toLocaleDateString()} → ${new Date(currentSeason.endAt).toLocaleDateString()}.` : 'Ranks are calculated from verified database activity. Featured-token status does not affect normal points.'} />
+          <div className="swap-widget-tabs" role="tablist" aria-label="Leaderboard period" style={{ flexShrink: 0 }}>
+            {[['daily', 'DAILY'], ['weekly', 'WEEKLY'], ['monthly', 'MONTHLY'], ['season', 'CURRENT SEASON'], ['all-time', 'ALL TIME']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={leaderboardPeriod === value} className={leaderboardPeriod === value ? 'active' : ''} onClick={() => setLeaderboardPeriod(value)}>{label}</button>)}
+          </div>
+        </div>
+        {wallet && <div className="surface-card leaderboard-stats-card" style={{ marginTop: '24px', padding: '18px', display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '12px' }}>
+          <div><span className="data-label">LIFETIME POINTS</span><strong style={{ display: 'block', marginTop: '6px' }}>{Number(leaderboard.wallet?.lifetimePoints || 0).toLocaleString()}</strong></div>
+          <div><span className="data-label">LIFETIME VOLUME</span><strong style={{ display: 'block', marginTop: '6px' }}>${Number(leaderboard.wallet?.lifetimeVolume || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong></div>
+          <div><span className="data-label">CURRENT RANK</span><strong style={{ display: 'block', marginTop: '6px' }}>{leaderboard.wallet?.currentRank ? `#${leaderboard.wallet.currentRank}` : '—'}</strong></div>
+          <div><span className="data-label">QUALIFYING SWAPS</span><strong style={{ display: 'block', marginTop: '6px' }}>{Number(leaderboard.wallet?.lifetimeSwaps || 0).toLocaleString()}</strong></div>
+          <div><span className="data-label">SEASON POINTS</span><strong style={{ display: 'block', marginTop: '6px' }}>{Number(leaderboard.wallet?.seasonPoints || 0).toLocaleString()}</strong></div>
+          <div><span className="data-label">SEASON VOLUME</span><strong style={{ display: 'block', marginTop: '6px' }}>${Number(leaderboard.wallet?.seasonVolume || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong></div>
+        </div>}
+        <div className="surface-card leaderboard-table-card" style={{ marginTop: '14px', overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 160px 160px 120px', gap: '12px', padding: '14px 18px', borderBottom: '1px solid var(--line)' }}><span className="data-label">RANK</span><span className="data-label">SAMURAI</span><span className="data-label">VERIFIED VOLUME</span><span className="data-label">SAMURAI POINTS</span><span className="data-label">SWAPS</span></div>
+          {leaderboardState === 'loading' && <p style={{ padding: '26px 18px', margin: 0, color: 'var(--muted)' }}>Loading Samurai leaderboard...</p>}
+          {leaderboardState === 'error' && <p style={{ padding: '26px 18px', margin: 0, color: 'var(--red)' }}>Unable to load leaderboard. Please try again.</p>}
+          {leaderboardState === 'ready' && !leaderboard.entries.length && <p style={{ padding: '26px 18px', margin: 0, color: 'var(--muted)' }}>No verified swap activity yet. Be the first Samurai.</p>}
+          {leaderboardState === 'ready' && leaderboard.entries.map((entry) => <div key={entry.wallet} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 160px 160px 120px', gap: '12px', padding: '15px 18px', alignItems: 'center', background: leaderboardWallet?.toLowerCase() === entry.wallet?.toLowerCase() ? 'rgba(185,28,28,.08)' : 'transparent', borderBottom: '1px solid var(--line)' }}><strong>#{entry.rank}</strong><span style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>{entry.wallet.slice(0, 5)}...{entry.wallet.slice(-5)}</span><span>${Number(entry.verifiedVolume).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span><strong>{Number(entry.samuraiPoints).toLocaleString()}</strong><span>{Number(entry.qualifyingSwaps).toLocaleString()}</span></div>)}
+        </div>
       </section>
     </>
   )
