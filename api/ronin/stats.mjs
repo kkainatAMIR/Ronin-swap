@@ -295,6 +295,7 @@ async function getDex() {
     priceUsd: best.priceUsd ? Number(best.priceUsd) : null,
     priceNative: best.priceNative ? Number(best.priceNative) : null,
     volume24h: best.volume?.h24 ? Number(best.volume.h24) : null,
+    transactions24h: Number(best.txns?.h24?.buys || 0) + Number(best.txns?.h24?.sells || 0),
     volume6h: best.volume?.h6 ? Number(best.volume.h6) : null,
     liquidityUsd: best.liquidity?.usd ? Number(best.liquidity.usd) : null,
     marketCap: best.marketCap ? Number(best.marketCap) : best.fdv ? Number(best.fdv) : null,

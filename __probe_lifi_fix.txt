@@ -1,0 +1,34 @@
+symbol | current (registry)  | correct (LI.FI 4663)                          | dec | name
+---|---|---|---|---
+WETH | 0x0bd7d3088e1639fba988df18a801114eacad73 | 0x0bd7d308f8e1639fab988df18a8011f41eacad73 | 18 | Wrapped Ether  ✗ MISMATCH
+USDG | 0x5fc5360d0400a0fd42af552add042d716fd168 | 0x0a3b763d66c0e8c7555c986a3701e1dc1bf3954f | 6 | Paxos USDG  ✗ MISMATCH
+CASHCAT | 0x020bfc650a365f8bb26819deabf3e21291018b4 | 0x020bfc650a365f8bb26819deaabf3e21291018b4 | 18 | Cash Cat  ✗ MISMATCH
+CCC | 0xddec0170ceb4426ea05f2bd48d5ff4a4afa6615 | NOT_FOUND_IN_CATALOG | ? | Cashcat Chain  ✗ MISMATCH
+STONKBROKER | 0xe934e36a439c94017b64a3fece66af12099ab50 | 0xe934e36a439c94017b64a3fece66af12099abf50 | 18 | StonkBroker  ✗ MISMATCH
+INDEX | 0x56910d4409f3a0c78c64dd8d0545ff0705389870 | 0x56910d4409f3a0c78c64dd8d0545ff0705389870 | 18 | The Index  ✓
+SYNAPSE | 0x1e75e55b4b2d77b62f07d5aa86401057584add | NOT_FOUND_IN_CATALOG | ? | Hood Synapse by Virtuals  ✗ MISMATCH
+NASDUCK | 0x78fc7e13bccab8a7aedc5b8465c3442d6d7d9d64 | NOT_FOUND_IN_CATALOG | ? | Nasduck  ✗ MISMATCH
+MONEROCHAN | 0x0908a927f27c96e5f21fa15bcd296974542da0f | NOT_FOUND_IN_CATALOG | ? | Monero-Chan  ✗ MISMATCH
+PIPEDOG | 0x5cb6f181081301b44905f3ae15419112ecabd8a6 | 0x5cb6f181081301b44905f3ae15419112ecabd8a6 | 18 | pipedog  ✓
+UNIPCS | 0x7df5daaf80e65dfcc7a1435d9b52bcb2b5753fbe | 0x7df5daaf80e65dfcc7a1435d9b52bcf2b5753fbe | 18 | Unipcs  ✗ MISMATCH
+AOBS | 0x47366e0f257ac009e82bd46fb74e2fb50826ce98 | NOT_FOUND_IN_CATALOG | ? | Agent OBS  ✗ MISMATCH
+PORT | 0xafa57c4c5a72d36530c8e816ad6e9a5947941536 | NOT_FOUND_IN_CATALOG | ? | Port  ✗ MISMATCH
+BOOMER | 0x73c2de14c7fa0a57cc2d9722b959ea70b881ffe4 | NOT_FOUND_IN_CATALOG | ? | Boomer  ✗ MISMATCH
+SHRUB | 0x5d9144d2d017386519a7134fcc7f1e4ba222920c | NOT_FOUND_IN_CATALOG | ? | Lil' Shrub  ✗ MISMATCH
+CUPCAKE | 0x0ae4cab49b6f048f9c589a522620eb0fc4ededc6 | NOT_FOUND_IN_CATALOG | ? | Cupcake  ✗ MISMATCH
+ZZZ | 0x7dbf38976f6d3b9c529e7d9484a71898b409ee6a | 0x7dbf38976f6d3b9c529e7d9484a71898b409ee6a | 18 | ZZZ  ✓
+
+Total mismatches: 14 / 17
+
+=== JS Object replacement for robinhoodRegistry.js ===
+const candidate = (symbol, name, address, categories, opts) => Object.freeze({ chainId: 4663, chainKey: "robinhood", type: "erc20", symbol, name, address, decimals: opts.decimals, categories, isMeme: !!opts.isMeme, verification: "verified", productionEnabled: true })
+export const ROBINHOOD_TOKEN_CANDIDATES = Object.freeze([
+  candidate('WETH', 'Wrapped Ether', '0x0bd7d308f8e1639fab988df18a8011f41eacad73', ["core"], { decimals: 18 }),
+  candidate('USDG', 'Global Dollar', '0x0a3b763d66c0e8c7555c986a3701e1dc1bf3954f', ["core"], { decimals: 6 }),
+  candidate('CASHCAT', 'Cash Cat', '0x020bfc650a365f8bb26819deaabf3e21291018b4', ["meme","l3"], { isMeme: true, decimals: 18 }),
+  candidate('STONKBROKER', 'StonkBroker', '0xe934e36a439c94017b64a3fece66af12099abf50', ["utility","meme"], { isMeme: true, decimals: 18 }),
+  candidate('INDEX', 'The Index', '0x56910d4409f3a0c78c64dd8d0545ff0705389870', ["meme","index"], { isMeme: true, decimals: 18 }),
+  candidate('PIPEDOG', 'pipedog', '0x5cb6f181081301b44905f3ae15419112ecabd8a6', ["meme"], { isMeme: true, decimals: 18 }),
+  candidate('UNIPCS', 'Unipcs', '0x7df5daaf80e65dfcc7a1435d9b52bcf2b5753fbe', ["meme","community"], { isMeme: true, decimals: 18 }),
+  candidate('ZZZ', 'ZZZ', '0x7dbf38976f6d3b9c529e7d9484a71898b409ee6a', ["meme"], { isMeme: true, decimals: 18 }),
+])

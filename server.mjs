@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import health from './api/health.mjs'
+import publicSettings from './api/settings.mjs'
 import jupiterOrder from './api/jupiter/order.mjs'
 import jupiterExecute from './api/jupiter/execute.mjs'
 import jupiterQuote from './api/jupiter/quote.mjs'
@@ -19,6 +20,7 @@ import swapRecord from './api/swap/record.mjs'
 import swapHistory from './api/swap/history.mjs'
 import swapPoints from './api/swap/points.mjs'
 import leaderboard from './api/leaderboard.mjs'
+import trending from './api/trending.mjs'
 import adminSamurai from './api/admin/samurai.mjs'
 import currentSeason from './api/samurai/season.mjs'
 import adminSeasons from './api/admin/seasons.mjs'
@@ -34,6 +36,7 @@ import lifiStatus from './api/lifi/status.mjs'
 import lifiComplete from './api/lifi/complete.mjs'
 import robinhoodTrending from './api/robinhood/trending.mjs'
 import robinhoodTokens from './api/robinhood/tokens.mjs'
+import coingeckoSearch from './api/coingecko/search.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -41,6 +44,7 @@ const distDir = path.join(__dirname, 'dist')
 
 const routes = new Map([
   ['GET /api/health', health],
+  ['GET /api/settings', publicSettings],
   ['GET /api/jupiter/order', jupiterOrder],
   ['POST /api/jupiter/execute', jupiterExecute],
   ['GET /api/jupiter/quote', jupiterQuote],
@@ -57,6 +61,7 @@ const routes = new Map([
   ['GET /api/swap/history', swapHistory],
   ['POST /api/swap/points', swapPoints],
   ['GET /api/leaderboard', leaderboard],
+  ['GET /api/trending', trending],
   ['GET /api/samurai/season/current', currentSeason],
   ['GET /api/admin/samurai/seasons', adminSeasons],
   ['POST /api/admin/samurai/seasons', adminSeasons],
@@ -83,6 +88,7 @@ const routes = new Map([
   ['POST /api/lifi/complete', lifiComplete],
   ['GET /api/robinhood/trending', robinhoodTrending],
   ['GET /api/robinhood/tokens', robinhoodTokens],
+  ['GET /api/coingecko/search', coingeckoSearch],
 ])
 
 function createResponse(res) {

@@ -1,0 +1,9 @@
+
+=== V3 (CORRECT WETH->USDG): expect 404 NO_ROUTE (pair has no real route) ===
+THREW: fetch failed
+
+=== V4 (CORRECT native->WETH): expect 200 SUCCESS with quoteProof + quoteId ===
+THREW: fetch failed
+
+=== V5 (OLD WRONG addresses): expect 400 LIFI_INVALID_REQUEST with actual LI.FI message ===
+THREW: fetch failed

@@ -2,8 +2,17 @@ import { apiError, json, parseBody } from '../_lib/roninBackend.mjs'
 import { requireAdmin } from '../_lib/adminAuth.mjs'
 import { getAdminLeaderboard, getAdminNotes, getAdminOverview, getAdminPointDetails, getAdminSettings, getAdminWallet, getSeasons, createAdminNote, updateAdminSettings, isSupabaseConfigured } from '../_lib/supabaseBackend.mjs'
 
-function validWallet(value) { return typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value) }
-function validSignature(value) { return typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(value) }
+function validWallet(value) {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed) || /^0x[a-fA-F0-9]{40}$/.test(trimmed)
+}
+
+function validSignature(value) {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  return /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(trimmed) || /^0x[a-fA-F0-9]{64}$/.test(trimmed)
+}
 function adminId(req) { return String(req.headers['x-admin-id'] || 'admin').slice(0, 120) }
 
 export default async function handler(req, res) {

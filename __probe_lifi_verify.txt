@@ -1,0 +1,16 @@
+=== V1: Upstream LI.FI /quote WETH(CORRECT)->USDG(CORRECT) 1e18 ===
+status=404 ok=false
+FAIL body={"message":"No available quotes for the requested transfer","code":1002,"errors":{"filteredOut":[],"failed":[{"overallPath":"4663:WETH~4663:WETH-4663:WETH~4663:USDG","subpaths":{"4663:WETH~4663:USDG":[{"errorType":"NO_QUOTE","code":"NO_POSSIBLE_ROUTE","tool":"fly","message":"couldn't recognize to token","durationMs":0,"action":{"fromChainId":4663,"fromAmount":"997500000000000000","fromToken":{"address":"0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73","chainId":4663,"symbol":"WETH","decimals":18,"nam
+
+=== V2: Upstream LI.FI /quote native(zero)->WETH(CORRECT) 1e18 ===
+status=200 ok=true
+SUCCESS: id=4609c052-0844-4b72-b74f-1740f58ea6e5:0 toAmount=997500000000000000 tx.to=0xB477751B76CF82d00a686A1232f5fCD772414Af3
+
+=== V3: Local POST /api/lifi/quote WETH(CORRECT)->USDG(CORRECT) ===
+Local /api/lifi/quote fetch failed: fetch failed
+
+=== V4: Local POST /api/lifi/quote native->WETH(CORRECT) ===
+Local /api/lifi/quote fetch failed: fetch failed
+
+=== V5: Local POST /api/lifi/quote with OLD addresses (should return 4xx with actual LI.FI message) ===
+Local /api/lifi/quote fetch failed: fetch failed

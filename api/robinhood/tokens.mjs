@@ -1,6 +1,6 @@
 import { apiError, json, rateLimit } from '../_lib/roninBackend.mjs'
 import { lifiRpc, lifiRpcUrl } from '../_lib/lifi.mjs'
-import { getRobinhoodMarketPairs, isMemeToken, pairActivity, rankingScore } from '../_lib/robinhoodMarket.mjs'
+import { getRobinhoodMarketPairs, isMemeToken, pairActivity, rankingScore, tokenLogoUri } from '../_lib/robinhoodMarket.mjs'
 import { ROBINHOOD_TOKEN_CANDIDATES } from '../../src/config/robinhoodRegistry.js'
 
 const CHAIN_ID = 4663
@@ -33,7 +33,7 @@ function toToken(token, pair) {
     symbol: token.symbol || 'UNKNOWN',
     name: token.name || token.symbol || 'Unknown token',
     decimals: Number(token.decimals),
-    logoURI: token.logoURI || null,
+    logoURI: tokenLogoUri(token, pair),
     categories: token.categories || [],
     isMeme: Boolean(token.isMeme || isMemeToken(token)),
     verification: token.verification,

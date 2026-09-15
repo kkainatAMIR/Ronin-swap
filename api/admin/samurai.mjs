@@ -6,6 +6,12 @@ function validBase58(value, min, max) {
   return typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]+$/.test(value) && value.length >= min && value.length <= max
 }
 
+function validWallet(value) {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  return validBase58(trimmed, 32, 44) || /^0x[a-fA-F0-9]{40}$/.test(trimmed)
+}
+
 function pageValue(value, fallback) {
   const parsed = Number(value)
   return Number.isInteger(parsed) ? parsed : fallback
@@ -27,7 +33,7 @@ export default async function handler(req, res) {
       const signature = req.query?.signature ? String(req.query.signature).trim() : ''
       const wallet = req.query?.wallet ? String(req.query.wallet).trim() : ''
       if (signature && !validBase58(signature, 32, 88)) return apiError(res, 400, 'INVALID_SIGNATURE', 'Invalid signature.')
-      if (wallet && !validBase58(wallet, 32, 44)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
+      if (wallet && !validWallet(wallet)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
       const page = pageValue(req.query?.page, 1)
       const limit = pageValue(req.query?.limit, 25)
       if (page < 1 || limit < 1 || limit > 100) return apiError(res, 400, 'INVALID_PAGINATION', 'Invalid pagination.')
@@ -35,13 +41,13 @@ export default async function handler(req, res) {
     }
     if (req.method === 'GET' && resource === 'wallet') {
       const wallet = String(req.query?.wallet || '').trim()
-      if (!validBase58(wallet, 32, 44)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
+      if (!validWallet(wallet)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
       return json(res, 200, await getAdminWallet(wallet))
     }
     if (req.method === 'POST' && resource === 'recalculate') {
       const body = req.body || {}
       const wallet = body.wallet ? String(body.wallet).trim() : null
-      if (wallet && !validBase58(wallet, 32, 44)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
+      if (wallet && !validWallet(wallet)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
       return json(res, 200, { recalculated: await recalculateSamurai(wallet), action: 'ADMIN_RECALCULATED_POINTS' })
     }
     if (req.method === 'POST' && ['flag', 'exclude', 'restore'].includes(resource)) {
@@ -50,7 +56,7 @@ export default async function handler(req, res) {
       const wallet = body.wallet ? String(body.wallet).trim() : null
       if (!signature && !wallet) return apiError(res, 400, 'MISSING_TARGET', 'A transaction signature or wallet is required.')
       if (signature && !validBase58(signature, 32, 88)) return apiError(res, 400, 'INVALID_SIGNATURE', 'Invalid signature.')
-      if (wallet && !validBase58(wallet, 32, 44)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
+      if (wallet && !validWallet(wallet)) return apiError(res, 400, 'INVALID_WALLET', 'Invalid wallet.')
       const status = resource === 'flag' ? 'FLAGGED' : resource === 'exclude' ? 'EXCLUDED' : 'NORMAL'
       const result = await adminAction({ action: `ADMIN_${resource.toUpperCase()}_${signature ? 'TRANSACTION' : 'WALLET'}`, signature, wallet, status, reason: String(body.reason || 'Admin review'), severity: String(body.severity || 'medium'), adminId: String(req.headers['x-admin-id'] || 'admin') })
       return json(res, 200, result)

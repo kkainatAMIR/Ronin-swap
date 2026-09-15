@@ -1,16 +1,46 @@
 import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
 import { PublicKey } from '@solana/web3.js'
 
 const challenges = new Map()
 const SESSION_TTL_SECONDS = 60 * 60 * 8
 
+function runtimeEnv() {
+  return globalThis.__RONIN_LOCAL_ENV__ || process.env
+}
+
+function readLocalEnvFile() {
+  const localEnvPath = path.resolve(process.cwd(), '.env.local')
+  if (!fs.existsSync(localEnvPath)) return {}
+
+  const env = {}
+  const file = fs.readFileSync(localEnvPath, 'utf8')
+  for (const line of file.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue
+
+    const separatorIndex = trimmed.indexOf('=')
+    const key = trimmed.slice(0, separatorIndex).trim()
+    const rawValue = trimmed.slice(separatorIndex + 1).trim()
+
+    if (!key) continue
+
+    env[key] = rawValue.replace(/^['"]|['"]$/g, '')
+  }
+
+  return env
+}
+
 function configuredWallets() {
-  return String(process.env.ADMIN_WALLET_ADDRESSES || process.env.ADMIN_WALLET_ADDRESS || '')
+  const env = { ...readLocalEnvFile(), ...runtimeEnv() }
+  return String(env.ADMIN_WALLET_ADDRESSES || env.ADMIN_WALLET_ADDRESS || '')
     .split(',').map((value) => value.trim()).filter(Boolean)
 }
 
 function sessionSecret() {
-  return process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_API_TOKEN || ''
+  const env = { ...readLocalEnvFile(), ...runtimeEnv() }
+  return env.ADMIN_SESSION_SECRET || env.ADMIN_API_TOKEN || ''
 }
 
 function cookieValue(req, name) {

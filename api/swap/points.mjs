@@ -1,6 +1,6 @@
 import { apiError, json, parseBody, rateLimit } from '../_lib/roninBackend.mjs'
 import { getVerifiedSwapBySignature, awardSamuraiPoints, isSupabaseConfigured, createAbuseFlag, getSeasonForTimestamp, getAdminSettings } from '../_lib/supabaseBackend.mjs'
-import { calculateSamuraiPoints, getPointsConfiguration } from '../_lib/samuraiPoints.mjs'
+import { calculateSamuraiPoints, getEffectivePointsConfiguration, getPointsConfiguration } from '../_lib/samuraiPoints.mjs'
 
 function isValidSignature(value) {
   return typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(value)
@@ -21,17 +21,8 @@ export default async function handler(req, res) {
 
     const season = await getSeasonForTimestamp(swap.timestamp)
     const savedSettings = await getAdminSettings().catch(() => null)
-    const fallbackConfiguration = getPointsConfiguration()
-    const configuration = savedSettings ? {
-      ...fallbackConfiguration,
-      pointsEnabled: savedSettings.points_enabled,
-      minimumQualifyingSwapUsd: Number(savedSettings.minimum_qualifying_swap_usd),
-      pointsPerUsd: Number(savedSettings.points_per_usd),
-      transactionPointsCapEnabled: savedSettings.transaction_points_cap_enabled,
-      transactionPointsCap: savedSettings.transaction_points_cap == null ? null : Number(savedSettings.transaction_points_cap),
-      campaigns: Array.isArray(savedSettings.campaigns) ? savedSettings.campaigns : [],
-    } : fallbackConfiguration
-    const calculation = await calculateSamuraiPoints(swap, season ? { ...configuration, pointsEnabled: season.points_enabled, minimumQualifyingSwapUsd: Number(season.minimum_qualifying_volume), pointsPerUsd: Number(season.base_points_per_usd), campaigns: Array.isArray(season.multiplier_rules) ? season.multiplier_rules : configuration.campaigns } : configuration)
+    const configuration = getEffectivePointsConfiguration(savedSettings)
+    const calculation = await calculateSamuraiPoints(swap, configuration)
     const result = await awardSamuraiPoints({ signature, ...calculation, seasonId: season?.id || null })
     if (!result) return apiError(res, 502, 'POINTS_DATABASE_ERROR', 'The points result was not returned by the database.')
 

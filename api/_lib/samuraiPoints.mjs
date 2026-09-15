@@ -27,19 +27,80 @@ function parseCampaigns(value) {
   }
 }
 
+function hasExplicitEnvValue(name) {
+  const value = runtimeEnv[name]
+  return value !== undefined && value !== null && value !== ''
+}
+
+function envNumber(name, fallback) {
+  const value = runtimeEnv[name]
+  if (value == null || value === '') return fallback
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
 export function getPointsConfiguration() {
-  const configuredRate = Number(runtimeEnv.SAMURAI_POINTS_PER_DOLLAR || 1)
-  const configuredMinimum = Number(runtimeEnv.SAMURAI_MINIMUM_QUALIFYING_SWAP_USD || runtimeEnv.SAMURAI_MINIMUM_QUALIFYING_SWAP || 10)
+  const configuredRate = envNumber('SAMURAI_POINTS_PER_DOLLAR', 1)
+  const configuredMinimum = envNumber('SAMURAI_MINIMUM_QUALIFYING_SWAP_USD', envNumber('SAMURAI_MINIMUM_QUALIFYING_SWAP', 0))
   return {
     pointsEnabled: parseBoolean(runtimeEnv.SAMURAI_POINTS_ENABLED, true),
-    pointsPerUsd: Number.isFinite(configuredRate) && configuredRate >= 0 ? configuredRate : 1,
-    minimumQualifyingSwapUsd: Number.isFinite(configuredMinimum) && configuredMinimum >= 0 ? configuredMinimum : 10,
+    pointsPerUsd: configuredRate,
+    minimumQualifyingSwapUsd: configuredMinimum,
     transactionPointsCapEnabled: parseBoolean(runtimeEnv.SAMURAI_TRANSACTION_POINTS_CAP_ENABLED, false),
     transactionPointsCap: parseOptionalNumber(runtimeEnv.SAMURAI_TRANSACTION_POINTS_CAP),
     campaigns: parseCampaigns(runtimeEnv.SAMURAI_POINTS_CAMPAIGNS),
     startDate: runtimeEnv.SAMURAI_POINTS_START_DATE || null,
     endDate: runtimeEnv.SAMURAI_POINTS_END_DATE || null,
     ruleVersion: runtimeEnv.SAMURAI_POINTS_RULE_VERSION || 'v1',
+  }
+}
+
+export function getEffectivePointsConfiguration(savedSettings = null) {
+  const fallback = getPointsConfiguration()
+  const saved = savedSettings || {}
+  const hasSavedSettings = savedSettings != null
+
+  const pointsEnabled = hasSavedSettings
+    ? Boolean(saved.points_enabled ?? fallback.pointsEnabled)
+    : hasExplicitEnvValue('SAMURAI_POINTS_ENABLED')
+      ? parseBoolean(runtimeEnv.SAMURAI_POINTS_ENABLED, fallback.pointsEnabled)
+      : Boolean(saved.points_enabled ?? fallback.pointsEnabled)
+
+  const minimumQualifyingSwapUsd = hasSavedSettings
+    ? Number(saved.minimum_qualifying_swap_usd ?? saved.minimum_qualifying_volume_usd ?? fallback.minimumQualifyingSwapUsd)
+    : hasExplicitEnvValue('SAMURAI_MINIMUM_QUALIFYING_SWAP_USD') || hasExplicitEnvValue('SAMURAI_MINIMUM_QUALIFYING_SWAP')
+      ? envNumber('SAMURAI_MINIMUM_QUALIFYING_SWAP_USD', envNumber('SAMURAI_MINIMUM_QUALIFYING_SWAP', saved.minimum_qualifying_swap_usd ?? saved.minimum_qualifying_volume_usd ?? fallback.minimumQualifyingSwapUsd))
+      : Number(saved.minimum_qualifying_swap_usd ?? saved.minimum_qualifying_volume_usd ?? fallback.minimumQualifyingSwapUsd)
+
+  const pointsPerUsd = hasSavedSettings
+    ? Number(saved.points_per_usd ?? fallback.pointsPerUsd)
+    : hasExplicitEnvValue('SAMURAI_POINTS_PER_DOLLAR')
+      ? envNumber('SAMURAI_POINTS_PER_DOLLAR', saved.points_per_usd ?? fallback.pointsPerUsd)
+      : Number(saved.points_per_usd ?? fallback.pointsPerUsd)
+
+  const transactionPointsCapEnabled = hasSavedSettings
+    ? Boolean(saved.transaction_points_cap_enabled ?? fallback.transactionPointsCapEnabled)
+    : hasExplicitEnvValue('SAMURAI_TRANSACTION_POINTS_CAP_ENABLED')
+      ? parseBoolean(runtimeEnv.SAMURAI_TRANSACTION_POINTS_CAP_ENABLED, fallback.transactionPointsCapEnabled)
+      : Boolean(saved.transaction_points_cap_enabled ?? fallback.transactionPointsCapEnabled)
+
+  const transactionPointsCap = hasSavedSettings
+    ? (saved.transaction_points_cap == null ? fallback.transactionPointsCap : Number(saved.transaction_points_cap))
+    : hasExplicitEnvValue('SAMURAI_TRANSACTION_POINTS_CAP')
+      ? parseOptionalNumber(runtimeEnv.SAMURAI_TRANSACTION_POINTS_CAP)
+      : (saved.transaction_points_cap == null ? fallback.transactionPointsCap : Number(saved.transaction_points_cap))
+
+  return {
+    ...fallback,
+    pointsEnabled,
+    pointsPerUsd,
+    minimumQualifyingSwapUsd,
+    transactionPointsCapEnabled,
+    transactionPointsCap,
+    campaigns: Array.isArray(saved.campaigns) ? saved.campaigns : fallback.campaigns,
+    startDate: saved.start_date || fallback.startDate,
+    endDate: saved.end_date || fallback.endDate,
+    ruleVersion: fallback.ruleVersion,
   }
 }
 
@@ -91,6 +152,15 @@ export async function calculateSamuraiPoints(swap, configuration = getPointsConf
     pointsRuleVersion: configuration.ruleVersion,
     exclusionReason: null,
   }
+  console.log('[ETH-POINTS-TRACE] calculateSamuraiPoints input', {
+    signature: swap?.signature || null,
+    verificationStatus: swap?.verification_status || null,
+    chainId: swap?.chain_id ?? null,
+    volumeUsd: swap?.volume_usd ?? null,
+    timestamp: swap?.timestamp || null,
+    minimumQualifyingSwapUsd: configuration.minimumQualifyingSwapUsd,
+    pointsEnabled: configuration.pointsEnabled,
+  })
   if (!swap || swap.verification_status !== 'verified') return { ...base, exclusionReason: 'TRANSACTION_NOT_VERIFIED' }
   if (!configuration.pointsEnabled) return { ...base, exclusionReason: 'POINTS_DISABLED' }
   if (!activePeriod(swap.timestamp, configuration)) return { ...base, exclusionReason: 'OUTSIDE_ACTIVE_PERIOD' }
@@ -120,7 +190,9 @@ export async function calculateSamuraiPoints(swap, configuration = getPointsConf
     const multiplier = getMultiplier(swap, configuration)
     let finalPoints = Number((basePoints * multiplier).toFixed(6))
     if (configuration.transactionPointsCapEnabled && configuration.transactionPointsCap != null) finalPoints = Math.min(finalPoints, configuration.transactionPointsCap)
-    return { ...base, qualified: finalPoints > 0, qualifyingVolumeUsd, basePoints, multiplier, finalPoints, pointsAwarded: finalPoints }
+    const result = { ...base, qualified: finalPoints > 0, qualifyingVolumeUsd, basePoints, multiplier, finalPoints, pointsAwarded: finalPoints }
+    console.log('[ETH-POINTS-TRACE] calculateSamuraiPoints result', result)
+    return result
   }
 
   const rawInput = BigInt(String(swap.input_amount_raw))
@@ -147,7 +219,9 @@ export async function calculateSamuraiPoints(swap, configuration = getPointsConf
   if (configuration.transactionPointsCapEnabled && configuration.transactionPointsCap != null) {
     finalPoints = Math.min(finalPoints, configuration.transactionPointsCap)
   }
-  return { ...base, qualified: finalPoints > 0, qualifyingVolumeUsd, basePoints, multiplier, finalPoints, pointsAwarded: finalPoints }
+  const result = { ...base, qualified: finalPoints > 0, qualifyingVolumeUsd, basePoints, multiplier, finalPoints, pointsAwarded: finalPoints }
+  console.log('[ETH-POINTS-TRACE] calculateSamuraiPoints result', result)
+  return result
 }
 
 export { JUPITER_TIMEOUT_MS, SOL_MINT }

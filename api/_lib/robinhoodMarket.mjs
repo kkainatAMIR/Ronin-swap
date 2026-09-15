@@ -46,6 +46,12 @@ export function pairActivity(pair) {
   return { buys, sells, transactions: buys + sells, volumeUsd, liquidityUsd, priceChange24h }
 }
 
+export function tokenLogoUri(token, pair) {
+  const pairLogo = String(pair?.baseToken?.icon || pair?.info?.imageUrl || pair?.baseToken?.logoURI || '').trim()
+  const tokenLogo = String(token?.logoURI || token?.icon || token?.image || '').trim()
+  return pairLogo || tokenLogo || null
+}
+
 // Batches candidate addresses through DexScreener and returns the best
 // (highest-volume) pair per token address, keyed by lowercase address.
 export async function getRobinhoodMarketPairs(candidates) {

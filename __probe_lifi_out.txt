@@ -1,0 +1,26 @@
+=== T1: Upstream LI.FI /tokens chains=4663 ===
+status=200 ok=true
+tokenCount4663=308
+
+=== T2: Upstream LI.FI /quote WETH->USDG ERC20 1e18 ===
+status=400 ok=false
+body={
+  "message": "/fromToken Invalid address, /fromToken Unknown token symbol, /fromToken must match exactly one schema in oneOf",
+  "code": 1011
+}
+
+=== T3: Upstream LI.FI /quote native(zero)->USDG 1e18 ===
+status=400 ok=false
+body={
+  "message": "/toToken Invalid address, /toToken Unknown token symbol, /toToken must match exactly one schema in oneOf",
+  "code": 1011
+}
+
+=== T4: Local POST /api/lifi/quote WETH->USDG ===
+
+THREW: fetch failed
+TypeError: fetch failed
+    at node:internal/deps/undici/undici:16416:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async localPost (C:\Users\user\Desktop\Assignment\Ronin 2\Ronin-repo\__probe_lifi.cjs:21:15)
+    at async C:\Users\user\Desktop\Assignment\Ronin 2\Ronin-repo\__probe_lifi.cjs:55:16

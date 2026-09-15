@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatCompact, getCurrentRank, navItems, RONIN_MINT, RONIN_TOKEN_URL } from '../data'
+import { isAdminWalletAddress } from '../config/admin'
 import { useWallet } from '../context/WalletContext'
 import Icon from './Icon'
 import BuyRonin from './BuyRonin'
@@ -142,15 +143,29 @@ function WalletButton({ onClick }) {
 }
 
 export function Header({ route }) {
-  const { openWalletModal } = useWallet()
+  const { wallet, openWalletModal } = useWallet()
   const [open, setOpen] = useState(false)
 
   useEffect(() => setOpen(false), [route])
 
+  const isAdmin = Boolean(wallet && !wallet.isDemo && isAdminWalletAddress(wallet.address))
+  const navItemsWithAdmin = isAdmin ? [...navItems, { id: 'admin', label: 'Admin' }] : navItems
+
   const navigate = (event, id) => {
     event.preventDefault()
-    window.location.hash = id
     setOpen(false)
+
+    if (id === 'admin') {
+      window.location.href = '/admin'
+      return
+    }
+
+    if (route === 'admin') {
+      window.location.href = id === 'home' ? '/' : `/#${id}`
+      return
+    }
+
+    window.location.hash = id
   }
 
   return (
@@ -158,7 +173,15 @@ export function Header({ route }) {
       <div className="nav-shell">
         <a href="#home" onClick={(event) => navigate(event, 'home')} aria-label="Ronin home"><RoninMark /></a>
         <nav className={`nav-links ${open ? 'is-open' : ''}`} aria-label="Primary navigation">
-          {navItems.map((item) => <a key={item.id} className={route === item.id ? 'active' : ''} href={`#${item.id}`} onClick={(event) => navigate(event, item.id)}>{item.label}</a>)}
+          {navItemsWithAdmin.map((item) => {
+            const href = item.id === 'admin'
+              ? '/admin'
+              : route === 'admin'
+                ? (item.id === 'home' ? '/' : `/#${item.id}`)
+                : `#${item.id}`
+
+            return <a key={item.id} className={route === item.id ? 'active' : ''} href={href} onClick={(event) => navigate(event, item.id)}>{item.label}</a>
+          })}
           <div className="mobile-wallet"><WalletButton onClick={openWalletModal} /></div>
         </nav>
         <div className="nav-actions"><WalletButton onClick={openWalletModal} /><button className="menu-toggle" onClick={() => setOpen((value) => !value)} aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open}><Icon name={open ? 'close' : 'menu'} size={20} /></button></div>

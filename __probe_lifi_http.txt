@@ -1,0 +1,14 @@
+=== T0: GET /api/health ===
+status=200 {"ok":true,"solanaRpcConfigured":true,"jupiterBaseUrl":"https://api.jup.ag","hasApiKey":true,"referralAccount":"VF1nw8cRfFKJeqW7kCsthWy1NirCF4B31YocUKZrbB7","referralFeeBps":50,"solIncineratorBaseUrl"
+
+=== V3: CORRECT WETH->USDG (pair may have no real route): expect 404 NO_ROUTE (NOT 502 "service unavailable") ===
+status=400 ok=false
+FAIL: code=LIFI_INVALID_REQUEST error=LI.FI rejected this quote: Integrator "RoninSamurai" is not configured for collecting fees. Please sign up on https://portal.li.fi/ and configure your fee wallet.
+
+=== V4: CORRECT native(zero)->WETH (default UI after user picks WETH): expect 200 SUCCESS with quoteProof ===
+status=400 ok=false
+FAIL: code=LIFI_INVALID_REQUEST error=LI.FI rejected this quote: Integrator "RoninSamurai" is not configured for collecting fees. Please sign up on https://portal.li.fi/ and configure your fee wallet.
+
+=== V5: OLD WRONG addresses (BEFORE fix): expect 400 with actual LI.FI "Invalid address" message (NOT 502 "service unavailable") ===
+status=400 ok=false
+code=INVALID_LIFI_QUOTE error=A valid chain-aware LI.FI quote request is required.

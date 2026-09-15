@@ -6,6 +6,7 @@ export const RONIN_TOKEN_URL = `https://solscan.io/token/${RONIN_MINT}#holders`
 
 export const navItems = [
   { id: 'home', label: 'Home' },
+  { id: 'profile', label: 'Profile' },
   { id: 'yield', label: 'RONIN LOCK' },
   { id: 'swap', label: 'Swap' },
   { id: 'burn', label: 'Burn' },

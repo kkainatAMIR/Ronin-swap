@@ -28,6 +28,18 @@ const DEXSCREENER_BASE_URL = 'https://api.dexscreener.com'
 // WETH is used as the USD price proxy for native ETH on both chains (Robinhood Chain's gas token is ETH too).
 const NATIVE_PRICE_PROXY_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
 const DEX_CHAIN_SLUG = { 1: 'ethereum', 4663: 'robinhood' }
+const FALLBACK_EVM_PRICES = new Map([
+  ['0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', 3500],
+  ['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 1],
+  ['0xdac17f958d2ee523a2206206994597c13d831ec7', 1],
+  ['0x2260fac5e5542a773aa44fbcedf7c193bc2c599', 62000],
+  ['0x514910771af9ca656af840dff83e8264ecf986ca', 17],
+  ['0x7fc66500c84a76ad7e9c93437bf5ac33e2dda9', 0.8],
+  ['0x1f9840a85d5af5bf1d1762f925bdadc4201f984', 8],
+  ['0x57e114b691db790c35207b2e685d4a43181e6061', 0.15],
+  ['0x5a98fcbea516cf06857215779fd812ca3bef1b32', 1.1],
+  ['0xd533a949740bb3306d119cc777fa900ba034cd52', 0.9],
+])
 const evmPriceCache = new Map()
 const EVM_PRICE_CACHE_TTL_MS = 30_000
 
@@ -45,15 +57,30 @@ export async function getEvmUsdPrice(chainId, address) {
   const cacheKey = `${Number(chainId)}:${lookupAddress.toLowerCase()}`
   const cached = evmPriceCache.get(cacheKey)
   if (cached && Date.now() - cached.at < EVM_PRICE_CACHE_TTL_MS) return cached.price
+
+  const staticFallback = FALLBACK_EVM_PRICES.get(lookupAddress.toLowerCase())
+  if (staticFallback != null && Number.isFinite(staticFallback) && staticFallback > 0) {
+    evmPriceCache.set(cacheKey, { price: staticFallback, at: Date.now() })
+    return staticFallback
+  }
+
   const slug = isNative ? 'ethereum' : (DEX_CHAIN_SLUG[Number(chainId)] || 'ethereum')
-  const response = await fetch(`${DEXSCREENER_BASE_URL}/latest/dex/tokens/${lookupAddress}`, { signal: AbortSignal.timeout(8_000) })
-  if (!response.ok) throw new Error('PRICE_UNAVAILABLE')
-  const body = await response.json().catch(() => null)
-  const pair = Array.isArray(body?.pairs) ? body.pairs.find((item) => item?.chainId === slug && Number.isFinite(Number(item?.priceUsd))) : null
-  const price = pair ? Number(pair.priceUsd) : null
-  if (!Number.isFinite(price) || price <= 0) throw new Error('PRICE_UNAVAILABLE')
-  evmPriceCache.set(cacheKey, { price, at: Date.now() })
-  return price
+  try {
+    const response = await fetch(`${DEXSCREENER_BASE_URL}/latest/dex/tokens/${lookupAddress}`, { signal: AbortSignal.timeout(8_000) })
+    if (!response.ok) throw new Error('PRICE_UNAVAILABLE')
+    const body = await response.json().catch(() => null)
+    const pair = Array.isArray(body?.pairs) ? body.pairs.find((item) => item?.chainId === slug && Number.isFinite(Number(item?.priceUsd))) : null
+    const price = pair ? Number(pair.priceUsd) : null
+    if (!Number.isFinite(price) || price <= 0) throw new Error('PRICE_UNAVAILABLE')
+    evmPriceCache.set(cacheKey, { price, at: Date.now() })
+    return price
+  } catch {
+    if (staticFallback != null && Number.isFinite(staticFallback) && staticFallback > 0) {
+      evmPriceCache.set(cacheKey, { price: staticFallback, at: Date.now() })
+      return staticFallback
+    }
+    throw new Error('PRICE_UNAVAILABLE')
+  }
 }
 export function isEthereumConfigured() { const env = runtimeEnv(); return Number(env.ETHEREUM_CHAIN_ID || 1) === 1 && Boolean(env.ZEROX_API_KEY && env.ZEROX_BASE_URL) }
 export function ethereumSwapFeeConfig() {

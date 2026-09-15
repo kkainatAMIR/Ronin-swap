@@ -1,6 +1,6 @@
 import { apiError, json, rateLimit } from '../_lib/roninBackend.mjs'
 import { getRobinhoodTokenCatalog } from '../_lib/lifi.mjs'
-import { filterCatalogTokens, getRobinhoodMarketPairs, isEligibleForRanking, pairActivity, rankingScore, safetyFor } from '../_lib/robinhoodMarket.mjs'
+import { filterCatalogTokens, getRobinhoodMarketPairs, isEligibleForRanking, pairActivity, rankingScore, safetyFor, tokenLogoUri } from '../_lib/robinhoodMarket.mjs'
 
 const CHAIN_ID = 4663
 const MAX_RESULTS = 10
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
         symbol: token.symbol || 'UNKNOWN',
         name: token.name || token.symbol || 'Unknown token',
         decimals: Number(token.decimals),
-        logoURI: token.logoURI || null,
+        logoURI: tokenLogoUri(token, pair),
         verification: safety.checks.verification,
         warning: safety.warnings.join(' '),
         warnings: safety.warnings,

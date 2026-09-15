@@ -165,7 +165,7 @@ Derived from `spec.md` Acceptance Criteria.
 ---
 
 ## Task 10: Document 3-chain swap UI workflow parity (all 3 chains)
-**Status:** pending
+**Status:** completed
 **Priority:** high
 **Maps to AC:** AC-11 (rubric 0-2, threshold 2)
 **Depends on:** None — can be done in parallel with Tasks 3-5.
@@ -173,11 +173,15 @@ Derived from `spec.md` Acceptance Criteria.
 ### Task-local Test Requirements
 | ID | Type | Statement |
 |---|---|---|
-| TR-10.1 | **rule** | For Solana: step-by-step flow fully enumerated with source file references and line ranges for each step's implementation. |
-| TR-10.2 | **rule** | For Ethereum: step-by-step flow fully enumerated with source file references and line ranges for each step's implementation. |
-| TR-10.3 | **rule** | For Robinhood: step-by-step flow fully enumerated with source file references and line ranges for each step's implementation. |
-| TR-10.4 | **rule** | A single "UI Flow Parity Summary" table compares: Token Selector, Quote Request, Quote Display, Wallet Connect, Approval Flow, Signing UI, Confirmation Polling, Completion API, Points Banner, Success Screen, Leaderboard Reflection — across all 3 chains. |
+| TR-10.1 | **rule** ✅ PASS | For Solana: step-by-step flow fully enumerated with source file references and line ranges for each step's implementation. (12 steps documented in `three-chain-swap-ui-workflow.md` lines 21–44: Connect Wallet → Token Selection → Amount Entry → Quote Request → Quote Display → Approval N/A → Signing → Confirmation Polling → Verify → Persist → Points → Success Screen → Swap History → Leaderboard) |
+| TR-10.2 | **rule** ✅ PASS | For Ethereum: step-by-step flow fully enumerated with source file references and line ranges for each step's implementation. (12 steps documented in lines 48–68: Connect Wallet + Ensure Chain → Token Selection → Amount Entry → Quote Request (0x proxy + quoteProof HMAC) → Quote Display → Approval ERC-20 only → Gas Check + Signing → Confirmation Polling → Combined Complete API → Success Screen → Swap History → Leaderboard) |
+| TR-10.3 | **rule** ✅ PASS | For Robinhood: step-by-step flow fully enumerated with source file references and line ranges for each step's implementation. (12 steps documented in lines 72–92: Connect Wallet + Ensure Chain (add if 4902) → Token Selection (Trending tab) → Amount Entry → Quote Request (LI.FI advanced/routes) → Quote Display (+ Quote ID row) → Approval (getLifiApprovalRequest deep-scan) → Signing → Confirmation Polling (LI.FI status + on-chain receipt fallback) → Combined Complete API (whitelist check) → Success Screen → Swap History → Leaderboard) |
+| TR-10.4 | **rule** ✅ PASS | A single "UI Flow Parity Summary" table compares: Token Selector, Quote Request, Quote Display, Wallet Connect, Approval Flow, Signing UI, Confirmation Polling, Completion API, Points Banner, Success Screen, Leaderboard Reflection — across all 3 chains. (14-row parity table at lines 96–113 includes all 11 required items plus 3 additional debug columns; required items explicitly present: Token Selector L100, Quote Request L101, Quote Display L102, Wallet Connect L103+L104, Approval Flow L105, Signing UI L106, Confirmation Polling L107, Completion API L108, Points Banner L110, Success Screen L109+L111, Leaderboard Reflection L112+L113) |
 
 ### Completion Evidence
-- Structured per-chain step list with code references.
-- Parity comparison table (markdown).
+- **Structured per-chain step list with code references:** `three-chain-swap-ui-workflow.md` contains:
+  - **Solana (Jupiter):** Lines 21–44 — 12-step table with `Code path` column containing absolute clickable `file:///` links and line ranges for each step (WalletContext.jsx#L139-L183, TokenSelector#L657-L730, jupiterService.js#L47-L81, api/swap/verify.mjs, api/swap/record.mjs#L19-L29, api/swap/points.mjs#L18-L71, supabaseBackend.mjs references).
+  - **Ethereum (0x):** Lines 48–68 — 12-step table with links for each step (ethereumService.js#L13-L20, EthereumTokenSelector#L137-L144, ethereumService.js#L92-L98, EthereumSwapPanel#L196-L208, execute#L245-L258, execute#L260-L266, execute#L272-L278 → api/evm/complete.mjs#L21-L51 with 11 sub-steps a–k documented inline).
+  - **Robinhood (LI.FI):** Lines 72–92 — 12-step table with links (ethereumService.js#L113-L141, RobinhoodTokenSelector#L357-L408, loadQuote#L462-L479, execute#L516-L533, pollStatus#L492-L500, execute#L540-L546 fallback, api/lifi/complete.mjs#L21-L49 with 12 sub-steps a–l).
+- **Parity comparison table (markdown):** Lines 96–113 of same file — 14-row single table with Stage column and 3 chain columns. All 11 TR-10.4 required stages explicitly covered.
+- **Bonus:** Additional Completion Call Parity table (lines 117–129) comparing `/api/evm/complete` vs `/api/lifi/complete` across 7 implementation dimensions.

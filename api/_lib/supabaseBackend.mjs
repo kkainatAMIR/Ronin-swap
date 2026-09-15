@@ -1,4 +1,6 @@
 import dotenv from 'dotenv'
+import { readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 dotenv.config({ path: '.env.local', override: true })
 
@@ -25,7 +27,7 @@ async function supabaseRequest(path, options = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...options,
     headers: { ...supabaseHeaders(options.prefer), ...(options.headers || {}) },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(30_000),
   })
   const text = await response.text()
   let body = {}
@@ -85,8 +87,10 @@ export async function persistEthereumSwap({ wallet, transactionHash, sellToken, 
   if (!walletRow?.id) throw new Error('WALLET_PERSISTENCE_FAILED')
   const native = 'native'
   const slotNumber = typeof blockNumber === 'number' ? blockNumber : (typeof blockNumber === 'string' && blockNumber.startsWith('0x') ? Number.parseInt(blockNumber, 16) : Number(blockNumber) || 0)
-  const rows = await supabaseRequest('swap_transactions?on_conflict=chain_id,transaction_hash&select=*', { method: 'POST', body: JSON.stringify([{ signature: transactionHash, transaction_hash: transactionHash, chain_id: 1, provider: '0x', wallet_id: walletRow.id, wallet_address: wallet, input_mint: sellToken === native ? native : sellToken, output_mint: buyToken === native ? native : buyToken, sell_token_address: sellToken === native ? null : sellToken, buy_token_address: buyToken === native ? null : buyToken, sell_token_id: `1:${sellToken === native ? 'native' : sellToken.toLowerCase()}`, buy_token_id: `1:${buyToken === native ? 'native' : buyToken.toLowerCase()}`, input_amount_raw: String(sellAmount), output_amount_raw: String(buyAmount), sell_amount: String(sellAmount), buy_amount: String(buyAmount), input_decimals: sellDecimals, output_decimals: buyDecimals, volume_usd: volumeUsd == null ? null : Number(volumeUsd), timestamp, slot: slotNumber, confirmation_status: 'finalized', verification_status: 'verified', status: 'CONFIRMED', updated_at: new Date().toISOString() }]), prefer: 'resolution=merge-duplicates,return=representation' })
-  return { wallet: walletRow, swap: Array.isArray(rows) ? rows[0] : rows }
+  const rows = await supabaseRequest('swap_transactions?on_conflict=signature&select=*', { method: 'POST', body: JSON.stringify([{ signature: transactionHash, transaction_hash: transactionHash, chain_id: 1, provider: '0x', wallet_id: walletRow.id, wallet_address: wallet, input_mint: sellToken === native ? native : sellToken, output_mint: buyToken === native ? native : buyToken, sell_token_address: sellToken === native ? null : sellToken, buy_token_address: buyToken === native ? null : buyToken, sell_token_id: `1:${sellToken === native ? 'native' : sellToken.toLowerCase()}`, buy_token_id: `1:${buyToken === native ? 'native' : buyToken.toLowerCase()}`, input_amount_raw: String(sellAmount), output_amount_raw: String(buyAmount), sell_amount: String(sellAmount), buy_amount: String(buyAmount), input_decimals: sellDecimals, output_decimals: buyDecimals, volume_usd: volumeUsd == null ? null : Number(volumeUsd), timestamp, slot: slotNumber, confirmation_status: 'finalized', verification_status: 'verified', status: 'CONFIRMED', updated_at: new Date().toISOString() }]), prefer: 'resolution=merge-duplicates,return=representation' })
+  const persisted = Array.isArray(rows) ? rows[0] : rows
+  if (!persisted?.signature) throw new Error('ETHEREUM_SWAP_INSERT_FAILED')
+  return { wallet: walletRow, swap: persisted }
 }
 
 export async function getEthereumSwapByHash(transactionHash) {
@@ -94,12 +98,14 @@ export async function getEthereumSwapByHash(transactionHash) {
   return rows?.[0] || null
 }
 
-export async function persistLifiSwap({ wallet, transactionHash, fromChain, toChain, fromToken, toToken, fromAmount, toAmount, volumeUsd, timestamp, blockNumber, quoteId }) {
+export async function persistLifiSwap({ wallet, transactionHash, fromChain, toChain, fromToken, toToken, fromAmount, toAmount, volumeUsd, timestamp, blockNumber, quoteId, fromDecimals, toDecimals }) {
   const walletRows = await supabaseRequest('wallets?on_conflict=wallet_address&select=id,wallet_address', { method: 'POST', body: JSON.stringify([{ wallet_address: wallet, wallet_chain_id: Number(fromChain), updated_at: new Date().toISOString() }]), prefer: 'resolution=merge-duplicates,return=representation' })
   const walletRow = Array.isArray(walletRows) ? walletRows[0] : walletRows
   if (!walletRow?.id) throw new Error('WALLET_PERSISTENCE_FAILED')
   const slotNumber = typeof blockNumber === 'number' ? blockNumber : (typeof blockNumber === 'string' && blockNumber.startsWith('0x') ? Number.parseInt(blockNumber, 16) : Number(blockNumber) || 0)
-  const rows = await supabaseRequest('swap_transactions?on_conflict=chain_id,transaction_hash&select=*', { method: 'POST', body: JSON.stringify([{ signature: transactionHash, transaction_hash: transactionHash, chain_id: Number(fromChain), provider: 'lifi', wallet_id: walletRow.id, wallet_address: wallet, input_mint: fromToken, output_mint: toToken, sell_token_address: fromToken, buy_token_address: toToken, sell_token_id: `${fromChain}:${fromToken.toLowerCase()}`, buy_token_id: `${toChain}:${toToken.toLowerCase()}`, input_amount_raw: String(fromAmount), output_amount_raw: String(toAmount), sell_amount: String(fromAmount), buy_amount: String(toAmount), volume_usd: volumeUsd == null ? null : Number(volumeUsd), timestamp, slot: slotNumber, confirmation_status: 'finalized', verification_status: 'verified', status: 'CONFIRMED', quote_id: quoteId || null, updated_at: new Date().toISOString() }]), prefer: 'resolution=merge-duplicates,return=representation' })
+  const normalizedFromDecimals = Number.isInteger(Number(fromDecimals)) && Number(fromDecimals) >= 0 ? Number(fromDecimals) : 18
+  const normalizedToDecimals = Number.isInteger(Number(toDecimals)) && Number(toDecimals) >= 0 ? Number(toDecimals) : 18
+  const rows = await supabaseRequest('swap_transactions?on_conflict=signature&select=*', { method: 'POST', body: JSON.stringify([{ signature: transactionHash, transaction_hash: transactionHash, chain_id: Number(fromChain), provider: 'lifi', wallet_id: walletRow.id, wallet_address: wallet, input_mint: fromToken, output_mint: toToken, sell_token_address: fromToken, buy_token_address: toToken, sell_token_id: `${fromChain}:${fromToken.toLowerCase()}`, buy_token_id: `${toChain}:${toToken.toLowerCase()}`, input_amount_raw: String(fromAmount), output_amount_raw: String(toAmount), sell_amount: String(fromAmount), buy_amount: String(toAmount), input_decimals: normalizedFromDecimals, output_decimals: normalizedToDecimals, volume_usd: volumeUsd == null ? null : Number(volumeUsd), timestamp, slot: slotNumber, confirmation_status: 'finalized', verification_status: 'verified', status: 'CONFIRMED', updated_at: new Date().toISOString(), ...(quoteId ? { quote_id: quoteId } : {}) }]), prefer: 'resolution=merge-duplicates,return=representation' })
   return { wallet: walletRow, swap: Array.isArray(rows) ? rows[0] : rows }
 }
 
@@ -122,37 +128,94 @@ export async function getVerifiedSwapHistory(walletAddress, chain = 'all') {
   })
   if (!Array.isArray(swaps) || !swaps.length) return []
   const signatures = swaps.map((swap) => swap.signature).filter(Boolean)
-  const points = await getAdminRows(`samurai_points?signature=in.(${signatures.join(',')})&select=signature,points_awarded,final_points,eligibility_status`)
+  const points = await getAdminRows(`samurai_points?signature=in.(${signatures.join(',')})&select=signature,points_awarded,final_points,qualifying_volume_usd,eligibility_status`)
   const pointsBySignature = new Map((points || []).map((point) => [point.signature, point]))
-  return swaps.map((swap) => ({ ...swap, points_awarded: Number(pointsBySignature.get(swap.signature)?.points_awarded || 0), eligibility_status: pointsBySignature.get(swap.signature)?.eligibility_status || 'not_qualified' }))
+  return swaps.map((swap) => ({
+    ...swap,
+    points_awarded: Number(pointsBySignature.get(swap.signature)?.points_awarded || 0),
+    qualifying_volume_usd: Number(pointsBySignature.get(swap.signature)?.qualifying_volume_usd || 0),
+    eligibility_status: pointsBySignature.get(swap.signature)?.eligibility_status || 'not_qualified',
+  }))
 }
 
 export async function getVerifiedSwapBySignature(signature) {
   const encodedSignature = encodeURIComponent(`eq.${signature}`)
-  const rows = await supabaseRequest(`swap_transactions?signature=${encodedSignature}&verification_status=eq.verified&select=signature,wallet_id,wallet_address,input_mint,output_mint,input_amount_raw,output_amount_raw,input_decimals,output_decimals,timestamp,slot,confirmation_status,verification_status`, {
+  const rows = await supabaseRequest(`swap_transactions?signature=${encodedSignature}&verification_status=eq.verified&select=signature,chain_id,wallet_id,wallet_address,input_mint,output_mint,input_amount_raw,output_amount_raw,input_decimals,output_decimals,volume_usd,timestamp,slot,confirmation_status,verification_status`, {
     method: 'GET',
     prefer: 'return=minimal',
   })
   return Array.isArray(rows) ? rows[0] || null : null
 }
 
-export async function awardSamuraiPoints(points) {
-  const rows = await supabaseRequest('rpc/award_samurai_points', {
-    method: 'POST',
-    body: JSON.stringify({
-      p_signature: points.signature,
-      p_qualifying_volume_usd: points.qualified ? points.qualifyingVolumeUsd : 0,
-      p_base_points: points.qualified ? points.basePoints : 0,
-      p_multiplier: points.qualified ? points.multiplier : 1,
-      p_final_points: points.qualified ? points.finalPoints : 0,
-      p_points_rule_version: points.pointsRuleVersion,
-      p_season_id: points.seasonId || null,
-      p_eligibility_status: points.qualified ? 'qualified' : 'not_qualified',
-      p_exclusion_reason: points.exclusionReason || null,
-    }),
-    prefer: 'return=representation',
+export async function reconcileSamuraiPointChainId(signature) {
+  if (!signature) return null
+  const swapRows = await supabaseRequest(`swap_transactions?signature=eq.${encodeURIComponent(signature)}&select=signature,chain_id`, {
+    method: 'GET',
+    prefer: 'return=minimal',
   })
-  return Array.isArray(rows) ? rows[0] || null : rows
+  const swap = Array.isArray(swapRows) ? swapRows[0] : swapRows
+  if (!swap || swap.chain_id == null) return null
+  const pointRows = await supabaseRequest(`samurai_points?signature=eq.${encodeURIComponent(signature)}&select=id,chain_id`, {
+    method: 'GET',
+    prefer: 'return=minimal',
+  })
+  const point = Array.isArray(pointRows) ? pointRows[0] : pointRows
+  if (!point || Number(point.chain_id) === Number(swap.chain_id)) return point
+  await supabaseRequest(`samurai_points?signature=eq.${encodeURIComponent(signature)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ chain_id: Number(swap.chain_id) }),
+    prefer: 'return=minimal',
+  })
+  return { ...point, chain_id: Number(swap.chain_id) }
+}
+
+export async function awardSamuraiPoints(points) {
+  const payload = {
+    p_signature: points.signature,
+    p_qualifying_volume_usd: points.qualified ? points.qualifyingVolumeUsd : 0,
+    p_base_points: points.qualified ? points.basePoints : 0,
+    p_multiplier: points.qualified ? points.multiplier : 1,
+    p_final_points: points.qualified ? points.finalPoints : 0,
+    p_points_rule_version: points.pointsRuleVersion,
+    p_season_id: points.seasonId || null,
+    p_eligibility_status: points.qualified ? 'qualified' : 'not_qualified',
+    p_exclusion_reason: points.exclusionReason || null,
+  }
+  console.log('[ETH-POINTS-TRACE] award payload', {
+    signature: payload.p_signature,
+    eligible: payload.p_eligibility_status,
+    qualifyingVolumeUsd: payload.p_qualifying_volume_usd,
+    finalPoints: payload.p_final_points,
+    seasonId: payload.p_season_id,
+    ruleVersion: payload.p_points_rule_version,
+  })
+  let rows
+  try {
+    rows = await supabaseRequest('rpc/award_samurai_points', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      prefer: 'return=representation',
+    })
+  } catch (error) {
+    console.error('[ETH-POINTS-TRACE] RPC award_samurai_points error', {
+      message: error?.message || String(error),
+      status: error?.status || null,
+      body: error?.body || null,
+      signature: payload.p_signature,
+    })
+    throw error
+  }
+  const result = Array.isArray(rows) ? rows[0] || null : rows
+  console.log('[ETH-POINTS-TRACE] award rpc result', result)
+  if (result?.signature) {
+    await reconcileSamuraiPointChainId(result.signature)
+    await supabaseRequest('rpc/recalculate_samurai_totals', {
+      method: 'POST',
+      body: JSON.stringify({ p_wallet: result.wallet_address || null }),
+      prefer: 'return=representation',
+    })
+  }
+  return result
 }
 
 export async function getLeaderboard({ period, seasonId, page, limit }) {
@@ -194,7 +257,7 @@ export async function getAdminOverview() {
 }
 
 export async function getAdminNotes({ wallet, signature }) {
-  const filter = wallet ? `wallet_address=eq.${encodeURIComponent(wallet)}` : `transaction_signature=eq.${encodeURIComponent(signature)}`
+  const filter = wallet ? walletAddressFilter(wallet) : `transaction_signature=eq.${encodeURIComponent(signature)}`
   return getAdminRows(`samurai_admin_notes?${filter}&select=*&order=created_at.desc`)
 }
 
@@ -218,7 +281,14 @@ export async function getSeason(id) {
 export async function getSeasonForTimestamp(timestamp) {
   const encoded = encodeURIComponent(timestamp)
   const rows = await supabaseRequest(`samurai_seasons?start_at=lte.${encoded}&end_at=gt.${encoded}&status=eq.ACTIVE&select=id,name,points_enabled,minimum_qualifying_volume,base_points_per_usd,multiplier_rules&order=start_at.desc&limit=1`, { method: 'GET', prefer: 'return=minimal' })
-  return rows?.[0] || null
+  if (Array.isArray(rows) && rows[0]) return rows[0]
+  const configuredSeasonId = String(process.env.SAMURAI_CURRENT_SEASON_ID || '').trim()
+  if (!configuredSeasonId) return null
+  const configuredRows = await supabaseRequest(`samurai_seasons?id=eq.${encodeURIComponent(configuredSeasonId)}&select=*`, {
+    method: 'GET',
+    prefer: 'return=minimal',
+  })
+  return Array.isArray(configuredRows) ? configuredRows[0] || null : configuredRows || null
 }
 
 export async function createSeason(season) {
@@ -262,8 +332,14 @@ export async function getAdminFlags(page, limit) {
   return getAdminRows(`samurai_abuse_flags?select=id,wallet_address,signature,reason,severity,status,details,created_at,resolved_at,resolved_by&order=created_at.desc&offset=${offset}&limit=${limit}`)
 }
 
+function walletAddressFilter(wallet) {
+  const trimmed = String(wallet || '').trim()
+  if (!trimmed) return ''
+  return `wallet_address=ilike.${encodeURIComponent(`*${trimmed}*`)}`
+}
+
 export async function getAdminTransactions({ signature, wallet, page, limit }) {
-  const filters = [signature ? `signature=eq.${encodeURIComponent(signature)}` : '', wallet ? `wallet_address=eq.${encodeURIComponent(wallet)}` : ''].filter(Boolean).join('&')
+  const filters = [signature ? `signature=eq.${encodeURIComponent(signature)}` : '', wallet ? walletAddressFilter(wallet) : ''].filter(Boolean).join('&')
   return getAdminRows(`swap_transactions?select=signature,wallet_address,input_mint,output_mint,timestamp,slot,verification_status,flag_status,flag_reason,flag_severity,excluded_at,excluded_by${filters ? `&${filters}` : ''}&order=timestamp.desc&offset=${(page - 1) * limit}&limit=${limit}`)
 }
 
@@ -277,9 +353,10 @@ export async function getAdminLeaderboard({ period, seasonId, page, limit }) {
 }
 
 export async function getAdminWallet(wallet) {
-  const rows = await getAdminRows(`wallets?wallet_address=eq.${encodeURIComponent(wallet)}&select=wallet_address,season_points,lifetime_points,season_qualifying_volume_usd,lifetime_qualifying_volume_usd,qualifying_swap_count,flag_status,excluded_at,excluded_by`)
-  const flags = await getAdminRows(`samurai_abuse_flags?wallet_address=eq.${encodeURIComponent(wallet)}&select=id,signature,reason,severity,status,created_at&order=created_at.desc`)
-  const transactions = await getAdminRows(`samurai_points?wallet_address=eq.${encodeURIComponent(wallet)}&select=signature,qualifying_volume_usd,base_points,multiplier,final_points,season_id,eligibility_status,flag_status,created_at&order=created_at.desc&limit=100`)
+  const filter = walletAddressFilter(wallet)
+  const rows = await getAdminRows(`wallets?${filter}&select=wallet_address,season_points,lifetime_points,season_qualifying_volume_usd,lifetime_qualifying_volume_usd,qualifying_swap_count,flag_status,excluded_at,excluded_by`)
+  const flags = await getAdminRows(`samurai_abuse_flags?${filter}&select=id,signature,reason,severity,status,created_at&order=created_at.desc`)
+  const transactions = await getAdminRows(`samurai_points?${filter}&select=signature,qualifying_volume_usd,base_points,multiplier,final_points,season_id,eligibility_status,flag_status,created_at&order=created_at.desc&limit=100`)
   const notes = await getAdminNotes({ wallet })
   return { wallet: rows?.[0] || null, flags: flags || [], transactions: transactions || [], notes: notes || [] }
 }

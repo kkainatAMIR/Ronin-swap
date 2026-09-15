@@ -91,6 +91,31 @@ function shortSignature(signature = '', length = 5) {
   return `${signature.slice(0, length)}...${signature.slice(-length)}`
 }
 
+function getCompletionPointsRecord(payload) {
+  const candidate = payload?.points ?? payload?.pointsRecord ?? payload?.samuraiPoints ?? null
+  if (!candidate || typeof candidate !== 'object') return null
+  return candidate
+}
+
+function normalizeCompletionPayload(payload) {
+  if (!payload || typeof payload !== 'object') return payload
+  const pointsRecord = payload?.points ?? payload?.pointsRecord ?? payload?.samuraiPoints ?? null
+  return {
+    ...payload,
+    points: pointsRecord,
+  }
+}
+
+function hasUsablePointsRecord(payload) {
+  const points = getCompletionPointsRecord(payload)
+  if (!points) return false
+  const keys = Object.keys(points)
+  if (!keys.length) return false
+  const hasAnyPointsValue = [points.points_awarded, points.pointsAwarded, points.final_points, points.finalPoints, points.qualifying_volume_usd, points.qualifyingVolumeUsd].some((value) => value != null && value !== '')
+  const hasQualifiedFlag = points.qualified === true || points.eligibility_status === 'qualified'
+  return hasAnyPointsValue || hasQualifiedFlag
+}
+
 function solscanTxUrl(signature) {
   return `https://solscan.io/tx/${signature}`
 }
@@ -271,8 +296,23 @@ function EthereumSwapPanel() {
       setMessage('Transaction confirmed on Ethereum. Recording swap and Samurai Points...')
       try {
         const completed = await fetch('/api/evm/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chainId: 1, transactionHash: hash, wallet: account, sellToken: freshQuote.sellToken, buyToken: freshQuote.buyToken, sellAmount: freshQuote.sellAmount, buyAmount: freshQuote.buyAmount, quoteProof: freshQuote.quoteProof }) }).then((response) => response.json().then((body) => { if (!response.ok) throw new Error(body.error || 'Confirmed swap could not be recorded.'); return body }))
-        setCompletion(completed)
-        setMessage(`Swap confirmed. Samurai Points: ${Number(completed.points?.points_awarded || completed.points?.final_points || 0).toLocaleString()}`)
+        const pointsRecord = completed?.points ?? completed?.pointsRecord ?? completed?.samuraiPoints ?? null
+        const normalizedCompletion = {
+          ...completed,
+          points: pointsRecord,
+        }
+
+        const normalizedPoints = getCompletionPointsRecord(normalizedCompletion) || {}
+        const normalizedPointsAwarded = Number(
+          normalizedPoints.points_awarded ??
+          normalizedPoints.pointsAwarded ??
+          normalizedPoints.final_points ??
+          normalizedPoints.finalPoints ??
+          0
+        )
+
+        setCompletion(normalizedCompletion)
+        setMessage(`Swap confirmed. Samurai Points: ${normalizedPointsAwarded.toLocaleString()}`)
       } catch (completionError) {
         setMessage(`Transaction confirmed on Ethereum, but recording is pending: ${completionError?.message || 'backend unavailable.'}`)
       }
@@ -318,7 +358,49 @@ function EthereumSwapPanel() {
       </div>
       <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'signing' ? 'CONFIRM IN METAMASK...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Ethereum Mainnet</strong></div><div className="swap-quote-row"><span>Route</span><strong>0x</strong></div><div className="swap-quote-row"><span>Gas estimate</span><strong>{quote.transaction?.gas ? `${quote.transaction.gas} gas` : '—'}</strong></div><div className="swap-quote-row"><span>Treasury fee</span><strong>{quote.swapFeeBps != null ? `${Number(quote.swapFeeBps) / 100}%` : '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.buyAmount ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</strong></div></div>}
-      {status === 'confirmed' && <div className="swap-result-box swap-result-success"><h4>⚔️ SWAP COMPLETE</h4><p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p><p><strong>You Received:</strong> {quote ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</p><p><strong>Status:</strong> Confirmed</p><div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}><p style={{ margin: '0 0 4px', color: completion?.points?.qualified || completion?.points?.eligibility_status === 'qualified' ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{completion?.points?.qualified || completion?.points?.eligibility_status === 'qualified' ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || completion.points.final_points || 0).toLocaleString()} Samurai Points` : completion?.points ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong></p>{(completion?.points?.qualified || completion?.points?.eligibility_status === 'qualified') && <><p style={{ margin: '4px 0', color: 'var(--ink)' }}>Season Points: {Number(completion.points.walletSeasonPoints || completion.points.season_points || 0).toLocaleString()}</p><p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p></>}{completion?.points && !(completion.points.qualified || completion.points.eligibility_status === 'qualified') && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(completion.points.reason || completion.points.exclusionReason || completion.points.exclusion_reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}</div>{txHash && <><p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {`${txHash.slice(0, 5)}...${txHash.slice(-5)}`}</p><button type="button" className="swap-token-result" onClick={() => navigator.clipboard?.writeText?.(txHash)} style={{ marginTop: '6px' }}>Copy Transaction Hash</button><a href={etherscanTxUrl(txHash)} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '8px', color: '#7de3ff' }}>VIEW ON ETHERSCAN</a></>}{completion && <p style={{ margin: '10px 0 0', color: '#81f39a' }}>Transaction verified and recorded</p>}{!completion && <p style={{ margin: '10px 0 0', color: 'var(--red-dark)' }}>Transaction confirmed; recording is pending</p>}</div>}
+      {status === 'confirmed' && (() => {
+        const points = completion?.points ?? completion?.pointsRecord ?? completion?.samuraiPoints ?? null
+        const pointsAwarded = Number(
+          points?.points_awarded ??
+          points?.pointsAwarded ??
+          points?.final_points ??
+          points?.finalPoints ??
+          0
+        )
+        const qualified = points?.eligibility_status === 'qualified' || points?.qualified === true || pointsAwarded > 0
+        const hasPointsRecord = hasUsablePointsRecord(completion)
+        const seasonPoints = Number(points?.season_points ?? points?.walletSeasonPoints ?? 0)
+        const qualifyingVolumeUsd = Number(points?.qualifying_volume_usd ?? points?.qualifyingVolumeUsd ?? 0)
+        const reason = points?.reason || points?.exclusionReason || points?.exclusion_reason || 'NOT_QUALIFIED'
+
+        return (
+          <div className="swap-result-box swap-result-success">
+            <h4>⚔️ SWAP COMPLETE</h4>
+            <p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p>
+            <p><strong>You Received:</strong> {quote ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</p>
+            <p><strong>Status:</strong> Confirmed</p>
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}>
+              <p style={{ margin: '0 0 4px', color: qualified ? 'var(--gold)' : 'var(--red-dark)' }}>
+                <strong>{qualified ? `+${pointsAwarded.toLocaleString()} Samurai Points` : hasPointsRecord ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong>
+              </p>
+              {qualified && (
+                <>
+                  <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Season Points: {seasonPoints.toLocaleString()}</p>
+                  <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${qualifyingVolumeUsd.toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>
+                </>
+              )}
+              {hasPointsRecord && !qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {String(reason).replaceAll('_', ' ')}</p>}
+              {!hasPointsRecord && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: backend did not return a points record for this swap.</p>}
+            </div>
+            {txHash && (
+              <>
+                <p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {`${txHash.slice(0, 5)}...${txHash.slice(-5)}`}</p>
+                <button type="button" className="swap-token-result" onClick={() => navigator.clipboard?.writeText?.(txHash) || null}>Copy Txn</button>
+              </>
+            )}
+          </div>
+        )
+      })()}
       {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Ethereum swap could not be completed.'}</p><p>Review the wallet message and try again.</p></div>}
       {statusMessage && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot">{statusMessage}</p>}
       {message && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot" style={{ color: '#ba3c3c' }}>{message}</p>}
@@ -568,9 +650,12 @@ function RobinhoodSwapPanel() {
       setCompletion(completionBody)
       setMessage(completionBody?.points?.qualified ? `Swap confirmed. +${Number(completionBody.points.pointsAwarded || 0).toLocaleString()} Samurai Points.` : 'Swap confirmed. This transaction did not qualify for Samurai Points.')
     } catch (error) {
-      setStatus('error')
       const messageText = error?.message || 'Robinhood swap failed.'
-      setMessage(/4001|rejected/i.test(messageText) ? 'Transaction cancelled in MetaMask.' : messageText)
+      const timedOut = /timeout|aborted|AbortError/i.test(messageText)
+      setStatus(timedOut ? 'confirmed' : 'error')
+      setMessage(timedOut
+        ? 'Transaction confirmed on-chain, but the backend timed out while recording it. Please refresh or recheck the swap history.'
+        : /4001|rejected/i.test(messageText) ? 'Transaction cancelled in MetaMask.' : messageText)
     } finally {
       executeInFlightRef.current = false
     }
@@ -620,6 +705,7 @@ function UnifiedSwapHistory({ solanaWallet }) {
   const [wallet, setWallet] = useState(solanaWallet || '')
   const [rows, setRows] = useState([])
   const [state, setState] = useState('idle')
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -639,14 +725,27 @@ function UnifiedSwapHistory({ solanaWallet }) {
     return () => { cancelled = true }
   }, [solanaWallet, chain])
 
-  return <section className="swap-history section"><div className="swap-history-head"><div><span className="data-label">CONFIRMED ACTIVITY</span><h2>Swap history.</h2></div><div className="swap-history-filters" role="tablist" aria-label="Swap history network"><button className={chain === 'all' ? 'active' : ''} onClick={() => setChain('all')}>All</button><button className={chain === 'solana' ? 'active' : ''} onClick={() => setChain('solana')}>Solana</button><button className={chain === 'ethereum' ? 'active' : ''} onClick={() => setChain('ethereum')}>Ethereum</button><button className={chain === 'robinhood' ? 'active' : ''} onClick={() => setChain('robinhood')}>Robinhood</button></div></div>{!wallet && <p className="swap-history-empty">Connect a wallet to view confirmed swaps.</p>}{wallet && state === 'loading' && <p className="swap-history-empty">Loading confirmed swaps...</p>}{wallet && state === 'error' && <p className="swap-history-empty">Swap history is unavailable right now.</p>}{wallet && state === 'ready' && !rows.length && <p className="swap-history-empty">No confirmed swaps for this wallet yet.</p>}{rows.length > 0 && <div className="swap-history-table-wrap"><table className="swap-history-table"><thead><tr><th>Network</th><th>Pair</th><th>Volume</th><th>Status</th><th>Points</th><th>Date</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.chain_id}:${row.transaction_hash || row.signature}`}><td>{Number(row.chain_id) === 1 ? 'Ethereum' : Number(row.chain_id) === 4663 ? 'Robinhood' : 'Solana'}</td><td>{row.input_mint === 'native' ? 'ETH' : String(row.input_mint || '').slice(0, 8)} → {row.output_mint === 'native' ? 'ETH' : String(row.output_mint || '').slice(0, 8)}</td><td>{row.volume_usd == null ? '—' : `$${Number(row.volume_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</td><td>{row.status || 'CONFIRMED'}</td><td>{Number(row.points_awarded || 0).toLocaleString()}</td><td>{row.timestamp ? new Date(row.timestamp).toLocaleDateString() : '—'}</td></tr>)}</tbody></table></div>}</section>
+  return <section className="swap-history section"><div className="swap-history-head"><div><span className="data-label">CONFIRMED ACTIVITY</span><h2>Swap history.</h2></div><button type="button" className={`swap-history-toggle ${historyOpen ? 'is-open' : ''}`} onClick={() => setHistoryOpen((open) => !open)} aria-expanded={historyOpen}>{historyOpen ? 'Hide all transactions' : 'See all transactions'}<span aria-hidden="true">⌄</span></button></div>{historyOpen && <div className="swap-history-dropdown"><div className="swap-history-filters" role="tablist" aria-label="Swap history network"><button className={chain === 'all' ? 'active' : ''} onClick={() => setChain('all')}>All</button><button className={chain === 'solana' ? 'active' : ''} onClick={() => setChain('solana')}>Solana</button><button className={chain === 'ethereum' ? 'active' : ''} onClick={() => setChain('ethereum')}>Ethereum</button><button className={chain === 'robinhood' ? 'active' : ''} onClick={() => setChain('robinhood')}>Robinhood</button></div>{!wallet && <p className="swap-history-empty">Connect a wallet to view confirmed swaps.</p>}{wallet && state === 'loading' && <p className="swap-history-empty">Loading confirmed swaps...</p>}{wallet && state === 'error' && <p className="swap-history-empty">Swap history is unavailable right now.</p>}{wallet && state === 'ready' && !rows.length && <p className="swap-history-empty">No confirmed swaps for this wallet yet.</p>}{rows.length > 0 && <div className="swap-history-table-wrap"><table className="swap-history-table"><thead><tr><th>Network</th><th>Pair</th><th>Volume</th><th>Status</th><th>Points</th><th>Date</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.chain_id}:${row.transaction_hash || row.signature}`}><td>{Number(row.chain_id) === 1 ? 'Ethereum' : Number(row.chain_id) === 4663 ? 'Robinhood' : 'Solana'}</td><td>{row.input_mint === 'native' ? 'ETH' : String(row.input_mint || '').slice(0, 8)} → {row.output_mint === 'native' ? 'ETH' : String(row.output_mint || '').slice(0, 8)}</td><td>{row.volume_usd == null ? '—' : `$${Number(row.volume_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</td><td>{row.status || 'CONFIRMED'}</td><td>{Number(row.points_awarded || 0).toLocaleString()}</td><td>{row.timestamp ? new Date(row.timestamp).toLocaleDateString() : '—'}</td></tr>)}</tbody></table></div>}</div>}</section>
 }
 
 function TokenMark({ token, size = 25 }) {
   const [imageFailed, setImageFailed] = useState(false)
-  if (token.logoURI && !imageFailed) {
-    return <img className="swap-token-dot swap-token-logo" src={token.logoURI} alt="" width={size} height={size} onError={(event) => { if (token.fallbackLogoURI && event.currentTarget.src !== token.fallbackLogoURI) event.currentTarget.src = token.fallbackLogoURI; else setImageFailed(true) }} />
+  const logoUri = token?.logoURI || token?.logo || token?.icon || token?.image || token?.fallbackLogoURI || null
+
+  useEffect(() => {
+    setImageFailed(false)
+  }, [logoUri])
+
+  if (logoUri && !imageFailed) {
+    return <img className="swap-token-dot swap-token-logo" src={logoUri} alt="" width={size} height={size} onError={(event) => {
+      if (token?.fallbackLogoURI && event.currentTarget.src !== token.fallbackLogoURI) {
+        event.currentTarget.src = token.fallbackLogoURI
+        return
+      }
+      setImageFailed(true)
+    }} />
   }
+
   return <span className={`swap-token-dot ${token.className || 'tok-empty'}`} aria-hidden="true">{token.glyph || token.symbol?.slice(0, 1) || '?'}</span>
 }
 
@@ -741,9 +840,9 @@ export default function Swap() {
   const [roninBalance, setRoninBalance] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
   const [robinhoodSections, setRobinhoodSections] = useState({ all: [], tokens: [], memes: [], popular: [] })
-  const [robinhoodTrending, setRobinhoodTrending] = useState([])
-  const [ethereumTrending, setEthereumTrending] = useState([])
-  const [solanaTrending, setSolanaTrending] = useState([])
+  const [trendingTimeframe, setTrendingTimeframe] = useState('24h')
+  const [trendingState, setTrendingState] = useState({ state: 'idle', results: [], chain: null, timeframe: '24h' })
+  const [trendingRetry, setTrendingRetry] = useState(0)
   const swapInFlightRef = useRef(false)
   const paused = !SWAP_ENABLED
   const quoteAmountRaw = rawAmountFromUi(amountInput, fromToken?.decimals || 9)
@@ -763,53 +862,40 @@ export default function Swap() {
     getRobinhoodTokenSections().then((body) => {
       if (!cancelled) setRobinhoodSections({ all: body.sections?.all || [], tokens: body.sections?.tokens || [], memes: body.sections?.memes || [], popular: body.sections?.popular || [] })
     }).catch(() => {})
-    getRobinhoodTrending().then((body) => {
-      if (!cancelled) setRobinhoodTrending(body.results || [])
-    }).catch(() => {})
     return () => { cancelled = true }
   }, [network])
 
   useEffect(() => {
     let cancelled = false
+    const chain = network === 'robinhood' ? 'robinhood' : network
+    setTrendingState((current) => ({ ...current, state: 'loading', chain, timeframe: trendingTimeframe }))
     const loadTrending = async () => {
       try {
-        const [ethereumTokens, solanaTokens] = await Promise.all([
-          getLiveTrendingTokens({ chainId: 1, chainSlug: 'ethereum', tokens: ETHEREUM_FEATURED_TOKENS, limit: 10 }),
-          getLiveTrendingTokens({ chainId: 'solana', chainSlug: 'solana', tokens: TRUSTED_TOKENS, limit: 10 }),
-        ])
-        if (cancelled) return
-        setEthereumTrending(ethereumTokens)
-        setSolanaTrending(solanaTokens)
+        const body = await getLiveTrendingTokens({ chain, timeframe: trendingTimeframe })
+        if (!cancelled) setTrendingState({ state: body.dataAvailable ? 'ready' : 'empty', results: body.tokens || [], chain, timeframe: trendingTimeframe })
       } catch {
-        if (!cancelled) {
-          setEthereumTrending([])
-          setSolanaTrending([])
-        }
+        if (!cancelled) setTrendingState({ state: 'error', results: [], chain, timeframe: trendingTimeframe })
       }
     }
     loadTrending()
-    return () => { cancelled = true }
-  }, [])
+    const interval = window.setInterval(loadTrending, 45_000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [network, trendingTimeframe, trendingRetry])
 
+  const dashboardTrending = trendingState.chain === network ? trendingState.results : []
   const visibleTokens = network === 'ethereum'
     ? (tokenFilter === 'trending'
-      ? ethereumTrending
+      ? dashboardTrending
       : tokenFilter === 'tokens'
         ? ETHEREUM_FEATURED_TOKENS
         : ETHEREUM_FEATURED_SECTIONS[tokenFilter]?.map((symbol) => ETHEREUM_FEATURED_TOKENS.find((token) => token.symbol === symbol)).filter(Boolean) || [])
     : network === 'robinhood'
-      ? (tokenFilter === 'trending' ? robinhoodTrending : tokenFilter === 'memes' ? robinhoodSections.memes : tokenFilter === 'pop' ? robinhoodSections.popular : tokenFilter === 'tokens' ? robinhoodSections.tokens : robinhoodSections.all)
+      ? (tokenFilter === 'trending' ? dashboardTrending : tokenFilter === 'memes' ? robinhoodSections.memes : tokenFilter === 'pop' ? robinhoodSections.popular : tokenFilter === 'tokens' ? robinhoodSections.tokens : robinhoodSections.all)
       : tokenFilter === 'tokens'
         ? TRUSTED_TOKENS
         : tokenFilter === 'trending'
-          ? solanaTrending
+          ? dashboardTrending
           : TRUSTED_TOKENS.filter((token) => token.section.includes(tokenFilter))
-
-  const dashboardTrending = network === 'ethereum'
-    ? ethereumTrending
-    : network === 'robinhood'
-      ? robinhoodTrending
-      : solanaTrending
 
   useEffect(() => {
     if (!wallet?.address || !isValidWalletAddress(wallet.address)) return undefined
@@ -1013,7 +1099,7 @@ export default function Swap() {
   const pending = liveStatsState === 'loading' ? '…' : '—'
   const ecosystemStats = [
     { icon: 'chart', label: '24H VOLUME', value: formatUsd(dex?.volume24h) || pending, note: dex?.dexId ? `${dex.dexId} live` : 'DexScreener pending' },
-    { icon: 'swapVertical', label: 'TOTAL SWAPS', value: '—', note: 'Live at launch' },
+    { icon: 'swapVertical', label: 'TOTAL SWAPS', value: dex?.transactions24h != null ? Number(dex.transactions24h).toLocaleString() : pending, note: dex?.transactions24h != null ? 'DexScreener live' : 'DexScreener pending' },
     { icon: 'users', label: 'HOLDERS', value: liveStats?.holdersCount ? Number(liveStats.holdersCount).toLocaleString() : pending, note: liveStats?.holdersCount ? 'Helius live' : 'Helius pending' },
     { icon: 'flame', label: 'LIQUIDITY', value: formatUsd(dex?.liquidityUsd) || pending, note: dex?.liquidityUsd ? 'DexScreener live' : 'pending' },
     { icon: 'award', label: 'ECOSYSTEM SUPPORT', value: '0.5%', note: 'Jupiter referral fee' },
@@ -1245,7 +1331,7 @@ export default function Swap() {
       {/* ---------- HERO ---------- */}
       <section className="swap-hero-section">
         <div className="swap-hero-bg" aria-hidden="true">
-          <img src="/images/swap-hero-wide.png" alt="" />
+            <img src="/images/hero-ronin.jpg" alt="" />
         </div>
         <div className="swap-hero-scrim" aria-hidden="true" />
 
@@ -1468,6 +1554,21 @@ export default function Swap() {
             <p className="swap-widget-foot"><Icon name="shield" size={12} /> {txState === 'ready_to_sign' ? 'Unsigned swap prepared — ready for wallet approval.' : txState === 'signing' ? 'READY FOR WALLET APPROVAL' : txState === 'submitted' ? 'Transaction submitted to Jupiter.' : txState === 'confirming' ? 'Waiting for on-chain confirmation.' : 'Secure. Non-Custodial. Powered by Jupiter Aggregator.'}</p>
             </>}
           </div>
+
+          <aside className="swap-reference-side" aria-label="Ronin ecosystem highlights">
+            <section className="swap-reference-card swap-reference-chains">
+              <div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>SUPPORTED CHAINS</strong><span className="swap-reference-new">NEW</span></div>
+              <div className="swap-reference-chain-list"><span><TokenMark token={fromToken} size={22} /> Solana</span><span><span className="swap-reference-chain-gem">◆</span> Ethereum</span><span><span className="swap-reference-chain-gem">↗</span> Robinhood Chain</span></div>
+              <p>One platform. Three chains. More opportunities.</p>
+            </section>
+            <section className="swap-reference-card swap-reference-points">
+              <div className="swap-reference-card-title"><span className="swap-reference-icon">♜</span><strong>SAMURAI POINTS</strong></div>
+              <div className="swap-reference-points-body"><div><small>Earn points per qualifying swap.</small><b>YOUR JOURNEY</b></div><ul><li>Earn Points Per Swap</li><li>Leaderboard &amp; Seasons</li><li>Future Airdrops</li><li>More Utilities Coming</li></ul></div>
+              <button type="button" className="swap-reference-outline-button" onClick={handleSwapAction}>VIEW POINTS &amp; REWARDS</button>
+            </section>
+            <section className="swap-reference-card swap-reference-clan"><div className="swap-reference-card-title"><span className="swap-reference-icon">♨</span><strong>EVERY SWAP FUELS THE CLAN</strong></div><p>A portion of platform fees supports LP, buy &amp; burns, validator development and future utilities.</p><a href="#tokenomics" className="swap-reference-card-link">VIEW TOKENOMICS →</a></section>
+            <section className="swap-reference-card swap-reference-live"><div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>LIVE ECOSYSTEM STATS</strong><span className="swap-reference-live-dot">● Live</span></div><div className="swap-reference-live-grid">{ecosystemStats.slice(0, 4).map((stat) => <div key={stat.label}><small>{stat.label}</small><b>{stat.value}</b><em>{stat.note || 'Live data'}</em></div>)}</div></section>
+          </aside>
         </div>
       </section>
 
@@ -1518,21 +1619,34 @@ export default function Swap() {
                   </button>
                 ))}
               </div>
+              {tokenFilter === 'trending' && <div className="swap-token-filters trending-timeframe-filters" role="tablist" aria-label="Trending timeframe">
+                {['1h', '6h', '24h'].map((period) => <button type="button" role="tab" aria-selected={trendingTimeframe === period} className={trendingTimeframe === period ? 'active' : ''} key={period} onClick={() => setTrendingTimeframe(period)}>{period.toUpperCase()}</button>)}
+              </div>}
             </div>
             <button type="button" className="swap-tokens-all" onClick={handleSwapAction} disabled={paused}>VIEW ALL TOKENS <Icon name="chevronRight" size={13} /></button>
           </div>
           <div className="swap-tokens-row">
+            {tokenFilter === 'trending' && trendingState.state === 'loading' && <p className="swap-token-empty-state">Loading live trending data...</p>}
+            {tokenFilter === 'trending' && trendingState.state === 'error' && <p className="swap-token-empty-state">Trending data temporarily unavailable. <button type="button" onClick={() => setTrendingRetry((value) => value + 1)}>Retry</button></p>}
+            {tokenFilter === 'trending' && trendingState.state === 'empty' && <p className="swap-token-empty-state">No live trending tokens are available for this chain right now.</p>}
             {visibleTokens.map((token) => (
               <button type="button" className="swap-token" key={token.mint || token.address || token.symbol} onClick={() => network === 'solana' && selectToken('to', token)}>
                 <TokenMark token={token} size={38} />
                 <strong>{token.symbol}</strong>
                 <small>{token.name}</small>
+                {tokenFilter === 'trending' && <small>${Number(token.priceUsd || 0).toLocaleString('en-US', { maximumSignificantDigits: 6 })} · {Number(token.priceChange || 0).toFixed(2)}%</small>}
               </button>
             ))}
           </div>
-          {tokenFilter === 'trending' && dashboardTrending.length > 0 && <div className="swap-tokens-note" style={{ marginTop: '12px', fontSize: '12px', opacity: 0.75 }}>Live trending tokens ranked from on-chain market activity.</div>}
+          {tokenFilter === 'trending' && dashboardTrending.length > 0 && <div className="swap-tokens-note" style={{ marginTop: '12px', fontSize: '12px', opacity: 0.75 }}>Live DexScreener activity · {trendingTimeframe.toUpperCase()} · refreshes every 45 seconds.</div>}
           <div className="swap-quick-pairs">{RONIN_QUICK_PAIRS.map((pair) => <button type="button" key={pair.label} onClick={() => choosePair(pair)}>{pair.label}</button>)}</div>
         </div>
+      </section>
+
+      <section className="swap-reference-promos" aria-label="Ronin features">
+        <article className="swap-reference-promo"><img src="/images/game-landscape.jpg" alt="Ronin PVP Arena" /><div><h3>⚔ RONIN PVP ARENA</h3><span>COMING SOON</span><p>Stake. Fight. Win. Burn.<br />Samurai vs Samurai.</p></div></article>
+        <article className="swap-reference-promo"><img src="/images/nft-shogun.jpg" alt="Ronin NFTs" /><div><h3>▣ RONIN NFTs</h3><span>CUSTOMIZE YOUR SAMURAI</span><p>Equip NFTs. Show your style.<br />Gain exclusive perks.</p></div></article>
+        <a href="#shield" className="swap-reference-promo"><img src="/images/rank-warrior.jpg" alt="Ronin Shield" /><div><h3>⬡ RONIN SHIELD</h3><span>FREE WALLET SCANNER</span><p>Scan and revoke risky approvals.<br />Keep your assets safe.</p></div></a>
       </section>
 
       {/* ---------- PURPOSE BANNER ---------- */}

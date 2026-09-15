@@ -12,8 +12,9 @@ import Tokenomics from './pages/Tokenomics'
 import Transparency from './pages/Transparency'
 import Swap from './pages/Swap'
 import Admin from './pages/Admin'
+import Profile from './pages/Profile'
 
-const pageMap = { home: Home, yield: Yield, burn: Burn, game: Game, nft: NFT, rank: Rank, shield: Shield, tokenomics: Tokenomics, transparency: Transparency, swap: Swap, admin: Admin }
+const pageMap = { home: Home, yield: Yield, burn: Burn, game: Game, nft: NFT, rank: Rank, shield: Shield, tokenomics: Tokenomics, transparency: Transparency, swap: Swap, profile: Profile, admin: Admin }
 
 class ErrorBoundary extends Component {
   constructor(props){ super(props); this.state={hasError:false, error:null} }

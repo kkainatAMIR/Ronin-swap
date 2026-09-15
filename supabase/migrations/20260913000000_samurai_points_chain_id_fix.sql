@@ -113,3 +113,7 @@ where st.signature = sp.signature and sp.chain_id <> st.chain_id;
 -- swap_transactions.chain_id also needs Robinhood Chain (4663) as a valid value.
 alter table public.swap_transactions drop constraint if exists swap_chain_id_supported;
 alter table public.swap_transactions add constraint swap_chain_id_supported check (chain_id in (1, 101, 4663));
+
+-- Rebuild wallet totals from the source of truth so a legacy bad chain_id or
+-- older partial backfill does not leave wallet totals stuck at zero.
+select public.recalculate_samurai_totals();
