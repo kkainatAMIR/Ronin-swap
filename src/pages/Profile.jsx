@@ -4,6 +4,7 @@ import { useWallet } from '../context/WalletContext'
 import { getProfileData } from '../services/profileService'
 import { Button, ProgressBar, Sakura, SectionHeading, StatCard, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
+import RewardClaimPanel from '../components/RewardClaimPanel'
 import './profile.css'
 
 const chainNames = { 101: 'Solana', 1: 'Ethereum', 4663: 'Robinhood Chain' }
@@ -188,6 +189,8 @@ export default function Profile() {
         <StatCard stat={{ icon: 'chart', label: 'TOTAL VOLUME', value: volume ? `$${formatCompact(volume)}` : '$0', detail: 'Qualifying swap volume' }} />
         <StatCard stat={{ icon: 'swapVertical', label: 'TOTAL SWAPS', value: formatNumber(swaps), detail: 'Qualifying swaps' }} />
       </section>
+
+      <RewardClaimPanel wallet={wallet.address} />
 
       <section className="profile-main-grid">
         <div className="profile-panel profile-rank-panel"><SectionHeading eyebrow="THE WAY FORWARD" title="Rank progress" text={nextRank ? `${formatNumber(Math.max(0, Number(nextRank.minBalance || 0) - Number(profile?.balance || 0)))} RONIN until ${nextRank.name}.` : 'You hold the highest configured rank.'} /><div className="profile-rank-line"><strong>{currentRank?.name || 'Unranked'}</strong><span>{nextRank?.name || 'MAX RANK'}</span></div><ProgressBar value={rankProgress} rightLabel={`${rankProgress}%`} /><small className="profile-muted">Rank is calculated from the existing RONIN holding system.</small></div>
