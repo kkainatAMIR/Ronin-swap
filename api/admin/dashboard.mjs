@@ -39,13 +39,17 @@ export default async function handler(req, res) {
     }
     const body = parseBody(req) || {}
     if (req.method === 'PATCH' && resource === 'settings') {
-      const allowed = ['points_enabled', 'minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap_enabled', 'transaction_points_cap', 'campaigns', 'swap_enabled', 'sol_rewards_enabled', 'platform_fee_enabled', 'platform_fee_bps']
+      const allowed = ['points_enabled', 'minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap_enabled', 'transaction_points_cap', 'campaigns', 'swap_enabled', 'sol_rewards_enabled', 'platform_fee_enabled', 'platform_fee_bps', 'reward_asset', 'reward_points_per_unit']
       const values = Object.fromEntries(allowed.filter((key) => Object.prototype.hasOwnProperty.call(body, key)).map((key) => [key, body[key]]))
-      const numeric = ['minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap', 'platform_fee_bps']
+      const numeric = ['minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap', 'platform_fee_bps', 'reward_points_per_unit']
       for (const key of numeric) if (values[key] != null && (!Number.isFinite(Number(values[key])) || Number(values[key]) < 0)) return apiError(res, 400, 'INVALID_SETTING', `${key} must be non-negative.`)
       if (values.campaigns != null && !Array.isArray(values.campaigns)) return apiError(res, 400, 'INVALID_CAMPAIGNS', 'campaigns must be an array.')
       if (values.platform_fee_bps != null && Number(values.platform_fee_bps) > 10_000) return apiError(res, 400, 'INVALID_SETTING', 'platform_fee_bps must not exceed 10000.')
-      if (values.sol_rewards_enabled === true) return apiError(res, 400, 'REWARDS_NOT_AVAILABLE', 'SOL rewards are not available in this release.')
+      if (values.reward_points_per_unit != null && Number(values.reward_points_per_unit) <= 0) return apiError(res, 400, 'INVALID_SETTING', 'reward_points_per_unit must be greater than 0.')
+      if (values.reward_asset != null && (typeof values.reward_asset !== 'string' || values.reward_asset.trim().length === 0 || values.reward_asset.length > 32)) return apiError(res, 400, 'INVALID_SETTING', 'reward_asset must be a non-empty string (max 32 chars).')
+      // `sol_rewards_enabled` is the Rewards ON/OFF gate for the reward claim RPC.
+      // Historical placeholder rejection has been removed: the reward accounting
+      // layer is now implemented in migration 20260917000000_reward_claims.sql.
       return json(res, 200, { settings: await updateAdminSettings(values, adminId(req)) })
     }
     if (req.method === 'POST' && resource === 'notes') {
