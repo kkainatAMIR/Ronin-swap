@@ -1,0 +1,34 @@
+# Anchor build artifacts
+/target
+/programs/*/target
+
+# Anchor IDL + types (generated at build time)
+/target/idl
+/target/types
+/target/anchor
+
+# Node modules
+/node_modules
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Program keypair — NEVER COMMIT THIS
+# This is a SECRET key whose public key is the deployed program ID.
+# Anyone with this file can deploy upgrades to your program.
+/programs/ronin_rewards/ronin_rewards-keypair.json
+*-keypair.json
+keypair.json
+deployer-keypair.json
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode
+.idea

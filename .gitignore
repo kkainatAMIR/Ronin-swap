@@ -9,3 +9,12 @@ dist/
 .vercel
 .env*.local
 .env*
+
+# Solana Anchor program (program/) build artifacts + secrets
+# NEVER commit the program keypair — anyone with it can deploy upgrades.
+program/target/
+program/programs/*/target/
+program/programs/*/ronin_rewards-keypair.json
+program/**/*-keypair.json
+program/.anchor/
+program/test-ledger/

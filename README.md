@@ -2,6 +2,27 @@
 
 A responsive, samurai-inspired frontend for the RONIN ecosystem, built with React and Vite.
 
+## Repository structure
+
+```
+Ronin-swap/
+├── api/                    ← Vercel serverless functions (website backend)
+├── src/                    ← React frontend (Vite)
+├── supabase/migrations/    ← Database migrations (Samurai Points + reward accounting)
+├── program/                ← Solana Anchor program: ronin_rewards (NEW)
+│   ├── programs/ronin_rewards/src/lib.rs    ← The actual on-chain program
+│   ├── tests/ronin_rewards.ts              ← Test suite (manual SHA-256)
+│   └── scripts/
+│       ├── deploy-mainnet.sh               ← Mainnet deployment script
+│       ├── extract-keypair.js               ← Extract program keypair from Solana Playground
+│       ├── initialize-mainnet.sh            ← One-time initialize() call
+│       └── verify-program.mjs               ← Read-only on-chain verification
+├── scripts/                ← Website test scripts (reward accounting, security, etc.)
+└── docs/                   ← Existing project docs
+```
+
+See [`program/README.md`](program/README.md) for the complete Solana program deployment guide.
+
 ## Run locally
 
 ```bash
