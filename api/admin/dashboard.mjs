@@ -62,7 +62,14 @@ export default async function handler(req, res) {
     }
     return apiError(res, 404, 'ADMIN_RESOURCE_NOT_FOUND', 'Admin resource not found.')
   } catch (error) {
-    console.error('admin dashboard API failed:', error?.message || error)
-    return apiError(res, 400, 'ADMIN_DASHBOARD_ERROR', 'Admin dashboard operation failed.')
+    // Log full error to server console for debugging
+    console.error('admin dashboard API failed:', error?.message || error, error?.stack || '')
+    // Return a more informative error to the frontend so the admin can
+    // see what's actually wrong (the previous generic "Admin dashboard
+    // operation failed." message hid the real cause).
+    const code = error?.code || error?.body?.code || 'ADMIN_DASHBOARD_ERROR'
+    const message = error?.body?.message || error?.message || 'Admin dashboard operation failed.'
+    const status = error?.status || 400
+    return apiError(res, status, code, message)
   }
 }
