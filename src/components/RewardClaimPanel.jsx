@@ -42,15 +42,20 @@ export default function RewardClaimPanel({ wallet }) {
   const hasActiveSeason = Boolean(balance?.has_active_season)
   const rewardAsset = balance?.reward_asset || 'SOL'
   const rate = Number(balance?.reward_points_per_unit || 1000)
+  const network = balance?.network || 'devnet'  // backend tells us which network
   const estimatedReward = claimable > 0 && rate > 0 ? claimable / rate : 0
 
   const handleClaim = async () => {
     if (!wallet || claimable <= 0 || state === 'claiming') return
+    // Confirmation dialog — show the user exactly what they're about to claim.
+    const confirmMsg = `Claim ${claimable.toLocaleString('en-US', { maximumFractionDigits: 2 })} Samurai Points for ${formatRewardAmount(estimatedReward, rewardAsset)}?\n\n` +
+      `This is a REAL on-chain Solana transaction. The payout will be signed by the backend admin and sent to your connected wallet.`
+    if (!window.confirm(confirmMsg)) return
     setState('claiming')
     setError('')
     try {
       const result = await claimReward(wallet) // claim all available
-      setLastClaim(result.claim)
+      setLastClaim(result.claim ? { ...result, claim_tx_signature: result.claim_tx_signature, claim: result.claim, message: result.message, payout_succeeded: result.payout_succeeded, previously_failed: result.previously_failed, pending_payout: result.pending_payout, db_status_update_pending: result.db_status_update_pending, already_completed: result.already_completed } : result)
       // Refresh the balance so the new claimable_points shows.
       await load()
     } catch (e) {
@@ -152,7 +157,7 @@ export default function RewardClaimPanel({ wallet }) {
             {lastClaim.claim_tx_signature && (
               <small className="profile-rewards-tx-sig">
                 Solana tx:{' '}
-                <a href={solanaTxExplorerUrl(lastClaim.claim_tx_signature)} target="_blank" rel="noreferrer">
+                <a href={solanaTxExplorerUrl(lastClaim.claim_tx_signature, network)} target="_blank" rel="noreferrer">
                   {lastClaim.claim_tx_signature.slice(0, 8)}…{lastClaim.claim_tx_signature.slice(-6)}
                 </a>
               </small>
@@ -173,7 +178,7 @@ export default function RewardClaimPanel({ wallet }) {
                   <strong>{Number(claim.points_claimed).toLocaleString('en-US', { maximumFractionDigits: 2 })} SP</strong>
                   <span>→ {formatRewardAmount(claim.reward_amount, claim.reward_asset)}</span>
                   {claim.status === 'COMPLETED' && claim.claim_tx_signature && (
-                    <a className="profile-rewards-tx-link" href={solanaTxExplorerUrl(claim.claim_tx_signature)} target="_blank" rel="noreferrer">
+                    <a className="profile-rewards-tx-link" href={solanaTxExplorerUrl(claim.claim_tx_signature, network)} target="_blank" rel="noreferrer">
                       tx ↗
                     </a>
                   )}

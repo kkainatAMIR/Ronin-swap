@@ -51,10 +51,39 @@ import path from 'node:path'
 // =====================================================================
 // Configuration
 // =====================================================================
+//
+// The program ID and network are FULLY CONFIGURABLE via env vars so the
+// same code can target Devnet for testing today and Mainnet for
+// production tomorrow by changing env vars only — no code changes.
+//
+//   SOLANA_REWARDS_PROGRAM_ID (default: the Devnet program below)
+//   SOLANA_RPC_URL            (Devnet or Mainnet; already used elsewhere)
+//   HELIUS_API_KEY            (optional; preferred for production RPC)
+//
+// The default remains the Devnet program ID so existing behavior is
+// unchanged. When you deploy a Mainnet program, just override
+// SOLANA_REWARDS_PROGRAM_ID in .env.local or Vercel.
+//
+const DEFAULT_PROGRAM_ID = 'FHd1Nvwfvywkvw6Xcdt2QrgiLWPo2qG1KLrUoCwHWKfU'
 
-export const RONIN_REWARDS_PROGRAM_ID = new PublicKey('FHd1Nvwfvywkvw6Xcdt2QrgiLWPo2qG1KLrUoCwHWKfU')
+function resolveProgramId() {
+  const fromEnv = (process.env.SOLANA_REWARDS_PROGRAM_ID || '').trim()
+  return new PublicKey(fromEnv || DEFAULT_PROGRAM_ID)
+}
 
-export const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com'
+// Cached PublicKey so we don't re-parse on every call.
+let _programIdCache = null
+function getProgramId() {
+  if (!_programIdCache) _programIdCache = resolveProgramId()
+  return _programIdCache
+}
+
+// Exported as a function (not a constant) so tests / future hot-reload
+// can pick up env var changes. Most call sites use the constant below
+// for convenience; it's resolved once at module load time.
+export const RONIN_REWARDS_PROGRAM_ID = getProgramId()
+
+export const DEFAULT_SOLANA_RPC_URL = 'https://api.devnet.solana.com'
 
 // Anchor uses the first 8 bytes of sha256("global:<snake_case_method_name>").
 function anchorDiscriminator(methodName) {
@@ -67,16 +96,67 @@ const CLAIM_REWARD_DISCRIMINATOR = anchorDiscriminator('claim_reward')
 // Solana RPC connection (reuses the project's SOLANA_RPC_URL / HELIUS_API_KEY
 // convention from api/solana/rpc.mjs)
 // =====================================================================
-
+//
+// Network selection is fully env-driven:
+//   - If SOLANA_RPC_URL is set explicitly (Devnet or Mainnet), use it.
+//   - Otherwise, if HELIUS_API_KEY is set, build the matching Helius URL
+//     for whichever network is configured (we sniff Devnet vs Mainnet
+//     from SOLANA_REWARDS_NETWORK; default Devnet for safety).
+//   - Otherwise, fall back to the public Solana endpoint for the
+//     configured network.
+//
+// The current default is Devnet because the deployed rewards program
+// (FHd1Nvwfvywkvw6Xcdt2QrgiLWPo2qG1KLrUoCwHWKfU) is on Devnet.
+// When you deploy a Mainnet program, set:
+//   SOLANA_REWARDS_NETWORK=mainnet-beta
+//   SOLANA_REWARDS_PROGRAM_ID=<mainnet program id>
+//   SOLANA_RPC_URL=<mainnet RPC>  (or use HELIUS_API_KEY)
 let _connection = null
+
+function resolveNetwork() {
+  const net = String(process.env.SOLANA_REWARDS_NETWORK || '').trim().toLowerCase()
+  if (net === 'mainnet' || net === 'mainnet-beta') return 'mainnet-beta'
+  if (net === 'devnet') return 'devnet'
+  // Sniff from SOLANA_RPC_URL if not specified explicitly
+  const rpc = String(process.env.SOLANA_RPC_URL || '').toLowerCase()
+  if (rpc.includes('devnet')) return 'devnet'
+  if (rpc.includes('mainnet')) return 'mainnet-beta'
+  // Default to Devnet for safety — the deployed rewards program is on Devnet.
+  return 'devnet'
+}
+
+export function getRewardsNetwork() {
+  return resolveNetwork()
+}
+
+function resolveRpcEndpoint() {
+  const explicit = String(process.env.SOLANA_RPC_URL || '').trim()
+  if (explicit) return explicit
+  const network = resolveNetwork()
+  const heliusKey = process.env.HELIUS_API_KEY
+  if (heliusKey) {
+    if (network === 'devnet') return `https://devnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusKey)}`
+    return `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusKey)}`
+  }
+  return network === 'devnet' ? 'https://api.devnet.solana.com' : 'https://api.mainnet-beta.solana.com'
+}
+
 export function getRewardsConnection() {
   if (_connection) return _connection
-  const helius = process.env.HELIUS_API_KEY
-    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(process.env.HELIUS_API_KEY)}`
-    : ''
-  const endpoint = process.env.SOLANA_RPC_URL || helius || DEFAULT_SOLANA_RPC_URL
-  _connection = new Connection(endpoint, 'confirmed')
+  _connection = new Connection(resolveRpcEndpoint(), 'confirmed')
   return _connection
+}
+
+export function getExplorerBaseUrl() {
+  return resolveNetwork() === 'devnet'
+    ? 'https://solscan.io'
+    : 'https://solscan.io'
+}
+
+export function getTxExplorerUrl(signature) {
+  const network = resolveNetwork()
+  const cluster = network === 'devnet' ? '?cluster=devnet' : ''
+  return `https://solscan.io/tx/${signature}${cluster}`
 }
 
 // =====================================================================
@@ -261,9 +341,14 @@ export function buildClaimRewardInstruction({
 // Builds and submits the transaction, signed by the admin keypair.
 // Returns the transaction signature on success.
 //
-// The transaction includes a small priority fee for faster confirmation.
-// Throws a typed error on failure (the caller is responsible for
-// invoking revert_failed_reward_claim).
+// CRITICAL: when sendAndConfirmTransaction throws, the signature MAY
+// still exist if the tx was broadcast but not yet confirmed. We catch
+// the error and return an object with `{ signature, confirmed: false }`
+// so the caller can decide whether to keep the claim PENDING_PAYOUT
+// (safer) or revert it.
+//
+// The caller (api/rewards/claim.mjs) uses safeConfirmTx() to poll the
+// signature status and decide what to do.
 export async function submitClaimRewardTx({
   claimId,
   pointsClaimed,
@@ -283,11 +368,7 @@ export async function submitClaimRewardTx({
     rewardAmountLamports,
   })
 
-  // Priority fee: 1000 micro-lamports per CU. Modest, keeps the tx
-  // competitive without overpaying. The Solana program is light
-  // (one PDA init + one transfer), so this is plenty.
   const priorityIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 })
-  // Compute budget: 100k CU is plenty for this small program.
   const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 })
 
   const tx = new Transaction().add(priorityIx, computeIx, instruction)
@@ -295,22 +376,50 @@ export async function submitClaimRewardTx({
   tx.recentBlockhash = blockhash
   tx.feePayer = admin.publicKey
 
-  const signature = await sendAndConfirmTransaction(
-    connection,
-    tx,
-    [admin],
-    { commitment: 'confirmed', maxRetries: 3 }
-  )
-  return signature
+  // Step 1: sign + raw send. This returns a signature that can be polled
+  // even if confirmation later fails.
+  const signature = await connection.sendTransaction(tx, [admin], {
+    skipPreflight: false,
+    maxRetries: 3,
+  })
+
+  // Step 2: confirm. If this throws, the tx may still land on-chain later.
+  try {
+    await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight },
+      'confirmed'
+    )
+    return { signature, confirmed: true }
+  } catch (confirmError) {
+    // Don't lose the signature — the caller MUST reconcile it.
+    return { signature, confirmed: false, confirmError: confirmError?.message || String(confirmError) }
+  }
 }
 
 // =====================================================================
-// Pre-flight checks
+// Pre-flight checks + on-chain state reader
 // =====================================================================
 
-// Returns { ok, paused, vaultBalanceLamports, admin, rewardConfig, rewardVault }
-// or throws. Used by the backend to fail fast if the program is paused
-// or the vault is underfunded — without burning a Supabase claim first.
+// Returns the decoded on-chain RewardConfig state.
+//
+// Anchor layout for RewardConfig (per the deployed program):
+//   [0..7]    discriminator (8 bytes) = sha256("account:RewardConfig")[0..8]
+//   [8..39]   admin (32 bytes PublicKey)
+//   [40]      bump (1 byte)
+//   [41]      vault_bump (1 byte)
+//   [42..49]  total_claimed (8 bytes u64 LE) — total SOL paid out in lamports
+//   [50..57]  total_claims (8 bytes u64 LE) — total number of successful claims
+//   [58]      paused (1 byte bool)
+//
+// Total length: 59 bytes (matches what we observed on-chain).
+const CONFIG_ADMIN_OFFSET = 8
+const CONFIG_BUMP_OFFSET = 40
+const CONFIG_VAULT_BUMP_OFFSET = 41
+const CONFIG_TOTAL_CLAIMED_OFFSET = 42
+const CONFIG_TOTAL_CLAIMS_OFFSET = 50
+const CONFIG_PAUSED_OFFSET = 58
+const CONFIG_EXPECTED_LENGTH = 59
+
 export async function getRewardsProgramState() {
   const connection = getRewardsConnection()
   const [rewardConfig] = getRewardConfigPda()
@@ -319,32 +428,221 @@ export async function getRewardsProgramState() {
   if (!accountInfo) {
     throw new Error('REWARD_CONFIG_NOT_INITIALIZED')
   }
-  // Anchor account discriminator for RewardConfig is sha256("account:RewardConfig")[0..8].
-  // We don't need to verify it here — the program will reject the tx if the
-  // account is wrong. Just decode the paused byte.
-  //
-  // Layout (per the deployed program — standard Anchor):
-  //   [discriminator 8] [admin 32] [bump 1] [vault_bump 1] [total_claimed 8 u64] [total_claims 8 u64] [paused 1 bool]
-  // The deployed program's exact field order may differ; we read the bool
-  // conservatively from the last byte (Anchor pads bool fields to 1 byte,
-  // and the deployed program is small enough that this is the last field).
-  //
-  // If the layout is wrong, the program will reject the claim_reward tx
-  // and the backend will revert it. This check is best-effort.
   const data = accountInfo.data
-  const pausedByte = data ? data[data.length - 1] : 0
-  const paused = Boolean(pausedByte)
+  if (!data || data.length < CONFIG_EXPECTED_LENGTH) {
+    throw new Error(`REWARD_CONFIG_INVALID_LAYOUT (data length ${data?.length || 0}, expected ${CONFIG_EXPECTED_LENGTH})`)
+  }
+
+  const admin = new PublicKey(data.subarray(CONFIG_ADMIN_OFFSET, CONFIG_ADMIN_OFFSET + 32))
+  const bump = data[CONFIG_BUMP_OFFSET]
+  const vaultBump = data[CONFIG_VAULT_BUMP_OFFSET]
+  const totalClaimed = data.readBigUInt64LE(CONFIG_TOTAL_CLAIMED_OFFSET)
+  const totalClaims = data.readBigUInt64LE(CONFIG_TOTAL_CLAIMS_OFFSET)
+  const paused = Boolean(data[CONFIG_PAUSED_OFFSET])
 
   const vaultBalanceLamports = await connection.getBalance(rewardVault, 'confirmed')
 
   return {
     ok: true,
+    programId: RONIN_REWARDS_PROGRAM_ID,
+    network: getRewardsNetwork(),
     paused,
-    vaultBalanceLamports,
-    vaultBalanceSol: vaultBalanceLamports / LAMPORTS_PER_SOL,
+    admin,
+    bump,
+    vaultBump,
+    totalClaimed,        // BigInt lamports paid out over all time
+    totalClaims,         // BigInt count of successful claims
     rewardConfig,
     rewardVault,
+    vaultBalanceLamports,
+    vaultBalanceSol: vaultBalanceLamports / LAMPORTS_PER_SOL,
   }
+}
+
+// =====================================================================
+// Admin instructions: fund_vault, withdraw_vault, set_paused
+// =====================================================================
+//
+// These mirror the deployed program's admin instructions. Only the
+// backend admin keypair can sign them; users NEVER have access.
+//
+// Layout (Anchor convention):
+//   discriminator (8 bytes): sha256("global:<method_name>")[0..8]
+//   args follow as little-endian fixed-size integers / booleans
+//
+// Accounts (in the order the deployed program expects):
+//   fund_vault(amount: u64):
+//     admin, reward_config, reward_vault, system_program
+//   withdraw_vault(amount: u64):
+//     admin, reward_config, reward_vault, admin_token_account_or_admin,
+//     system_program
+//   set_paused(paused: bool):
+//     admin, reward_config
+//
+// We default to assuming withdraw_vault transfers SOL back to admin
+// directly (no token account) — that matches the standard pattern for
+// a SOL-vault program. If the deployed program requires a different
+// account list, we'll need to adjust.
+const FUND_VAULT_DISCRIMINATOR = anchorDiscriminator('fund_vault')
+const WITHDRAW_VAULT_DISCRIMINATOR = anchorDiscriminator('withdraw_vault')
+const SET_PAUSED_DISCRIMINATOR = anchorDiscriminator('set_paused')
+
+export function buildFundVaultInstruction({ admin, amountLamports }) {
+  if (!Number.isSafeInteger(amountLamports) || amountLamports <= 0) {
+    throw new Error('INVALID_FUND_AMOUNT')
+  }
+  const [rewardConfig] = getRewardConfigPda()
+  const [rewardVault] = getRewardVaultPda()
+  const data = Buffer.alloc(8 + 8)
+  FUND_VAULT_DISCRIMINATOR.copy(data, 0)
+  data.writeBigUInt64LE(BigInt(amountLamports), 8)
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: admin, isSigner: true, isWritable: true },
+      { pubkey: rewardConfig, isSigner: false, isWritable: true },
+      { pubkey: rewardVault, isSigner: false, isWritable: true },
+      { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+    ],
+    programId: RONIN_REWARDS_PROGRAM_ID,
+    data,
+  })
+}
+
+export function buildWithdrawVaultInstruction({ admin, amountLamports }) {
+  if (!Number.isSafeInteger(amountLamports) || amountLamports <= 0) {
+    throw new Error('INVALID_WITHDRAW_AMOUNT')
+  }
+  const [rewardConfig] = getRewardConfigPda()
+  const [rewardVault] = getRewardVaultPda()
+  const data = Buffer.alloc(8 + 8)
+  WITHDRAW_VAULT_DISCRIMINATOR.copy(data, 0)
+  data.writeBigUInt64LE(BigInt(amountLamports), 8)
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: admin, isSigner: true, isWritable: true },
+      { pubkey: rewardConfig, isSigner: false, isWritable: true },
+      { pubkey: rewardVault, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: false, isWritable: true },  // recipient = admin
+      { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+    ],
+    programId: RONIN_REWARDS_PROGRAM_ID,
+    data,
+  })
+}
+
+export function buildSetPausedInstruction({ admin, paused }) {
+  const [rewardConfig] = getRewardConfigPda()
+  const data = Buffer.alloc(8 + 1)
+  SET_PAUSED_DISCRIMINATOR.copy(data, 0)
+  data[8] = paused ? 1 : 0
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: admin, isSigner: true, isWritable: false },
+      { pubkey: rewardConfig, isSigner: false, isWritable: true },
+    ],
+    programId: RONIN_REWARDS_PROGRAM_ID,
+    data,
+  })
+}
+
+// =====================================================================
+// Admin transaction submission
+// =====================================================================
+//
+// All three admin operations follow the same pattern: build instruction,
+// wrap in a Transaction with priority fee + compute budget, sign with
+// admin keypair, submit + confirm.
+async function submitAdminTx(instruction, label) {
+  const admin = getRewardsAdminKeypair()
+  const connection = getRewardsConnection()
+  const priorityIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 })
+  const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 })
+  const tx = new Transaction().add(priorityIx, computeIx, instruction)
+  const { blockhash } = await connection.getLatestBlockhash('confirmed')
+  tx.recentBlockhash = blockhash
+  tx.feePayer = admin.publicKey
+  try {
+    const signature = await sendAndConfirmTransaction(
+      connection, tx, [admin],
+      { commitment: 'confirmed', maxRetries: 3 }
+    )
+    return signature
+  } catch (error) {
+    // Wrap with a label so the caller can log it clearly.
+    error.label = label
+    throw error
+  }
+}
+
+export async function submitFundVaultTx(amountLamports) {
+  const admin = getRewardsAdminKeypair()
+  const ix = buildFundVaultInstruction({ admin: admin.publicKey, amountLamports })
+  return submitAdminTx(ix, 'fund_vault')
+}
+
+export async function submitWithdrawVaultTx(amountLamports) {
+  const admin = getRewardsAdminKeypair()
+  const ix = buildWithdrawVaultInstruction({ admin: admin.publicKey, amountLamports })
+  return submitAdminTx(ix, 'withdraw_vault')
+}
+
+export async function submitSetPausedTx(paused) {
+  const admin = getRewardsAdminKeypair()
+  const ix = buildSetPausedInstruction({ admin: admin.publicKey, paused: Boolean(paused) })
+  return submitAdminTx(ix, 'set_paused')
+}
+
+// =====================================================================
+// Transaction confirmation safety
+// =====================================================================
+//
+// sendAndConfirmTransaction can fail for two very different reasons:
+//   1. The transaction was REJECTED before submission (bad blockhash,
+//      signature verification failure, etc.) — signature is null/undefined
+//      and NO money moved.
+//   2. The transaction was SUBMITTED but confirmation timed out — the
+//      tx may still land on-chain later. The signature exists; we must
+//      NOT treat this as a definitive failure.
+//
+// `safeConfirmTx(signature)` is used by /api/rewards/claim after a
+// signature comes back from sendAndConfirmTransaction. If
+// sendAndConfirmTransaction throws, we cannot assume the tx failed —
+// we must poll the signature status to determine the truth.
+//
+// Returns one of:
+//   - { status: 'confirmed', signature }
+//   - { status: 'failed', signature, error }
+//   - { status: 'unknown', signature } — RPC couldn't tell us; treat
+//     as PENDING_PAYOUT and let an admin reconciliation job resolve it
+export async function safeConfirmTx(signature, opts = {}) {
+  const connection = getRewardsConnection()
+  const timeoutMs = opts.timeoutMs || 30_000
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const status = await connection.getSignatureStatus(signature, {
+        searchTransactionHistory: true,
+      })
+      const value = status?.value
+      if (!value) {
+        // Not seen yet. Wait briefly and retry.
+        await new Promise((r) => setTimeout(r, 1_500))
+        continue
+      }
+      if (value.err) {
+        return { status: 'failed', signature, error: JSON.stringify(value.err) }
+      }
+      if (value.confirmationStatus === 'confirmed' || value.confirmationStatus === 'finalized') {
+        return { status: 'confirmed', signature }
+      }
+      // Still pending; loop.
+      await new Promise((r) => setTimeout(r, 1_500))
+    } catch (err) {
+      // RPC error — don't give up, retry until timeout.
+      await new Promise((r) => setTimeout(r, 1_500))
+    }
+  }
+  return { status: 'unknown', signature }
 }
 
 // =====================================================================

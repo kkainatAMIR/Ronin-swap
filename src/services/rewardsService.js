@@ -66,7 +66,17 @@ export function formatRewardAmount(amount, asset = 'SOL') {
 }
 
 // Helper for the frontend to build a Solana explorer URL for a tx signature.
-export function solanaTxExplorerUrl(signature) {
+// The cluster parameter (?cluster=devnet) is appended automatically when
+// the response from /api/rewards/claim or /api/rewards/balance indicates
+// the program is on Devnet.
+//
+// We can't sniff the network purely from the frontend (env vars are
+// server-only), so we use the explorer_url returned by the backend if
+// present, otherwise default to mainnet (no cluster param).
+export function solanaTxExplorerUrl(signature, network) {
   if (!signature) return null
-  return `https://solscan.io/tx/${signature}`
+  // Backend returns 'devnet' or 'mainnet-beta' for `network`.
+  // If unspecified, default to mainnet (the production default).
+  const cluster = network === 'devnet' ? '?cluster=devnet' : ''
+  return `https://solscan.io/tx/${signature}${cluster}`
 }

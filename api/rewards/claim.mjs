@@ -5,6 +5,8 @@ import {
   getRewardsProgramState,
   solToLamports,
   submitClaimRewardTx,
+  safeConfirmTx,
+  getTxExplorerUrl,
 } from '../_lib/solanaRewardsAdmin.mjs'
 
 function isValidSolanaWallet(value) {
@@ -270,25 +272,92 @@ export default async function handler(req, res) {
   }
 
   // -----------------------------------------------------------------
-  // STEP 7: Submit the Solana claim_reward transaction.
+  // STEP 7: Submit the Solana claim_reward transaction (with safe
+  // confirmation reconciliation).
   // -----------------------------------------------------------------
+  // submitClaimRewardTx now returns { signature, confirmed: bool, confirmError? }
+  // instead of just a signature. This matters for production safety:
+  //
+  //   - If confirmed=true: tx is on-chain and confirmed. Mark COMPLETED.
+  //   - If confirmed=false AND signature exists: the tx was broadcast
+  //     but confirmation timed out. We MUST NOT mark FAILED — the tx
+  //     may still land on-chain. Instead, poll the signature status
+  //     for up to 30 seconds. If we can't determine the truth, leave
+  //     the claim in PENDING_PAYOUT and let an admin reconciliation
+  //     job resolve it later. NEVER revert in this case.
+  //   - If signature itself is missing: tx was rejected before
+  //     broadcast (bad blockhash, signature error, etc.). Safe to revert.
   let signature
+  let confirmed = false
   try {
-    signature = await submitClaimRewardTx({
+    const result = await submitClaimRewardTx({
       claimId,
       pointsClaimed: Number(claim.points_claimed),
       rewardAmountLamports,
       recipientAddress,
     })
+    signature = result.signature
+    confirmed = result.confirmed === true
   } catch (error) {
-    // STEP 7b: Solana payout failed — revert the claim atomically.
-    console.error('rewards/claim Solana tx failed:', error?.message || error, {
-      claimId, wallet: wallet.slice(0, 8) + '...', rewardAmountLamports
+    // The transaction was REJECTED before broadcast (e.g. simulation
+    // failure, blockhash expired, signature verification failure).
+    // No signature exists → no money moved → safe to revert.
+    console.error('rewards/claim Solana tx rejected before broadcast:', error?.message || error, {
+      claimId, wallet: wallet.slice(0, 8) + '...', rewardAmountLamports,
     })
-    const reason = solanaErrorMessage(error) || 'SOLANA_TX_FAILED'
+    const reason = solanaErrorMessage(error) || 'SOLANA_TX_REJECTED'
     await safeRevertFailedClaim(claimId, reason)
     return apiError(res, 502, 'SOLANA_PAYOUT_FAILED',
       `The on-chain payout failed: ${reason}. Your points have been restored.`)
+  }
+
+  // If confirmation timed out, poll for the truth.
+  if (!confirmed && signature) {
+    console.warn('rewards/claim Solana tx confirmation timed out; polling signature status', {
+      claimId, signature,
+    })
+    const pollResult = await safeConfirmTx(signature, { timeoutMs: 30_000 })
+    if (pollResult.status === 'confirmed') {
+      confirmed = true
+    } else if (pollResult.status === 'failed') {
+      // The tx was definitively rejected by the network.
+      console.error('rewards/claim Solana tx definitively FAILED after polling:', pollResult.error, {
+        claimId, signature,
+      })
+      await safeRevertFailedClaim(claimId, `SOLANA_TX_FAILED: ${pollResult.error || 'unknown'}`)
+      return apiError(res, 502, 'SOLANA_PAYOUT_FAILED',
+        `The on-chain payout failed: ${pollResult.error || 'transaction rejected'}. Your points have been restored.`)
+    } else {
+      // AMBIGUOUS: we don't know if the tx will land or not. NEVER revert —
+      // the user might still get paid. Leave the claim PENDING_PAYOUT
+      // and let an admin reconciliation job resolve it later.
+      console.error('rewards/claim Solana tx status UNKNOWN after polling — leaving PENDING_PAYOUT for admin reconciliation', {
+        claimId, signature,
+      })
+      return json(res, 200, {
+        success: false,
+        pending_payout: true,
+        db_status_pending: true,
+        ambiguous_confirmation: true,
+        claim: normalizeClaim(claim), // still PENDING_PAYOUT in DB
+        claim_tx_signature: signature,
+        explorer_url: getTxExplorerUrl(signature),
+        earned_points: Number(claimResult.earned_points || 0),
+        claimed_points: Number(claimResult.claimed_points || 0),
+        claimable_points: Number(claimResult.claimable_points || 0),
+        message: 'Your claim was submitted but on-chain confirmation timed out. ' +
+          'Your points are reserved. If the transaction succeeds, your payout will complete automatically. ' +
+          'If it fails, an admin will restore your points. No action needed from you.',
+      })
+    }
+  }
+
+  if (!signature) {
+    // Defensive — should never reach here.
+    console.error('rewards/claim no signature returned from submitClaimRewardTx', { claimId })
+    await safeRevertFailedClaim(claimId, 'NO_TX_SIGNATURE')
+    return apiError(res, 502, 'SOLANA_PAYOUT_FAILED',
+      'The on-chain payout failed: no transaction signature was returned. Your points have been restored.')
   }
 
   // -----------------------------------------------------------------
@@ -332,6 +401,7 @@ export default async function handler(req, res) {
     idempotent: Boolean(claimResult.idempotent),
     claim: normalizeClaim(completedClaim || claim),
     claim_tx_signature: signature,
+    explorer_url: getTxExplorerUrl(signature),
     earned_points: Number(claimResult.earned_points || 0),
     claimed_points: Number(claimResult.claimed_points || 0),
     claimable_points: Number(claimResult.claimable_points || 0),

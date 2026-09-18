@@ -1,5 +1,6 @@
 import { apiError, json, rateLimit } from '../_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../_lib/supabaseBackend.mjs'
+import { getRewardsNetwork } from '../_lib/solanaRewardsAdmin.mjs'
 
 // Validates Solana base58 (32-44), EVM 0x... (40 hex).
 function isValidWallet(value) {
@@ -72,6 +73,10 @@ export default async function handler(req, res) {
       active_season_id: result.active_season_id || null,
       reward_asset: result.reward_asset || 'SOL',
       reward_points_per_unit: Number(result.reward_points_per_unit || 1000),
+      // The Solana network the rewards program is deployed on
+      // ('devnet' or 'mainnet-beta'). Used by the frontend to build
+      // correct Solana explorer URLs (with ?cluster=devnet on Devnet).
+      network: getRewardsNetwork(),
       recent_claims: Array.isArray(result.recent_claims) ? result.recent_claims.map((c) => ({
         ...c,
         points_claimed: Number(c.points_claimed || 0),

@@ -319,3 +319,32 @@
     flex-direction: column;
   }
 }
+
+/* AdminRewardsPanel — real on-chain Solana rewards management */
+.admin-rewards-panel{margin-top:24px;padding:30px}
+.admin-rewards-status-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
+.admin-rewards-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:24px}
+.admin-rewards-stat{padding:18px;background:var(--cream);border:1px solid var(--line);border-radius:6px}
+.admin-rewards-stat strong{display:block;margin-top:8px;font-family:var(--mono);font-size:13px;word-break:break-all;color:var(--ink);font-weight:400;line-height:1.4}
+.admin-rewards-stat small{display:block;margin-top:6px;color:var(--muted);font-family:var(--mono);font-size:9px;line-height:1.5}
+.admin-rewards-stat-highlight{background:var(--ink);color:#f5f1e9;border-color:var(--ink)}
+.admin-rewards-stat-highlight strong{color:var(--gold);font-size:24px;font-family:var(--display)}
+.admin-rewards-stat-highlight small{color:#aaa29a}
+.admin-rewards-mono{font-family:var(--mono);font-size:11px}
+.admin-rewards-dbsettings{padding:16px 18px;background:var(--cream);border:1px dashed var(--line);margin-bottom:22px}
+.admin-rewards-dbsettings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;font-family:var(--mono);font-size:11px}
+.admin-rewards-dbsettings-grid strong{color:var(--red);font-weight:400}
+.admin-rewards-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:18px}
+.admin-rewards-action-card{padding:18px;background:var(--paper);border:1px solid var(--line);border-radius:6px}
+.admin-rewards-action-card h4{margin:0 0 6px;font-family:var(--display);font-size:18px;font-weight:400;color:var(--ink)}
+.admin-rewards-action-card p{margin:0 0 14px;color:var(--muted);font-size:11px;line-height:1.5}
+.admin-rewards-action-buttons{display:flex;gap:8px;flex-wrap:wrap}
+.admin-rewards-action-row{display:flex;align-items:center;gap:8px}
+.admin-rewards-action-row input{flex:1;min-width:80px;padding:8px 10px;border:1px solid var(--line);background:var(--cream);font-family:var(--mono);font-size:12px}
+.admin-rewards-action-row span{color:var(--muted);font-family:var(--mono);font-size:10px}
+.admin-rewards-footer{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}
+.admin-rewards-warn{color:var(--red);font-family:var(--mono);font-size:10px;line-height:1.5;flex:1;min-width:200px}
+.admin-rewards-skeleton{display:grid;gap:12px;margin-top:20px}
+.admin-rewards-skeleton span{display:block;height:60px;background:linear-gradient(90deg,var(--cream) 25%,var(--paper) 50%,var(--cream) 75%);background-size:200% 100%;animation:adminShimmer 1.4s infinite;border:1px solid var(--line)}
+@keyframes adminShimmer{to{background-position:-200% 0}}
+@media (max-width:800px){.admin-rewards-panel{padding:22px}.admin-rewards-actions{grid-template-columns:1fr}.admin-rewards-action-row{flex-direction:column;align-items:stretch}.admin-rewards-action-row span{text-align:center}}
