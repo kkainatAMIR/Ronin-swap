@@ -47,6 +47,16 @@ const LOCAL_API_HANDLERS = {
   '/api/ronin/shield-stats': '/api/ronin/shield-stats.mjs',
   '/api/ronin/shield-scan': '/api/ronin/shield-scan.mjs',
   '/api/ronin/shield-contribution': '/api/ronin/shield-contribution.mjs',
+  // Rewards (claim flow + admin on-chain management). Without these entries,
+  // /api/rewards/* and /api/admin/rewards/* silently 404 during `vite dev`,
+  // which is why the AdminRewardsPanel showed "Admin signer not configured"
+  // even when SOLANA_REWARDS_ADMIN_SECRET_KEY was set in .env.local.
+  '/api/rewards/balance': '/api/rewards/balance.mjs',
+  '/api/rewards/claim': '/api/rewards/claim.mjs',
+  '/api/admin/rewards/status': '/api/admin/rewards/status.mjs',
+  '/api/admin/rewards/set-paused': '/api/admin/rewards/set-paused.mjs',
+  '/api/admin/rewards/fund-vault': '/api/admin/rewards/fund-vault.mjs',
+  '/api/admin/rewards/withdraw-vault': '/api/admin/rewards/withdraw-vault.mjs',
 }
 
 function readRequestBody(req) {

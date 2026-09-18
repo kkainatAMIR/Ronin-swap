@@ -37,6 +37,12 @@ import lifiComplete from './api/lifi/complete.mjs'
 import robinhoodTrending from './api/robinhood/trending.mjs'
 import robinhoodTokens from './api/robinhood/tokens.mjs'
 import coingeckoSearch from './api/coingecko/search.mjs'
+import rewardsBalance from './api/rewards/balance.mjs'
+import rewardsClaim from './api/rewards/claim.mjs'
+import adminRewardsStatus from './api/admin/rewards/status.mjs'
+import adminRewardsSetPaused from './api/admin/rewards/set-paused.mjs'
+import adminRewardsFundVault from './api/admin/rewards/fund-vault.mjs'
+import adminRewardsWithdrawVault from './api/admin/rewards/withdraw-vault.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -89,6 +95,15 @@ const routes = new Map([
   ['GET /api/robinhood/trending', robinhoodTrending],
   ['GET /api/robinhood/tokens', robinhoodTokens],
   ['GET /api/coingecko/search', coingeckoSearch],
+  // Rewards (claim flow + admin on-chain management). Mirrors the entries
+  // added to LOCAL_API_HANDLERS in vite.config.js so both dev (vite) and
+  // preview (node server.mjs) serve the same routes.
+  ['GET /api/rewards/balance', rewardsBalance],
+  ['POST /api/rewards/claim', rewardsClaim],
+  ['GET /api/admin/rewards/status', adminRewardsStatus],
+  ['POST /api/admin/rewards/set-paused', adminRewardsSetPaused],
+  ['POST /api/admin/rewards/fund-vault', adminRewardsFundVault],
+  ['POST /api/admin/rewards/withdraw-vault', adminRewardsWithdrawVault],
 ])
 
 function createResponse(res) {
