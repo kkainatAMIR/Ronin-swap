@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, SectionHeading, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
-import { claimReward, formatRewardAmount, getRewardBalance } from '../services/rewardsService'
+import { claimReward, formatRewardAmount, getRewardBalance, solanaTxExplorerUrl } from '../services/rewardsService'
 
 // RewardClaimPanel — shows the user's earned / claimed / claimable Samurai
 // points balance and lets them claim available rewards. The claim is
@@ -129,15 +129,36 @@ export default function RewardClaimPanel({ wallet }) {
       {error && <div className="profile-rewards-error-text"><Icon name="info" size={14} /> {error}</div>}
 
       {lastClaim && (
-        <div className="profile-rewards-success">
-          <Icon name="check" size={16} />
+        <div className={`profile-rewards-success ${lastClaim.payout_succeeded === false || lastClaim.previously_failed ? 'profile-rewards-success-warn' : ''}`}>
+          <Icon name={lastClaim.payout_succeeded === false || lastClaim.previously_failed ? 'info' : 'check'} size={16} />
           <div>
-            <strong>Claim recorded!</strong>
+            {lastClaim.payout_succeeded === false ? (
+              <strong>Payout failed</strong>
+            ) : lastClaim.previously_failed ? (
+              <strong>Previous attempt failed</strong>
+            ) : lastClaim.db_status_update_pending ? (
+              <strong>Payout confirmed on-chain</strong>
+            ) : lastClaim.pending_payout ? (
+              <strong>Payout in progress</strong>
+            ) : lastClaim.already_completed ? (
+              <strong>Already claimed</strong>
+            ) : (
+              <strong>Claim paid!</strong>
+            )}
             <small>
-              {Number(lastClaim.points_claimed).toLocaleString('en-US', { maximumFractionDigits: 2 })} points →{' '}
-              {formatRewardAmount(lastClaim.reward_amount, lastClaim.reward_asset)} ({lastClaim.status})
+              {Number(lastClaim.claim?.points_claimed || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} points →{' '}
+              {formatRewardAmount(lastClaim.claim?.reward_amount, lastClaim.claim?.reward_asset)} ({lastClaim.claim?.status})
             </small>
-            <small className="profile-rewards-claim-id">Claim ID: <code>{lastClaim.claim_id}</code></small>
+            {lastClaim.claim_tx_signature && (
+              <small className="profile-rewards-tx-sig">
+                Solana tx:{' '}
+                <a href={solanaTxExplorerUrl(lastClaim.claim_tx_signature)} target="_blank" rel="noreferrer">
+                  {lastClaim.claim_tx_signature.slice(0, 8)}…{lastClaim.claim_tx_signature.slice(-6)}
+                </a>
+              </small>
+            )}
+            <small className="profile-rewards-claim-id">Claim ID: <code>{lastClaim.claim?.claim_id}</code></small>
+            {lastClaim.message && <small className="profile-rewards-message">{lastClaim.message}</small>}
           </div>
         </div>
       )}
@@ -151,6 +172,11 @@ export default function RewardClaimPanel({ wallet }) {
                 <div>
                   <strong>{Number(claim.points_claimed).toLocaleString('en-US', { maximumFractionDigits: 2 })} SP</strong>
                   <span>→ {formatRewardAmount(claim.reward_amount, claim.reward_asset)}</span>
+                  {claim.status === 'COMPLETED' && claim.claim_tx_signature && (
+                    <a className="profile-rewards-tx-link" href={solanaTxExplorerUrl(claim.claim_tx_signature)} target="_blank" rel="noreferrer">
+                      tx ↗
+                    </a>
+                  )}
                 </div>
                 <div className="profile-rewards-claim-meta">
                   <Tag tone={claim.status === 'COMPLETED' ? 'green' : claim.status === 'FAILED' ? 'red' : 'neutral'}>

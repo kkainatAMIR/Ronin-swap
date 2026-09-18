@@ -11,17 +11,35 @@ export async function getRewardBalance(wallet) {
 }
 
 // Generate a fresh, unguessable claim_id client-side. The DB enforces
-// uniqueness, so duplicates resolve to an idempotent response (no double-spend).
+// uniqueness (and the on-chain claim PDA is derived from the claim_id
+// via SHA-256), so duplicates resolve to an idempotent response (no
+// double-spend, no double-payout).
 function newClaimId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return 'claim-' + crypto.randomUUID()
   }
-  // Fallback for very old browsers
   return 'claim-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
 // Claim all available points (pointsToClaim === null means "claim all").
-// Returns { success, idempotent, claim, earned_points, claimed_points, claimable_points }.
+//
+// The backend /api/rewards/claim endpoint performs the full flow:
+//   1. Supabase claim_reward RPC (atomic insert + claimed_points increment)
+//   2. Status transition ENTITLED → PENDING_PAYOUT (atomic)
+//   3. Solana claim_reward() transaction signed by backend admin
+//   4. On success: status → COMPLETED, claim_tx_signature saved
+//   5. On failure: status → FAILED, claimed_points reverted
+//
+// The frontend NEVER sends earned_points / claimed_points /
+// claimable_points / reward_amount. Those values are derived server-side.
+//
+// Returns {
+//   success, idempotent?, claim, claim_tx_signature?,
+//   earned_points, claimed_points, claimable_points,
+//   already_completed?, pending_payout?, previously_failed?,
+//   payout_succeeded?, db_status_update_pending?,
+//   message?  // human-readable note for unusual states
+// }
 export async function claimReward(wallet, { pointsToClaim = null } = {}) {
   if (!wallet) throw new Error('A wallet address is required.')
   const claimId = newClaimId()
@@ -42,8 +60,13 @@ export async function claimReward(wallet, { pointsToClaim = null } = {}) {
 export function formatRewardAmount(amount, asset = 'SOL') {
   if (!Number.isFinite(Number(amount))) return '—'
   const n = Number(amount)
-  // SOL has 9 decimals but display 6 for readability on small amounts.
   const display = n >= 1 ? n.toLocaleString('en-US', { maximumFractionDigits: 4 })
     : n.toLocaleString('en-US', { maximumFractionDigits: 6 })
   return `${display} ${asset}`
+}
+
+// Helper for the frontend to build a Solana explorer URL for a tx signature.
+export function solanaTxExplorerUrl(signature) {
+  if (!signature) return null
+  return `https://solscan.io/tx/${signature}`
 }
