@@ -62,7 +62,13 @@ export default async function handler(req, res) {
       }
       return apiError(res, upstream.status >= 500 ? 502 : upstream.status, 'JUPITER_API_ERROR', body?.error || body?.message || 'Jupiter order request failed.')
     }
-    if (body?.errorCode != null || body?.error || body?.errorMessage || !body?.transaction) {
+    // Jupiter /swap/v2/order legitimately returns `transaction: null` when no
+    // `taker` was supplied — that is a valid "quote-only" response used by the
+    // BuyRonin panel to show a price before the wallet is connected. Only
+    // require a transaction when the caller actually passed a `taker` (i.e.,
+    // they want a signable transaction). Quote-only callers check
+    // `quote.transaction` themselves before signing.
+    if (body?.errorCode != null || body?.error || body?.errorMessage || (taker && !body?.transaction)) {
       return apiError(res, 400, 'JUPITER_ORDER_ERROR', body?.errorMessage || body?.error || 'Jupiter could not prepare a signable transaction for this swap.')
     }
     return json(res, 200, body)
