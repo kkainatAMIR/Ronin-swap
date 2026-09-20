@@ -36,10 +36,14 @@ function enforceRateLimit(req) {
   return record.count <= maxRequestsPerWindow
 }
 
+// Use globalThis.__RONIN_LOCAL_ENV__ (set by Vite's localApiPlugin) with
+// process.env fallback — same pattern as supabaseBackend.mjs.
+const verifyRuntimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 function getSolanaRpcEndpoints() {
-  const configured = process.env.SOLANA_RPC_URL || ''
-  const heliusEndpoint = process.env.HELIUS_API_KEY
-    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(process.env.HELIUS_API_KEY)}`
+  const configured = verifyRuntimeEnv.SOLANA_RPC_URL || ''
+  const heliusEndpoint = verifyRuntimeEnv.HELIUS_API_KEY
+    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(verifyRuntimeEnv.HELIUS_API_KEY)}`
     : ''
   const endpoints = [configured, heliusEndpoint, 'https://api.mainnet-beta.solana.com']
   return [...new Set(endpoints.filter(Boolean))]

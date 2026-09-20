@@ -1,8 +1,13 @@
 import { RONIN_MINT as MINT } from '../../api/_lib/roninBackend.mjs'
 
+// Use globalThis.__RONIN_LOCAL_ENV__ (set by Vite's localApiPlugin) with
+// process.env fallback — same pattern as supabaseBackend.mjs. This is
+// critical for Vite dev SSR, where process.env is not reliably populated.
+const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 const DEFAULT_BURN_ADDRESS = '9jRsw55MwR5L8yTneLLjWNfjdThX4v687CuHo7moRUCi'
-const API_KEY = process.env.HELIUS_API_KEY || ''
-const BURN_ADDRESS = process.env.RONIN_BURN_ADDRESS || DEFAULT_BURN_ADDRESS
+const API_KEY = runtimeEnv.HELIUS_API_KEY || ''
+const BURN_ADDRESS = runtimeEnv.RONIN_BURN_ADDRESS || DEFAULT_BURN_ADDRESS
 const RPC = `https://mainnet.helius-rpc.com/?api-key=${API_KEY}`
 
 function json(res, status, body) {

@@ -13,6 +13,11 @@ const ALLOWED_METHODS = new Set([
 ])
 const RPC_TIMEOUT_MS = 10_000
 
+// Use globalThis.__RONIN_LOCAL_ENV__ (set by Vite's localApiPlugin) with
+// process.env fallback — same pattern as supabaseBackend.mjs. This is
+// critical for Vite dev SSR, where process.env is not reliably populated.
+const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 function json(res, status, body) {
   res.status(status)
   res.setHeader('Cache-Control', 'no-store, max-age=0')
@@ -32,10 +37,10 @@ function endpointLabel(endpoint) {
 }
 
 function rpcEndpoints() {
-  const heliusEndpoint = process.env.HELIUS_API_KEY
-    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(process.env.HELIUS_API_KEY)}`
+  const heliusEndpoint = runtimeEnv.HELIUS_API_KEY
+    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(runtimeEnv.HELIUS_API_KEY)}`
     : ''
-  return [process.env.SOLANA_RPC_URL, heliusEndpoint, DEFAULT_RPC_URL]
+  return [runtimeEnv.SOLANA_RPC_URL, heliusEndpoint, DEFAULT_RPC_URL]
     .filter((endpoint, index, endpoints) => endpoint && endpoints.indexOf(endpoint) === index)
 }
 

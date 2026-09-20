@@ -1,7 +1,11 @@
 import { apiError, json, rateLimit } from '../../api/_lib/roninBackend.mjs'
 
+// Use globalThis.__RONIN_LOCAL_ENV__ (set by Vite's localApiPlugin) with
+// process.env fallback — same pattern as supabaseBackend.mjs.
+const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 const COINGECKO_BASE_URL = 'https://api.coingecko.com/api/v3'
-const COINGECKO_API_KEY = process.env.VITE_COINGECKO_API_KEY || process.env.COINGECKO_API_KEY || ''
+const COINGECKO_API_KEY = runtimeEnv.VITE_COINGECKO_API_KEY || runtimeEnv.COINGECKO_API_KEY || ''
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
