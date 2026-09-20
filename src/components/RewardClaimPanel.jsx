@@ -42,7 +42,7 @@ export default function RewardClaimPanel({ wallet }) {
   const hasActiveSeason = Boolean(balance?.has_active_season)
   const rewardAsset = balance?.reward_asset || 'SOL'
   const rate = Number(balance?.reward_points_per_unit || 1000)
-  const network = balance?.network || 'devnet'  // backend tells us which network
+  const network = balance?.network || 'mainnet-beta'  // backend tells us which network
   const estimatedReward = claimable > 0 && rate > 0 ? claimable / rate : 0
 
   const handleClaim = async () => {

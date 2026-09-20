@@ -1,6 +1,6 @@
 // =====================================================================
 // Solana Rewards Admin — integration with the deployed ronin_rewards
-// Anchor program at FHd1Nvwfvywkvw6Xcdt2QrgiLWPo2qG1KLrUoCwHWKfU.
+// Anchor program at 6Uyjo8oDGQJeb8zS1yFqwLCguc4gfUB1V4xWheAD7RYC (Mainnet).
 // =====================================================================
 //
 // This module is SERVER-SIDE ONLY. It loads the backend/admin Solana
@@ -60,11 +60,11 @@ import path from 'node:path'
 //   SOLANA_RPC_URL            (Devnet or Mainnet; already used elsewhere)
 //   HELIUS_API_KEY            (optional; preferred for production RPC)
 //
-// The default remains the Devnet program ID so existing behavior is
-// unchanged. When you deploy a Mainnet program, just override
-// SOLANA_REWARDS_PROGRAM_ID in .env.local or Vercel.
+// Production default is the Mainnet program (deployed 2026-09 via Solana
+// Playground, deployment tx WBFqAG9567ggx5dJTRnQdRTfYy3HunGZMMvnQf2UbbYDgDWpzFQRkpnBuWsHayTzPpYmwiMnm4V9on3cTz64QiT).
+// Override with SOLANA_REWARDS_PROGRAM_ID for non-production environments.
 //
-const DEFAULT_PROGRAM_ID = 'FHd1Nvwfvywkvw6Xcdt2QrgiLWPo2qG1KLrUoCwHWKfU'
+const DEFAULT_PROGRAM_ID = '6Uyjo8oDGQJeb8zS1yFqwLCguc4gfUB1V4xWheAD7RYC'
 
 function resolveProgramId() {
   const fromEnv = (process.env.SOLANA_REWARDS_PROGRAM_ID || '').trim()
@@ -83,7 +83,10 @@ function getProgramId() {
 // for convenience; it's resolved once at module load time.
 export const RONIN_REWARDS_PROGRAM_ID = getProgramId()
 
-export const DEFAULT_SOLANA_RPC_URL = 'https://api.devnet.solana.com'
+// Default RPC endpoint is Mainnet (the rewards program is now deployed
+// on Mainnet). For Devnet testing, set SOLANA_RPC_URL explicitly in
+// .env.local to a Devnet endpoint.
+export const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com'
 
 // Anchor uses the first 8 bytes of sha256("global:<snake_case_method_name>").
 function anchorDiscriminator(methodName) {
@@ -105,12 +108,11 @@ const CLAIM_REWARD_DISCRIMINATOR = anchorDiscriminator('claim_reward')
 //   - Otherwise, fall back to the public Solana endpoint for the
 //     configured network.
 //
-// The current default is Devnet because the deployed rewards program
-// (FHd1Nvwfvywkvw6Xcdt2QrgiLWPo2qG1KLrUoCwHWKfU) is on Devnet.
-// When you deploy a Mainnet program, set:
-//   SOLANA_REWARDS_NETWORK=mainnet-beta
-//   SOLANA_REWARDS_PROGRAM_ID=<mainnet program id>
-//   SOLANA_RPC_URL=<mainnet RPC>  (or use HELIUS_API_KEY)
+// The default is Mainnet because the rewards program (6Uyjo8oDGQJeb8zS1yFqwLCguc4gfUB1V4xWheAD7RYC)
+// is deployed on Mainnet. For Devnet testing, set in .env.local:
+//   SOLANA_REWARDS_NETWORK=devnet
+//   SOLANA_REWARDS_PROGRAM_ID=<devnet program id>
+//   SOLANA_RPC_URL=<devnet RPC>
 let _connection = null
 
 function resolveNetwork() {
@@ -121,8 +123,8 @@ function resolveNetwork() {
   const rpc = String(process.env.SOLANA_RPC_URL || '').toLowerCase()
   if (rpc.includes('devnet')) return 'devnet'
   if (rpc.includes('mainnet')) return 'mainnet-beta'
-  // Default to Devnet for safety — the deployed rewards program is on Devnet.
-  return 'devnet'
+  // Default to Mainnet — the rewards program is now deployed on Mainnet.
+  return 'mainnet-beta'
 }
 
 export function getRewardsNetwork() {
