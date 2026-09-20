@@ -57,6 +57,8 @@ const LOCAL_API_HANDLERS = {
   '/api/admin/rewards/set-paused': '/api/admin/rewards/set-paused.mjs',
   '/api/admin/rewards/fund-vault': '/api/admin/rewards/fund-vault.mjs',
   '/api/admin/rewards/withdraw-vault': '/api/admin/rewards/withdraw-vault.mjs',
+  // TEMPORARY debug endpoint — remove after diagnosis.
+  '/api/debug-env': '/api/debug-env.mjs',
 }
 
 function readRequestBody(req) {
