@@ -34,19 +34,23 @@ export default async function handler(req, res) {
 
   try {
     // Swap V2 is the recommended meta-aggregator flow. Referral params are
-    // passed on every eligible /order request so the fee is applied to both
+    // passed on EVERY eligible /order request so the fee is applied to both
     // buy (SOL → RONIN) and sell (RONIN → SOL) swaps.
+    //
+    // The Jupiter API key configured for this project is tied to the
+    // RoninSamurai Swap V2 referral project. Dropping these params causes
+    // Jupiter to return a response without a signable transaction (or with
+    // an explicit error), which breaks every quote — both in Swap.jsx and
+    // BuyRonin. Always send them.
     const params = new URLSearchParams({
       inputMint: String(inputMint),
       outputMint: String(outputMint),
       amount: String(amount),
       slippageBps: String(slippageBps || DEFAULT_SLIPPAGE_BPS),
       swapMode: 'ExactIn',
+      referralAccount: JUPITER_REFERRAL_ACCOUNT,
+      referralFee: String(JUPITER_REFERRAL_FEE_BPS),
     })
-    if (JUPITER_V2_REFERRAL_ENABLED) {
-      params.set('referralAccount', JUPITER_REFERRAL_ACCOUNT)
-      params.set('referralFee', String(JUPITER_REFERRAL_FEE_BPS))
-    }
     if (taker) params.set('taker', String(taker))
 
     const upstream = await fetchJupiter(`/swap/v2/order?${params}`, { headers: { Accept: 'application/json' } })
