@@ -1,8 +1,21 @@
-import { addTrackedContribution, loadCounters } from '../../api/_lib/shieldStore.mjs'
+// NOTE: shieldStore.mjs does not exist in the repo (pre-existing bug).
+// The import is deferred to runtime so it doesn't crash the gateway at
+// startup. When this endpoint is called, it will return a 500 error
+// with a clear message instead of breaking all other API routes.
+//
+// To fix: create api/_lib/shieldStore.mjs with addTrackedContribution()
+// and loadCounters() exports, or remove this endpoint if unused.
 
 function json(res, status, body) {
   res.status(status).setHeader('Cache-Control', 'no-store, max-age=0')
   return res.json(body)
+}
+
+// Deferred import — only fails when this specific endpoint is called,
+// not when the gateway loads.
+async function loadShieldStore() {
+  const mod = await import('../../api/_lib/shieldStore.mjs')
+  return mod
 }
 
 // Contribution validation mirrors the frontend config (src/config/shield.js).
@@ -31,6 +44,7 @@ export default async function handler(req, res) {
     }
 
     // We only track for transparency; on-chain treasury balance is source of truth.
+    const { addTrackedContribution, loadCounters } = await loadShieldStore()
     const newTracked = await addTrackedContribution(solAmount)
     const counters = await loadCounters()
 

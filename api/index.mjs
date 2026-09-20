@@ -75,9 +75,10 @@ export default async function handler(req, res) {
     }
   }
 
-  // Look up the route.
-  const loader = matchRoute(req.method, pathname)
-  if (!loader) {
+  // Look up the route. matchRoute returns the handler function directly
+  // (static imports — no dynamic import() needed).
+  const endpointHandler = matchRoute(req.method, pathname)
+  if (!endpointHandler) {
     // No route found. Return 404 in the same format as the old
     // server.mjs fallback did for unknown /api/ routes.
     if (!res.headersSent) {
@@ -88,14 +89,13 @@ export default async function handler(req, res) {
     return
   }
 
-  // Load the handler module (cached after first load) and call it.
+  // Call the handler with the original req/res objects.
   try {
-    const endpointHandler = await loader()
     await endpointHandler(req, res)
   } catch (error) {
-    // If the handler module fails to load or throws synchronously
-    // before its own try/catch, log and return 500. Handlers are
-    // expected to have their own error handling — this is a safety net.
+    // If the handler throws synchronously before its own try/catch,
+    // log and return 500. Handlers are expected to have their own
+    // error handling — this is a safety net.
     console.error('API gateway handler error:', error?.message || error, { path: pathname, method: req.method })
     if (!res.headersSent) {
       res.statusCode = 500
