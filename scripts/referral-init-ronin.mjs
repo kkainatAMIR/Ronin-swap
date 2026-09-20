@@ -150,7 +150,14 @@ async function main() {
       console.log('  (nothing to do; accounts already initialized)')
     }
     for (const item of unsignedTxns) {
-      const b64 = Buffer.from(item.tx.serialize()).toString('base64')
+      if (!item.tx.recentBlockhash) {
+        item.tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash
+      }
+      if (!item.tx.feePayer) item.tx.feePayer = payerPubKey
+      const b64 = Buffer.from(item.tx.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      })).toString('base64')
       console.log(`\n[${item.label}] base64:`)
       console.log(b64)
     }

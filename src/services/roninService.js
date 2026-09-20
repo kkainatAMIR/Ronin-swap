@@ -1,20 +1,12 @@
 import { RONIN_MINT } from '../data'
 
 export { RONIN_MINT }
-const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com'
-const PUBLICNODE_RPC_URL = 'https://solana-rpc.publicnode.com'
 const SOLANA_RPC_PROXY_URL = '/api/solana/rpc'
 const CONFIGURED_SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || ''
-// Keep the configured URL for wallet transaction confirmation, while reads
-// try the same-origin server proxy first so browser CORS/provider policies do
-// not turn a healthy RPC into a 403.
-export const SOLANA_RPC_URL = CONFIGURED_SOLANA_RPC_URL || DEFAULT_SOLANA_RPC_URL
-const SOLANA_RPC_ENDPOINTS = [
-  SOLANA_RPC_PROXY_URL,
-  CONFIGURED_SOLANA_RPC_URL,
-  DEFAULT_SOLANA_RPC_URL,
-  PUBLICNODE_RPC_URL,
-].filter((url, index, endpoints) => endpoints.indexOf(url) === index && url)
+// Keep provider credentials and retry policy on the server. Public browser
+// RPC endpoints frequently reject POST requests with 403 responses.
+export const SOLANA_RPC_URL = CONFIGURED_SOLANA_RPC_URL || SOLANA_RPC_PROXY_URL
+const SOLANA_RPC_ENDPOINTS = [SOLANA_RPC_PROXY_URL]
 const RPC_TIMEOUT_MS = 5000
 export const RONIN_TOKEN_URL = `https://solscan.io/token/${RONIN_MINT}#holders`
 

@@ -8,9 +8,6 @@ export const SHIELD_RPC_URL = SOLANA_RPC_URL
 
 const RPC_ENDPOINTS = [
   '/api/solana/rpc',
-  SHIELD_RPC_URL,
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-rpc.publicnode.com',
 ].filter((url, i, arr) => arr.indexOf(url) === i)
 
 function extractHeliusKey(rpcUrl) {

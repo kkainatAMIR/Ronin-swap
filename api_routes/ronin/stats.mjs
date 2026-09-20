@@ -347,6 +347,7 @@ export default async function handler(req, res) {
     })
   } catch (error) {
     console.error('RONIN stats endpoint failed:', error)
-    return json(res, 500, { error: error?.message || 'Live RONIN stats unavailable.' })
+    const status = /429|rate limit|quota/i.test(error?.message || '') ? 503 : 500
+    return json(res, status, { error: error?.message || 'Live RONIN stats unavailable.', code: status === 503 ? 'RPC_QUOTA_EXCEEDED' : 'RONIN_STATS_UNAVAILABLE' })
   }
 }

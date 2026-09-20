@@ -13,8 +13,20 @@ dotenv.config({ path: '.env.local', override: true })
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
     let body = ''
+    let bodyBytes = 0
+    const maxBytes = 1_000_000
     req.setEncoding('utf8')
-    req.on('data', (chunk) => { body += chunk })
+    req.on('data', (chunk) => {
+      bodyBytes += Buffer.byteLength(chunk)
+      if (bodyBytes > maxBytes) {
+        req.destroy()
+        const error = new Error('Request body too large.')
+        error.statusCode = 413
+        reject(error)
+        return
+      }
+      body += chunk
+    })
     req.on('end', () => {
       if (!body) return resolve({})
       try { return resolve(JSON.parse(body)) } catch { return resolve(null) }

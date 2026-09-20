@@ -1022,7 +1022,10 @@ export default function Swap() {
         setQuote(null)
         setQuoteMeta(null)
         setQuoteState('error')
-        setQuoteError(error?.message || 'Unable to price this pair right now.')
+        const errorMessage = error?.message || ''
+        setQuoteError(/insufficient funds/i.test(errorMessage)
+          ? 'Insufficient SOL for transaction fees. Add SOL to this wallet and try again.'
+          : errorMessage || 'Unable to price this pair right now.')
       }
     }
 

@@ -7,6 +7,7 @@ const JUPITER_API_KEY = runtimeEnv.JUPITER_API_KEY || ''
 const JUPITER_BASE_URL = runtimeEnv.JUPITER_BASE_URL || 'https://api.jup.ag'
 const JUPITER_REFERRAL_ACCOUNT = runtimeEnv.JUPITER_REFERRAL_ACCOUNT || 'VF1nw8cRfFKJeqW7kCsthWy1NirCF4B31YocUKZrbB7'
 const JUPITER_REFERRAL_FEE_BPS = Number(runtimeEnv.JUPITER_REFERRAL_FEE_BPS || 50)
+const JUPITER_V2_REFERRAL_ENABLED = String(runtimeEnv.JUPITER_V2_REFERRAL_ENABLED || '').toLowerCase() === 'true'
 const JUPITER_TIMEOUT_MS = 10_000
 const SOL_INCINERATOR_BASE_URL = process.env.SOL_INCINERATOR_BASE_URL || 'https://v2.api.sol-incinerator.com'
 const SOL_INCINERATOR_API_KEY = runtimeEnv.SOL_INCINERATOR_API_KEY || ''
@@ -16,6 +17,7 @@ const SOL_INCINERATOR_API_KEY = runtimeEnv.SOL_INCINERATOR_API_KEY || ''
 const DEFAULT_RONIN_MINT = '2JVEVXoRsskapZ8T56MjMNJq6Dk3feEUYSRmzkkipump'
 const RONIN_MINT = runtimeEnv.RONIN_MINT_ADDRESS || DEFAULT_RONIN_MINT
 const rateBuckets = new Map()
+const MAX_REQUEST_BODY_BYTES = 1_000_000
 
 export function json(res, status, body) {
   return res.status(status).json(body)
@@ -35,6 +37,11 @@ export function rateLimit(req, key, max = 60, windowMs = 60_000) {
   }
   current.count += 1
   return current.count <= max
+}
+
+export function requestBodyWithinLimit(req, maxBytes = MAX_REQUEST_BODY_BYTES) {
+  const length = Number(req.headers?.['content-length'])
+  return !Number.isFinite(length) || length <= maxBytes
 }
 
 export function jupiterHeaders(extra = {}) {
@@ -107,6 +114,7 @@ export {
   JUPITER_BASE_URL,
   JUPITER_REFERRAL_ACCOUNT,
   JUPITER_REFERRAL_FEE_BPS,
+  JUPITER_V2_REFERRAL_ENABLED,
   JUPITER_TIMEOUT_MS,
   SOL_INCINERATOR_BASE_URL,
   SOL_INCINERATOR_API_KEY,

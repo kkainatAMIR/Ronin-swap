@@ -36,8 +36,24 @@ function createResponse(res) {
 
 async function readBody(req) {
   if (req.method === 'GET' || req.method === 'HEAD') return {}
+  const declaredLength = Number(req.headers['content-length'])
+  const maxBytes = 1_000_000
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    const error = new Error('Request body too large.')
+    error.statusCode = 413
+    throw error
+  }
   const chunks = []
-  for await (const chunk of req) chunks.push(chunk)
+  let totalBytes = 0
+  for await (const chunk of req) {
+    totalBytes += Buffer.byteLength(chunk)
+    if (totalBytes > maxBytes) {
+      const error = new Error('Request body too large.')
+      error.statusCode = 413
+      throw error
+    }
+    chunks.push(chunk)
+  }
   if (!chunks.length) return {}
   const text = Buffer.concat(chunks).toString('utf8')
   if (!text) return {}
@@ -110,7 +126,7 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     console.error('RONIN server error:', error)
     if (!res.headersSent) {
-      res.statusCode = 500
+      res.statusCode = error.statusCode || 500
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
       res.end(JSON.stringify({ error: 'Internal server error.' }))
     } else {
