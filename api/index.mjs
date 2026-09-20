@@ -33,22 +33,18 @@
 // lives in the handler modules under api_routes/.
 // =====================================================================
 
-import { matchRoute } from './_routes.mjs'
-
-// Build a Vercel-compatible req/res shim if needed. Under Vercel's
-// Node.js runtime, req is an IncomingMessage and res is a ServerResponse.
-// We need to ensure req.query is populated (Vercel does this automatically,
-// but the vite dev server and server.mjs do it too).
-//
-// CRITICAL: We do NOT pre-parse req.body. Each handler expects the body
-// in a specific format:
-//   - Some use parseBody(req) from _lib/roninBackend.mjs
-//   - Some read req.body directly (assuming it's already an object)
-//   - Some do typeof req.body === 'string' ? JSON.parse : use-as-is
-//   - Some define their own local parseBody
-//
-// The runtime (Vercel / vite dev / server.mjs) is responsible for
-// populating req.body. This gateway does NOT touch it.
+// Use DYNAMIC import() for the route table so that any module-load failure
+// (a top-level throw inside one of the 40 handler modules, a missing
+// dependency, a malformed env var, etc.) is caught here and surfaced as a
+// readable HTTP 500 response — instead of Vercel's generic opaque
+// FUNCTION_INVOCATION_FAILED.
+let _routesPromise = null
+function loadRoutes() {
+  if (!_routesPromise) {
+    _routesPromise = import('./_routes.mjs').then((m) => m).catch((error) => ({ __loadError: error }))
+  }
+  return _routesPromise
+}
 
 export default async function handler(req, res) {
   // Parse the URL to extract the pathname (without query string).
@@ -73,6 +69,37 @@ export default async function handler(req, res) {
     } catch {
       req.query = {}
     }
+  }
+
+  // Load the route table. If any handler module failed to load, surface
+  // the actual error message in the HTTP response so it can be debugged
+  // remotely without access to Vercel logs.
+  const routesModule = await loadRoutes()
+  if (routesModule.__loadError) {
+    const error = routesModule.__loadError
+    console.error('RONIN gateway: route table failed to load:', error?.message || error, error?.stack || '')
+    if (!res.headersSent) {
+      res.statusCode = 500
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(JSON.stringify({
+        error: 'Gateway route table failed to load.',
+        message: error?.message || String(error),
+        stack: error?.stack ? error.stack.split('\n').slice(0, 10).join('\n') : null,
+        code: error?.code || null,
+      }))
+    }
+    return
+  }
+
+  const matchRoute = routesModule.matchRoute
+  if (typeof matchRoute !== 'function') {
+    console.error('RONIN gateway: matchRoute is not a function:', typeof matchRoute)
+    if (!res.headersSent) {
+      res.statusCode = 500
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(JSON.stringify({ error: 'Gateway route table is malformed.' }))
+    }
+    return
   }
 
   // Look up the route. matchRoute returns the handler function directly
