@@ -3,108 +3,14 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import health from './api/health.mjs'
-import publicSettings from './api/settings.mjs'
-import jupiterOrder from './api/jupiter/order.mjs'
-import jupiterExecute from './api/jupiter/execute.mjs'
-import jupiterQuote from './api/jupiter/quote.mjs'
-import jupiterSwap from './api/jupiter/swap.mjs'
-import roninStats from './api/ronin/stats.mjs'
-import burnHistory from './api/ronin/burn-history.mjs'
-import shieldStats from './api/ronin/shield-stats.mjs'
-import shieldScan from './api/ronin/shield-scan.mjs'
-import shieldContribution from './api/ronin/shield-contribution.mjs'
-import solanaRpc from './api/solana/rpc.mjs'
-import swapVerify from './api/swap/verify.mjs'
-import swapRecord from './api/swap/record.mjs'
-import swapHistory from './api/swap/history.mjs'
-import swapPoints from './api/swap/points.mjs'
-import leaderboard from './api/leaderboard.mjs'
-import trending from './api/trending.mjs'
-import adminSamurai from './api/admin/samurai.mjs'
-import currentSeason from './api/samurai/season.mjs'
-import adminSeasons from './api/admin/seasons.mjs'
-import adminDashboard from './api/admin/dashboard.mjs'
-import adminAuth from './api/admin/auth.mjs'
-import burnBuild from './api/burn/build.mjs'
-import burnPreview from './api/burn/preview.mjs'
-import evmQuote from './api/evm/quote.mjs'
-import evmComplete from './api/evm/complete.mjs'
-import lifiConfig from './api/lifi/config.mjs'
-import lifiQuote from './api/lifi/quote.mjs'
-import lifiStatus from './api/lifi/status.mjs'
-import lifiComplete from './api/lifi/complete.mjs'
-import robinhoodTrending from './api/robinhood/trending.mjs'
-import robinhoodTokens from './api/robinhood/tokens.mjs'
-import coingeckoSearch from './api/coingecko/search.mjs'
-import rewardsBalance from './api/rewards/balance.mjs'
-import rewardsClaim from './api/rewards/claim.mjs'
-import adminRewardsStatus from './api/admin/rewards/status.mjs'
-import adminRewardsSetPaused from './api/admin/rewards/set-paused.mjs'
-import adminRewardsFundVault from './api/admin/rewards/fund-vault.mjs'
-import adminRewardsWithdrawVault from './api/admin/rewards/withdraw-vault.mjs'
+// Single API gateway — all /api/* requests are dispatched through this.
+// The gateway (api/index.mjs) uses api/_routes.mjs to route to the
+// appropriate handler module under api_routes/.
+import gateway from './api/index.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const distDir = path.join(__dirname, 'dist')
-
-const routes = new Map([
-  ['GET /api/health', health],
-  ['GET /api/settings', publicSettings],
-  ['GET /api/jupiter/order', jupiterOrder],
-  ['POST /api/jupiter/execute', jupiterExecute],
-  ['GET /api/jupiter/quote', jupiterQuote],
-  ['POST /api/jupiter/swap', jupiterSwap],
-  ['GET /api/ronin/stats', roninStats],
-  ['GET /api/ronin/burn-history', burnHistory],
-  ['GET /api/ronin/shield-stats', shieldStats],
-  ['GET /api/ronin/shield-scan', shieldScan],
-  ['POST /api/ronin/shield-scan', shieldScan],
-  ['POST /api/ronin/shield-contribution', shieldContribution],
-  ['POST /api/solana/rpc', solanaRpc],
-  ['POST /api/swap/verify', swapVerify],
-  ['POST /api/swap/record', swapRecord],
-  ['GET /api/swap/history', swapHistory],
-  ['POST /api/swap/points', swapPoints],
-  ['GET /api/leaderboard', leaderboard],
-  ['GET /api/trending', trending],
-  ['GET /api/samurai/season/current', currentSeason],
-  ['GET /api/admin/samurai/seasons', adminSeasons],
-  ['POST /api/admin/samurai/seasons', adminSeasons],
-  ['POST /api/admin/samurai/season-action', adminSeasons],
-  ['GET /api/admin/samurai/flags', adminSamurai],
-  ['GET /api/admin/samurai/transactions', adminSamurai],
-  ['GET /api/admin/samurai/wallet', adminSamurai],
-  ['POST /api/admin/samurai/flag', adminSamurai],
-  ['POST /api/admin/samurai/exclude', adminSamurai],
-  ['POST /api/admin/samurai/restore', adminSamurai],
-  ['POST /api/admin/samurai/recalculate', adminSamurai],
-  ['GET /api/admin/dashboard', adminDashboard],
-  ['PATCH /api/admin/dashboard', adminDashboard],
-  ['POST /api/admin/dashboard', adminDashboard],
-  ['POST /api/admin/auth', adminAuth],
-  ['GET /api/admin/auth', adminAuth],
-  ['POST /api/burn/build', burnBuild],
-  ['POST /api/burn/preview', burnPreview],
-  ['POST /api/evm/quote', evmQuote],
-  ['POST /api/evm/complete', evmComplete],
-  ['GET /api/lifi/config', lifiConfig],
-  ['POST /api/lifi/quote', lifiQuote],
-  ['POST /api/lifi/status', lifiStatus],
-  ['POST /api/lifi/complete', lifiComplete],
-  ['GET /api/robinhood/trending', robinhoodTrending],
-  ['GET /api/robinhood/tokens', robinhoodTokens],
-  ['GET /api/coingecko/search', coingeckoSearch],
-  // Rewards (claim flow + admin on-chain management). Mirrors the entries
-  // added to LOCAL_API_HANDLERS in vite.config.js so both dev (vite) and
-  // preview (node server.mjs) serve the same routes.
-  ['GET /api/rewards/balance', rewardsBalance],
-  ['POST /api/rewards/claim', rewardsClaim],
-  ['GET /api/admin/rewards/status', adminRewardsStatus],
-  ['POST /api/admin/rewards/set-paused', adminRewardsSetPaused],
-  ['POST /api/admin/rewards/fund-vault', adminRewardsFundVault],
-  ['POST /api/admin/rewards/withdraw-vault', adminRewardsWithdrawVault],
-])
 
 function createResponse(res) {
   return {
@@ -185,18 +91,13 @@ async function serveStatic(res, pathname) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-    const handler = routes.get(`${req.method} ${url.pathname}`)
 
-    if (handler) {
+    // All /api/* requests go through the gateway. The gateway handles
+    // routing internally — no per-route map needed here.
+    if (url.pathname.startsWith('/api/')) {
       const body = await readBody(req)
       const request = createRequest(req, url, body)
-      return await handler(request, createResponse(res))
-    }
-
-    if (url.pathname.startsWith('/api/')) {
-      res.statusCode = 404
-      res.setHeader('Content-Type', 'application/json; charset=utf-8')
-      return res.end(JSON.stringify({ error: 'API route not found.' }))
+      return await gateway(request, createResponse(res))
     }
 
     if (await serveStatic(res, url.pathname)) return

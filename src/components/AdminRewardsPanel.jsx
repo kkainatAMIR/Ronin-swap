@@ -269,7 +269,7 @@ export default function AdminRewardsPanel() {
         {!adminSignerConfigured && (
           <small className="admin-rewards-warn">
             <Icon name="info" size={12} /> Admin signer not configured.
-            Set SOLANA_REWARDS_ADMIN_KEYPAIR or SOLANA_REWARDS_ADMIN_SECRET_KEY in .env.local
+            Set NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY (or SOLANA_REWARDS_ADMIN_SECRET_KEY) in .env.local
             to enable Pause/Resume/Deposit/Withdraw actions.
           </small>
         )}

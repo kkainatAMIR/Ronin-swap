@@ -5,61 +5,10 @@ import dotenv from 'dotenv'
 
 dotenv.config({ path: '.env.local', override: true })
 
-const LOCAL_API_HANDLERS = {
-  '/api/health': '/api/health.mjs',
-  '/api/solana/rpc': '/api/solana/rpc.mjs',
-  '/api/ronin/stats': '/api/ronin/stats.mjs',
-  '/api/ronin/burn-history': '/api/ronin/burn-history.mjs',
-  '/api/ronin/shield-stats': '/api/ronin/shield-stats.mjs',
-  '/api/burn/preview': '/api/burn/preview.mjs',
-  '/api/burn/build': '/api/burn/build.mjs',
-  '/api/jupiter/quote': '/api/jupiter/quote.mjs',
-  '/api/jupiter/swap': '/api/jupiter/swap.mjs',
-  '/api/jupiter/order': '/api/jupiter/order.mjs',
-  '/api/jupiter/execute': '/api/jupiter/execute.mjs',
-  '/api/evm/quote': '/api/evm/quote.mjs',
-  '/api/evm/complete': '/api/evm/complete.mjs',
-  '/api/lifi/config': '/api/lifi/config.mjs',
-  '/api/lifi/quote': '/api/lifi/quote.mjs',
-  '/api/lifi/status': '/api/lifi/status.mjs',
-  '/api/lifi/complete': '/api/lifi/complete.mjs',
-  '/api/robinhood/trending': '/api/robinhood/trending.mjs',
-  '/api/robinhood/tokens': '/api/robinhood/tokens.mjs',
-  '/api/coingecko/search': '/api/coingecko/search.mjs',
-  '/api/swap/verify': '/api/swap/verify.mjs',
-  '/api/swap/record': '/api/swap/record.mjs',
-  '/api/swap/history': '/api/swap/history.mjs',
-  '/api/swap/points': '/api/swap/points.mjs',
-  '/api/leaderboard': '/api/leaderboard.mjs',
-  '/api/trending': '/api/trending.mjs',
-  '/api/samurai/season/current': '/api/samurai/season.mjs',
-  '/api/admin/auth': '/api/admin/auth.mjs',
-  '/api/admin/dashboard': '/api/admin/dashboard.mjs',
-  '/api/admin/samurai/seasons': '/api/admin/seasons.mjs',
-  '/api/admin/samurai/season-action': '/api/admin/seasons.mjs',
-  '/api/admin/samurai/flags': '/api/admin/samurai.mjs',
-  '/api/admin/samurai/transactions': '/api/admin/samurai.mjs',
-  '/api/admin/samurai/wallet': '/api/admin/samurai.mjs',
-  '/api/admin/samurai/flag': '/api/admin/samurai.mjs',
-  '/api/admin/samurai/exclude': '/api/admin/samurai.mjs',
-  '/api/admin/samurai/restore': '/api/admin/samurai.mjs',
-  '/api/admin/samurai/recalculate': '/api/admin/samurai.mjs',
-  '/api/ronin/shield-stats': '/api/ronin/shield-stats.mjs',
-  '/api/ronin/shield-scan': '/api/ronin/shield-scan.mjs',
-  '/api/ronin/shield-contribution': '/api/ronin/shield-contribution.mjs',
-  // Rewards (claim flow + admin on-chain management). Without these entries,
-  // /api/rewards/* and /api/admin/rewards/* silently 404 during `vite dev`,
-  // which is why the AdminRewardsPanel showed "Admin signer not configured"
-  // even when SOLANA_REWARDS_ADMIN_SECRET_KEY was set in .env.local.
-  '/api/rewards/balance': '/api/rewards/balance.mjs',
-  '/api/rewards/claim': '/api/rewards/claim.mjs',
-  '/api/admin/rewards/status': '/api/admin/rewards/status.mjs',
-  '/api/admin/rewards/set-paused': '/api/admin/rewards/set-paused.mjs',
-  '/api/admin/rewards/fund-vault': '/api/admin/rewards/fund-vault.mjs',
-  '/api/admin/rewards/withdraw-vault': '/api/admin/rewards/withdraw-vault.mjs',
-  // TEMPORARY debug endpoint — remove after diagnosis.
-  '/api/debug-env': '/api/debug-env.mjs',
-}
+// All /api/* requests are now routed through a single gateway
+// (api/index.mjs) which dispatches to handler modules under api_routes/.
+// This mirrors the Vercel production setup (vercel.json rewrites all
+// /api/* to /api/index) and keeps local dev behavior identical to prod.
 
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
@@ -75,9 +24,9 @@ function readRequestBody(req) {
 }
 
 function localApiPlugin(env) {
-  // Vercel executes files in /api automatically in production. This small
-  // adapter gives the same handlers to `vite` during local development and
-  // Arena previews, so /api calls do not get served as JavaScript source.
+  // Vercel rewrites /api/* to /api/index in production. This plugin
+  // does the same for `vite dev` — all /api/* requests go through the
+  // gateway at api/index.mjs.
   for (const [key, value] of Object.entries(env)) {
     process.env[key] = value
   }
@@ -87,8 +36,10 @@ function localApiPlugin(env) {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const requestUrl = new URL(req.url || '/', 'http://localhost')
-        const modulePath = LOCAL_API_HANDLERS[requestUrl.pathname]
-        if (!modulePath) return next()
+
+        // Only intercept /api/* paths. Everything else falls through to
+        // Vite's static file server / SPA fallback.
+        if (!requestUrl.pathname.startsWith('/api/')) return next()
 
         try {
           // SSR API modules read server-only configuration at import time.
@@ -100,7 +51,10 @@ function localApiPlugin(env) {
             req.body = await readRequestBody(req)
           }
 
-          const { default: handler } = await server.ssrLoadModule(modulePath)
+          // Load the gateway. The gateway handles all routing internally
+          // via api/_routes.mjs. We pass req.url unchanged so handlers
+          // that parse req.url (e.g. admin/samurai.mjs) still work.
+          const { default: gateway } = await server.ssrLoadModule('/api/index.mjs')
           res.status = (status) => {
             res.statusCode = status
             return res
@@ -110,9 +64,9 @@ function localApiPlugin(env) {
             res.end(JSON.stringify(body))
             return res
           }
-          await handler(req, res)
+          await gateway(req, res)
         } catch (error) {
-          console.error(`Local API handler failed for ${requestUrl.pathname}:`, error)
+          console.error(`Local API gateway failed for ${requestUrl.pathname}:`, error)
           if (!res.headersSent) {
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
