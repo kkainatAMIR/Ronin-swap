@@ -23,10 +23,14 @@
     "ed25519-hd-key": "^2.0.0",
     "react": "latest",
     "react-dom": "latest",
+    "uuid": "^9.0.1",
     "vite": "latest"
   },
   "devDependencies": {
     "vercel": "latest",
     "vite-plugin-node-polyfills": "^0.28.0"
+  },
+  "overrides": {
+    "uuid": "^9.0.1"
   }
 }
