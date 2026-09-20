@@ -69,14 +69,15 @@ export default async function handler(req, res) {
 
   // Solana rewards program integration requires:
   //   - A Solana RPC endpoint (SOLANA_RPC_URL or HELIUS_API_KEY)
-  //   - The admin keypair (SOLANA_REWARDS_ADMIN_KEYPAIR or _SECRET_KEY)
+  //   - The admin keypair (NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY,
+  //     or legacy SOLANA_REWARDS_ADMIN_SECRET_KEY / _KEYPAIR)
   //
   // If the admin keypair is not configured, the endpoint will fail with
   // a clear configuration error rather than attempting to fall back.
   if (!isRewardsAdminConfigured()) {
     return apiError(res, 503, 'REWARDS_ADMIN_NOT_CONFIGURED',
       'The Solana rewards admin signer is not configured on the server. ' +
-      'Set SOLANA_REWARDS_ADMIN_KEYPAIR or SOLANA_REWARDS_ADMIN_SECRET_KEY.')
+      'Set NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY (preferred), or SOLANA_REWARDS_ADMIN_SECRET_KEY.')
   }
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {})
@@ -290,9 +291,19 @@ export default async function handler(req, res) {
   let signature
   let confirmed = false
   try {
+    // The on-chain Solana program expects points_claimed as a u64 integer,
+    // but the DB stores it as numeric(30,6) with up to 6 decimal places.
+    // Floor to an integer for the on-chain call. The fractional remainder
+    // (sub-point precision, worth < 0.001 SOL) is not claimable on-chain.
+    // The DB accounting (claimed_points increment) uses the full decimal
+    // value for accuracy; the on-chain value is purely informational.
+    const onChainPointsClaimed = Math.floor(Number(claim.points_claimed))
+    if (onChainPointsClaimed <= 0) {
+      throw new Error('POINTS_TOO_SMALL_TO_CLAIM_ON_CHAIN')
+    }
     const result = await submitClaimRewardTx({
       claimId,
-      pointsClaimed: Number(claim.points_claimed),
+      pointsClaimed: onChainPointsClaimed,
       rewardAmountLamports,
       recipientAddress,
     })
@@ -416,12 +427,18 @@ function safeParse(s) { try { return JSON.parse(s) } catch { return {} } }
 
 // Thin wrapper around Supabase REST RPC invocation.
 // Throws Error with .code and .message if the RPC raises an exception.
+//
+// Uses globalThis.__RONIN_LOCAL_ENV__ (set by Vite's localApiPlugin) with
+// process.env fallback — same pattern as supabaseBackend.mjs. This is
+// critical for Vite dev SSR, where process.env is not reliably populated.
+const claimRuntimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 async function callSupabaseRpc(name, params) {
-  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/${name}`, {
+  const response = await fetch(`${claimRuntimeEnv.SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: 'POST',
     headers: {
-      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: claimRuntimeEnv.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${claimRuntimeEnv.SUPABASE_SERVICE_ROLE_KEY}`,
       'Content-Type': 'application/json',
       Prefer: 'return=representation',
     },

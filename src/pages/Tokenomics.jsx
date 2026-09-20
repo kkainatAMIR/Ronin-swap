@@ -31,7 +31,7 @@ export default function Tokenomics() {
           <div className="tokenomics-layout surface-card enhanced-card">
             <div className="donut-stage">
               <div className="donut-chart"><div className="donut-center"><span>$RONIN</span><strong>100%</strong><small>CREATOR ALLOCATION</small></div></div>
-              <div className="donut-legend"><span><i className="legend-liquidity" /> Liquidity</span><span><i className="legend-burn" /> Buy & burn</span><span><i className="legend-dev" /> Vulture & dev</span></div>
+              <div className="donut-legend"><span><i className="legend-liquidity" /> Liquidity</span><span><i className="legend-burn" /> Buy & burn</span><span><i className="legend-dev" /> DEVELOPMENT</span></div>
               <div className="token-visual-side" style={{ marginTop: '28px', height: '220px' }}>
                 <img src="/images/nft-legend.jpg" alt="Ronin allocation visual" />
                 <div className="token-visual-side-overlay" />

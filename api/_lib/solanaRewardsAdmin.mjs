@@ -164,40 +164,72 @@ export function getTxExplorerUrl(signature) {
 // =====================================================================
 // Admin keypair loading
 // =====================================================================
-// Two env var styles are supported so that both local dev (keypair file)
-// and Vercel env vars (single-line JSON array) work without code changes.
+// Loads the backend/admin Solana keypair from env vars. The keypair is
+// used to sign claim_reward, fund_vault, set_paused, update_admin, and
+// withdraw_vault transactions.
 //
-//   SOLANA_REWARDS_ADMIN_KEYPAIR=/path/to/id.json
-//   SOLANA_REWARDS_ADMIN_SECRET_KEY=[123,456,789,...]   (the standard
-//   Solana keypair JSON format)
+// Env var priority (highest first):
+//   1. NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY  (JSON array of 64 bytes)
+//      — primary, post-admin-rotation variable
+//   2. SOLANA_REWARDS_ADMIN_SECRET_KEY      (JSON array of 64 bytes)
+//      — legacy fallback (still works for backward compatibility)
+//   3. SOLANA_REWARDS_ADMIN_KEYPAIR         (file path to id.json)
+//      — local dev fallback (not used on Vercel)
 //
 // The keypair is loaded once and cached. It is NEVER serialized back out,
-// logged, or returned to the frontend.
+// logged, returned to the frontend, or exposed via API responses.
+//
+// Uses globalThis.__RONIN_LOCAL_ENV__ (set by Vite's localApiPlugin) with
+// process.env fallback — same pattern as supabaseBackend.mjs. This is
+// critical for Vite dev SSR, where process.env is not reliably populated.
+const _adminRuntimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 let _adminKeypair = null
 export function getRewardsAdminKeypair() {
   if (_adminKeypair) return _adminKeypair
-  const filePath = process.env.SOLANA_REWARDS_ADMIN_KEYPAIR
-  const secretJson = process.env.SOLANA_REWARDS_ADMIN_SECRET_KEY
-  if (filePath) {
-    const resolved = path.resolve(filePath)
-    const raw = JSON.parse(fs.readFileSync(resolved, 'utf8').trim())
+
+  const newSecretJson = _adminRuntimeEnv.NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY
+  const legacySecretJson = _adminRuntimeEnv.SOLANA_REWARDS_ADMIN_SECRET_KEY
+  const filePath = _adminRuntimeEnv.SOLANA_REWARDS_ADMIN_KEYPAIR
+
+  // Priority 1: NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY (post-rotation primary)
+  if (newSecretJson) {
+    const raw = JSON.parse(newSecretJson)
+    if (!Array.isArray(raw) || raw.length !== 64) {
+      throw new Error('NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY must be a JSON array of 64 numbers')
+    }
     _adminKeypair = Keypair.fromSecretKey(new Uint8Array(raw))
     return _adminKeypair
   }
-  if (secretJson) {
-    const raw = JSON.parse(secretJson)
+
+  // Priority 2: SOLANA_REWARDS_ADMIN_SECRET_KEY (legacy JSON array)
+  if (legacySecretJson) {
+    const raw = JSON.parse(legacySecretJson)
     if (!Array.isArray(raw) || raw.length !== 64) {
       throw new Error('SOLANA_REWARDS_ADMIN_SECRET_KEY must be a JSON array of 64 numbers')
     }
     _adminKeypair = Keypair.fromSecretKey(new Uint8Array(raw))
     return _adminKeypair
   }
-  throw new Error('SOLANA_REWARDS_ADMIN_KEYPAIR (file path) or SOLANA_REWARDS_ADMIN_SECRET_KEY (JSON array) is required')
+
+  // Priority 3: SOLANA_REWARDS_ADMIN_KEYPAIR (local dev file path)
+  if (filePath) {
+    const resolved = path.resolve(filePath)
+    const raw = JSON.parse(fs.readFileSync(resolved, 'utf8').trim())
+    _adminKeypair = Keypair.fromSecretKey(new Uint8Array(raw))
+    return _adminKeypair
+  }
+
+  throw new Error('NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY, SOLANA_REWARDS_ADMIN_SECRET_KEY, or SOLANA_REWARDS_ADMIN_KEYPAIR is required')
 }
 
 // For test/dry-run: returns true if an admin keypair is configured.
 export function isRewardsAdminConfigured() {
-  return Boolean(process.env.SOLANA_REWARDS_ADMIN_KEYPAIR || process.env.SOLANA_REWARDS_ADMIN_SECRET_KEY)
+  return Boolean(
+    _adminRuntimeEnv.NEW_SOLANA_REWARDS_ADMIN_SECRET_KEY ||
+    _adminRuntimeEnv.SOLANA_REWARDS_ADMIN_SECRET_KEY ||
+    _adminRuntimeEnv.SOLANA_REWARDS_ADMIN_KEYPAIR
+  )
 }
 
 // =====================================================================

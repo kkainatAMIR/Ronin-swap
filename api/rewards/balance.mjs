@@ -2,6 +2,13 @@ import { apiError, json, rateLimit } from '../_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../_lib/supabaseBackend.mjs'
 import { getRewardsNetwork } from '../_lib/solanaRewardsAdmin.mjs'
 
+// In Vite dev SSR, process.env is not reliably populated — the env values
+// are injected via globalThis.__RONIN_LOCAL_ENV__ by vite.config.js's
+// localApiPlugin. Use the same runtimeEnv pattern as supabaseBackend.mjs
+// and roninBackend.mjs so the handler reads the correct values regardless
+// of whether it runs under Vite dev, Vercel, or plain Node (server.mjs).
+const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+
 // Validates Solana base58 (32-44), EVM 0x... (40 hex).
 function isValidWallet(value) {
   if (typeof value !== 'string') return false
@@ -26,11 +33,11 @@ export default async function handler(req, res) {
   if (!isValidWallet(wallet)) return apiError(res, 400, 'INVALID_WALLET', 'A valid wallet address is required.')
 
   try {
-    const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/get_wallet_reward_balance`, {
+    const response = await fetch(`${runtimeEnv.SUPABASE_URL}/rest/v1/rpc/get_wallet_reward_balance`, {
       method: 'POST',
       headers: {
-        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: runtimeEnv.SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${runtimeEnv.SUPABASE_SERVICE_ROLE_KEY}`,
         'Content-Type': 'application/json',
         Prefer: 'return=representation',
       },

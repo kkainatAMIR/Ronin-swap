@@ -236,7 +236,7 @@ export const demoProfile = {
 export const tokenomics = [
   { label: 'Liquidity', value: 50, color: '#b52b31', description: 'Used for liquidity and open ecosystem markets.' },
   { label: 'Buy & burn', value: 30, color: '#17161a', description: 'Funds dedicated buyback operations and permanent burning.' },
-  { label: 'Vulture & development', value: 20, color: '#c9bfb0', description: 'Supports ecosystem growth, partnerships, and sustainability.' },
+  { label: 'DEVELOPMENT', value: 20, color: '#c9bfb0', description: 'Supports ecosystem growth, partnerships, and sustainability.' },
 ]
 
 export const contracts = [
