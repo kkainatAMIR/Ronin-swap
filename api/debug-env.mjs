@@ -8,7 +8,7 @@
 // It prints the env values that the balance handler sees, so we can compare
 // them to what `node scripts/test-balance-handler.mjs` sees.
 
-import { json } from '../_lib/roninBackend.mjs'
+import { json } from './_lib/roninBackend.mjs'
 
 export default function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed.' })
