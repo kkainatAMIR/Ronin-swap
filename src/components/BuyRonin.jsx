@@ -413,12 +413,17 @@ export default function BuyRonin() {
         // If we have inAmount/outAmount but no transaction, Jupiter priced the
         // swap but can't build a signable tx for this wallet.
         const hasPriceButNoTx = freshQuote?.inAmount && freshQuote?.outAmount && !freshQuote?.transaction
+        // Jupiter's literal "Failed to get quotes" — usually means the wallet
+        // type isn't supported or the amount is too small for v2 /order.
+        const isFailedToGetQuotes = freshQuote?.error === 'Failed to get quotes'
         throw new JupiterApiError(
           isInsufficient
             ? 'Insufficient SOL balance for this swap. Add SOL to your wallet and try again.'
             : hasPriceButNoTx
               ? 'Jupiter could not build a signable transaction for this wallet. Try a smaller amount, or use a different wallet.'
-              : (freshQuote?.errorMessage || 'Jupiter could not build a transaction for this swap.'),
+              : isFailedToGetQuotes
+                ? 'Jupiter could not price this swap for your wallet right now. Try a slightly different amount or refresh in a moment.'
+                : (freshQuote?.errorMessage || 'Jupiter could not build a transaction for this swap.'),
           { detail: freshQuote }
         )
       }

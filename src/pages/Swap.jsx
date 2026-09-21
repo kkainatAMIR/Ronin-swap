@@ -1189,6 +1189,12 @@ export default function Swap() {
         if (freshQuote?.inAmount && freshQuote?.outAmount && !freshQuote?.transaction) {
           throw new Error('Jupiter could not build a signable transaction for this wallet. Try a smaller amount, or use a different wallet.')
         }
+        // Jupiter returned nothing useful at all — surface the actual error.
+        if (freshQuote?.error) {
+          throw new Error(freshQuote.error === 'Failed to get quotes'
+            ? 'Jupiter could not price this pair for your wallet right now. Try a slightly different amount or refresh in a moment.'
+            : freshQuote.error)
+        }
         throw new Error('Jupiter returned an invalid or missing unsigned transaction payload. Please request a fresh quote and try again.')
       }
 
