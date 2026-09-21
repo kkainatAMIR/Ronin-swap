@@ -1271,7 +1271,7 @@ export default function Swap() {
       setQuoteState('ready')
       setTxState('ready_to_sign')
       setTxError('')
-      return true
+      return freshQuote
     } catch (error) {
       setQuote(null)
       setQuoteMeta(null)
@@ -1284,7 +1284,7 @@ export default function Swap() {
     }
   }
 
-  const executeSwap = async () => {
+  const executeSwap = async (preparedQuote = null) => {
     if (!SWAP_ENABLED || swapInFlightRef.current) return
     if (!wallet?.address) {
       openWalletModal()
@@ -1298,14 +1298,20 @@ export default function Swap() {
       return
     }
 
-    const requestError = validateSwapRequest()
-    if (requestError) {
-      if (/wallet changed|fresh quote/i.test(requestError)) {
-        invalidatePreparedSwap(requestError)
-        return
-      }
+    // Use the preparedQuote passed from handleSwapAction if available.
+    // This is CRITICAL: React state updates from setQuote() are async, so
+    // reading `quote` from the closure right after handleSwapAction returns
+    // would give us the OLD (stale) quote from the price-preview path
+    // (which has transaction: null). The preparedQuote has the REAL
+    // signable transaction from the requireTransaction: true call.
+    const activeQuote = preparedQuote || quote
+
+    // Validate using activeQuote (the fresh one) instead of the stale
+    // `quote` state. This ensures the validation checks the actual
+    // transaction we're about to sign, not the price-preview quote.
+    if (!activeQuote || !isQuoteCurrentForRequest(activeQuote, fromToken, toToken, rawAmountFromUi(amountInput, fromToken.decimals), wallet.address)) {
       setTxState('error')
-      setTxError(requestError)
+      setTxError('Quote is missing or stale. Please refresh the quote and review it again before preparing the swap.')
       return
     }
 
@@ -1318,7 +1324,7 @@ export default function Swap() {
     setPointsError('')
 
     try {
-      const base64Transaction = quote.transaction
+      const base64Transaction = activeQuote.transaction
       let transaction
       try {
         transaction = deserializeTransaction(base64Transaction)
@@ -1346,12 +1352,12 @@ export default function Swap() {
       // transaction directly to the Solana network via our RPC proxy.
       let signature
       let executeResult = null
-      if (quote.requestId) {
+      if (activeQuote.requestId) {
         // v2 flow: submit via /api/jupiter/execute
         executeResult = await executeJupiterOrder({
           signedTransaction,
-          requestId: quote.requestId,
-          lastValidBlockHeight: quote.lastValidBlockHeight,
+          requestId: activeQuote.requestId,
+          lastValidBlockHeight: activeQuote.lastValidBlockHeight,
         })
 
         if (!executeResult?.signature || executeResult?.status === 'Failed' || executeResult?.status === 'error' || (executeResult?.code != null && Number(executeResult.code) !== 0)) {
@@ -1403,7 +1409,7 @@ export default function Swap() {
       }
 
       const outputDecimals = toToken?.decimals || 6
-      const outputRaw = executeResult?.outputAmountResult || executeResult?.outAmount || quote.outAmount || '0'
+      const outputRaw = executeResult?.outputAmountResult || executeResult?.outAmount || activeQuote.outAmount || '0'
       const outputUi = Number(outputRaw) / 10 ** outputDecimals
       setReceivedAmount(Number.isFinite(outputUi) ? outputUi : null)
 
@@ -1588,9 +1594,9 @@ export default function Swap() {
                   await executeSwap()
                   return
                 }
-                const prepared = await handleSwapAction()
-                if (prepared) {
-                  await executeSwap()
+                const preparedQuote = await handleSwapAction()
+                if (preparedQuote) {
+                  await executeSwap(preparedQuote)
                 }
               }}
               disabled={paused || swapInFlightRef.current || txState === 'preparing' || txState === 'signing' || txState === 'submitted' || txState === 'confirming'}
