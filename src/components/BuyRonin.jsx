@@ -91,7 +91,7 @@ function friendlyError(error) {
     return message
   }
   if (/failed to get quotes|could not reach the ronin swap service|unable to reach jupiter/i.test(message)) {
-    return 'The RONIN swap service is unavailable. Please restart the local server and try again.'
+    return 'Jupiter could not price this swap for your wallet. Try a smaller amount or refresh in a moment.'
   }
   if (/no route/i.test(message)) {
     return 'No route is currently available for SOL → RONIN. Please try again shortly.'

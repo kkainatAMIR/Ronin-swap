@@ -1025,7 +1025,9 @@ export default function Swap() {
         const errorMessage = error?.message || ''
         setQuoteError(/insufficient funds/i.test(errorMessage)
           ? 'Insufficient SOL for transaction fees. Add SOL to this wallet and try again.'
-          : errorMessage || 'Unable to price this pair right now.')
+          : /failed to get quotes|could not get quote|no route|not found/i.test(errorMessage)
+            ? 'Jupiter could not price this pair for your wallet. Try a smaller amount, swap direction, or refresh in a moment.'
+            : errorMessage || 'Unable to price this pair right now.')
       }
     }
 

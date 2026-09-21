@@ -113,27 +113,33 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
   }
 
   // First attempt: include the taker if the caller provided one. If Jupiter
-  // rejects the with-taker request (e.g. "Failed to get quotes" for an
-  // off-curve / system-program / otherwise unsupported taker address), retry
+  // rejects the with-taker request for ANY reason (HTTP 400 "Failed to get
+  // quotes" for an off-curve taker, HTTP 500 transient error, etc.), retry
   // WITHOUT the taker so the user still sees a price. The sign-time check
-  // on `quote.transaction` (empty/null → "Insufficient SOL") blocks
-  // execution; we never silently let them sign an unbuildable transaction.
+  // on `quote.transaction` (empty/null → "Insufficient SOL") blocks execution;
+  // we never silently let them sign an unbuildable transaction.
+  //
+  // The only errors we DON'T retry on are:
+  //   - AbortError (caller cancelled the request)
+  //   - The second (no-taker) attempt also fails (real upstream issue)
   try {
     return await fetchOnce(Boolean(taker))
   } catch (error) {
-    const isAbort = error?.name === 'AbortError'
-    if (isAbort) throw error
-    const isJupiterRejection = error instanceof JupiterApiError
-      && error.httpStatus === 400
-      && /failed to get quotes|could not get quote|no route|not found/i.test(error.jupiterError || error.message || '')
-    // Only retry if we actually passed a taker on the first attempt AND
-    // Jupiter's error looks like a taker-specific rejection. Otherwise
-    // re-throw immediately so non-recoverable errors surface fast.
-    if (!taker || !isJupiterRejection) throw error
-    // Retry without taker — quote-only mode. Drop the original taker so
-    // Jupiter builds a quote that doesn't depend on the connected wallet's
-    // on-chain state.
-    return await fetchOnce(false)
+    // Never retry if the caller aborted, or if we never had a taker to drop.
+    if (error?.name === 'AbortError' || !taker) throw error
+    // Any other error from the with-taker attempt → retry without taker.
+    // Quote-only mode doesn't depend on the connected wallet's on-chain
+    // state, so it succeeds in virtually every case where the with-taker
+    // call failed.
+    try {
+      return await fetchOnce(false)
+    } catch (retryError) {
+      // If the retry ALSO fails, throw the ORIGINAL error (not the retry
+      // error) so the caller sees the most informative message from the
+      // first attempt. But if the retry was aborted, propagate that.
+      if (retryError?.name === 'AbortError') throw retryError
+      throw error
+    }
   }
 }
 
