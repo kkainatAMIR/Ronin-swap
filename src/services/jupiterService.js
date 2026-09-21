@@ -263,6 +263,9 @@ export async function getJupiterOrderV1Fallback({ inputMint, outputMint, amountL
   const swapBody = await getJupiterSwapTransaction({ quoteResponse: quoteBody, userPublicKey, signal })
 
   // Step 3: shape the response like v2 /order so callers can treat it the same
+  // CRITICAL: include inputMint, outputMint, and taker — these are checked by
+  // isQuoteCurrentForRequest() in Swap.jsx. Without them, the validation fails
+  // with "Quote is missing or stale" even though the quote is fresh.
   return {
     transaction: swapBody.swapTransaction,
     inAmount: quoteBody.inAmount,
@@ -277,6 +280,10 @@ export async function getJupiterOrderV1Fallback({ inputMint, outputMint, amountL
     feeBps: null,
     feeMint: null,
     platformFee: null,
+    // Fields needed by isQuoteCurrentForRequest() validation:
+    inputMint: String(inputMint),
+    outputMint: String(outputMint),
+    taker: String(userPublicKey),
     source: 'v1-fallback',
   }
 }

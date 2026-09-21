@@ -1306,13 +1306,16 @@ export default function Swap() {
     // signable transaction from the requireTransaction: true call.
     const activeQuote = preparedQuote || quote
 
-    // Validate using activeQuote (the fresh one) instead of the stale
-    // `quote` state. This ensures the validation checks the actual
-    // transaction we're about to sign, not the price-preview quote.
-    if (!activeQuote || !isQuoteCurrentForRequest(activeQuote, fromToken, toToken, rawAmountFromUi(amountInput, fromToken.decimals), wallet.address)) {
-      setTxState('error')
-      setTxError('Quote is missing or stale. Please refresh the quote and review it again before preparing the swap.')
-      return
+    // If we have a freshly-prepared quote, skip the strict staleness check —
+    // it was JUST fetched with the current wallet + amount + tokens.
+    // Only run isQuoteCurrentForRequest when reading from the stale `quote`
+    // state (the "ready_to_sign" re-click case).
+    if (!preparedQuote) {
+      if (!activeQuote || !isQuoteCurrentForRequest(activeQuote, fromToken, toToken, rawAmountFromUi(amountInput, fromToken.decimals), wallet.address)) {
+        setTxState('error')
+        setTxError('Quote is missing or stale. Please refresh the quote and review it again before preparing the swap.')
+        return
+      }
     }
 
     swapInFlightRef.current = true
