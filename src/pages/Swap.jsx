@@ -4,7 +4,7 @@ import { getRobinhoodTokenSections, getRobinhoodTrending } from '../services/rob
 import { getLiveTrendingTokens } from '../services/liveTrendingService'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { VersionedTransaction } from '@solana/web3.js'
+import { Transaction, VersionedTransaction } from '@solana/web3.js'
 import { useWallet, getSolanaProvider } from '../context/WalletContext'
 import Icon from '../components/Icon'
 import { Button, Sakura } from '../components/Layout'
@@ -120,12 +120,21 @@ function solscanTxUrl(signature) {
   return `https://solscan.io/tx/${signature}`
 }
 
+function deserializeTransaction(payload) {
+  if (!payload || typeof payload !== 'string') return null
+  const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0))
+  // Jupiter v2 /swap/v2/order returns VERSIONED transactions (first byte has
+  // bit 0x80 set). Jupiter v1 /swap/v1/swap returns LEGACY transactions
+  // (no version prefix byte). Detect the format and deserialize accordingly.
+  if (bytes.length > 0 && (bytes[0] & 0x80) !== 0) {
+    return VersionedTransaction.deserialize(bytes)
+  }
+  return Transaction.from(Buffer.from(bytes))
+}
+
 function validateUnsignedTransactionPayload(payload) {
-  if (!payload || typeof payload !== 'string') return false
   try {
-    const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0))
-    VersionedTransaction.deserialize(bytes)
-    return true
+    return Boolean(deserializeTransaction(payload))
   } catch {
     return false
   }
@@ -1299,8 +1308,8 @@ export default function Swap() {
 
     try {
       const base64Transaction = quote.transaction
-      const bytes = Uint8Array.from(atob(base64Transaction), (char) => char.charCodeAt(0))
-      const transaction = VersionedTransaction.deserialize(bytes)
+      const transaction = deserializeTransaction(base64Transaction)
+      if (!transaction) throw new Error('Failed to deserialize the swap transaction.')
 
       if (typeof provider.signTransaction !== 'function') {
         throw new Error('The connected wallet does not expose signTransaction.')

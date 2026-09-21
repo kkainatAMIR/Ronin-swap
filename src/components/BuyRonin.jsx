@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PublicKey, VersionedTransaction } from '@solana/web3.js'
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import { useWallet, getSolanaProvider } from '../context/WalletContext'
 import { getSolBalance, getRoninBalance, getRoninSupply, sendSignedSolanaTransaction, confirmSolanaTransaction } from '../services/roninService'
 import { getJupiterOrder, executeJupiterOrder, getJupiterReferralConfig, JupiterApiError, SOL_MINT, LAMPORTS_PER_SOL, JUPITER_REFERRAL_ACCOUNT, JUPITER_REFERRAL_FEE_BPS, solToLamports } from '../services/jupiterService'
@@ -428,9 +428,13 @@ export default function BuyRonin() {
         )
       }
 
-      // 2. Deserialize the assembled transaction.
-      const transactionBuffer = Uint8Array.from(atob(freshQuote.transaction), (c) => c.charCodeAt(0))
-      const transaction = VersionedTransaction.deserialize(transactionBuffer)
+      // 2. Deserialize the assembled transaction. Jupiter v2 /order returns
+      // versioned transactions (first byte has bit 0x80 set); v1 /swap returns
+      // legacy transactions. Detect the format and deserialize accordingly.
+      const transactionBytes = Uint8Array.from(atob(freshQuote.transaction), (c) => c.charCodeAt(0))
+      const transaction = (transactionBytes[0] & 0x80) !== 0
+        ? VersionedTransaction.deserialize(transactionBytes)
+        : Transaction.from(Buffer.from(transactionBytes))
 
       setTxState('confirm-wallet')
 
