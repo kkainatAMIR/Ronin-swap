@@ -12,7 +12,7 @@ import ComingSoon from '../components/ComingSoon'
 import { SWAP_ENABLED } from '../config/features'
 import { FEATURED_TOKEN_SECTIONS, RONIN_QUICK_PAIRS, SOL_MINT, TOKEN_BY_MINT, TRUSTED_TOKENS } from '../config/tokenRegistry'
 import { RONIN_MINT } from '../data'
-import { executeJupiterOrder, getJupiterOrder, JupiterApiError, processSamuraiPoints, recordVerifiedSwap, verifySwapTransaction } from '../services/jupiterService'
+import { executeJupiterOrder, getJupiterOrder, getJupiterOrderV1Fallback, JupiterApiError, processSamuraiPoints, recordVerifiedSwap, verifySwapTransaction } from '../services/jupiterService'
 import { confirmSolanaTransaction, getRoninBalance, getSolBalance } from '../services/roninService'
 import { getAllTokenAccounts } from '../services/shieldService'
 import { ETHEREUM_CHAIN_ID, ETHEREUM_FEATURED_SECTIONS, ETHEREUM_FEATURED_TOKENS, ETHEREUM_SWAP_TOKENS } from '../config/ethereumRegistry'
@@ -1168,14 +1168,49 @@ export default function Swap() {
       // At sign-time we NEED the real Jupiter error so we can tell the user
       // exactly what's wrong: "Insufficient SOL" (add SOL), "Failed to get
       // quotes" (wallet not supported), or a real network error.
-      const freshQuote = await getJupiterOrder({
-        inputMint: fromToken.mint,
-        outputMint: toToken.mint,
-        amountLamports: rawAmount,
-        slippageBps: 100,
-        taker: wallet.address,
-        requireTransaction: true,
-      })
+      // If v2 /order rejects the wallet, fall back to v1 /quote + /swap
+      // which is more lenient and works for wallets that v2 rejects.
+      let freshQuote
+      try {
+        freshQuote = await getJupiterOrder({
+          inputMint: fromToken.mint,
+          outputMint: toToken.mint,
+          amountLamports: rawAmount,
+          slippageBps: 100,
+          taker: wallet.address,
+          requireTransaction: true,
+        })
+      } catch (v2Error) {
+        // If v2 failed with "Insufficient funds", surface that — the wallet
+        // has enough SOL to PRICE the swap but not enough to PAY for it. The
+        // v1 fallback won't help here because the wallet genuinely can't
+        // afford the swap; the user needs to add SOL.
+        const v2Message = v2Error?.message || ''
+        if (/insufficient funds/i.test(v2Message) || v2Error?.detail?.error === 'Insufficient funds') {
+          throw new Error('Insufficient SOL balance for this swap. Add SOL to your wallet and try again.')
+        }
+        // For any other v2 error (Failed to get quotes, etc.), try v1 fallback:
+        // 1. GET /api/jupiter/quote (v1 — more lenient, doesn't need a taker)
+        // 2. POST /api/jupiter/swap (v1 — builds a signable transaction from
+        //    the quote + userPublicKey)
+        // This works for wallets that v2 /order rejects but v1 /quote+swap
+        // accepts (which includes most standard Phantom wallets).
+        try {
+          freshQuote = await getJupiterOrderV1Fallback({
+            inputMint: fromToken.mint,
+            outputMint: toToken.mint,
+            amountLamports: rawAmount,
+            slippageBps: 100,
+            userPublicKey: wallet.address,
+          })
+        } catch (v1Error) {
+          // Both v2 and v1 failed. Throw the more informative of the two.
+          const v1Message = v1Error?.message || 'Jupiter could not build a transaction for this wallet.'
+          throw new Error(/failed to get quotes|no route|not found/i.test(v2Message)
+            ? 'Jupiter could not build a signable transaction for this wallet. Try a smaller amount, or use a different wallet.'
+            : v2Message || v1Message)
+        }
+      }
 
       if (!freshQuote || !freshQuote.transaction || !validateUnsignedTransactionPayload(freshQuote.transaction)) {
         // Distinguish "Insufficient funds" (Jupiter returned a price but no
@@ -1275,31 +1310,47 @@ export default function Swap() {
       const signedTransaction = Buffer.from(signed.serialize()).toString('base64')
       setTxState('submitted')
 
-      const executeResult = await executeJupiterOrder({
-        signedTransaction,
-        requestId: quote.requestId,
-        lastValidBlockHeight: quote.lastValidBlockHeight,
-      })
+      // If the quote came from the v1 fallback, it has no requestId —
+      // Jupiter's v2 /execute endpoint requires one. Use the wallet's
+      // signAndSendTransaction instead, which submits the signed
+      // transaction directly to the Solana network via our RPC proxy.
+      let signature
+      let executeResult = null
+      if (quote.requestId) {
+        // v2 flow: submit via /api/jupiter/execute
+        executeResult = await executeJupiterOrder({
+          signedTransaction,
+          requestId: quote.requestId,
+          lastValidBlockHeight: quote.lastValidBlockHeight,
+        })
 
-      if (!executeResult?.signature || executeResult?.status === 'Failed' || executeResult?.status === 'error' || (executeResult?.code != null && Number(executeResult.code) !== 0)) {
-        throw new Error(executeResult?.error || executeResult?.message || 'Jupiter execution failed.')
+        if (!executeResult?.signature || executeResult?.status === 'Failed' || executeResult?.status === 'error' || (executeResult?.code != null && Number(executeResult.code) !== 0)) {
+          throw new Error(executeResult?.error || executeResult?.message || 'Jupiter execution failed.')
+        }
+        signature = executeResult.signature
+      } else {
+        // v1 fallback flow: submit directly via the wallet provider
+        // (signAndSendTransaction sends the signed tx to the Solana network).
+        const sendResult = await provider.signAndSendTransaction?.(transaction)
+        signature = typeof sendResult === 'string' ? sendResult : sendResult?.signature
+        if (!signature) throw new Error('The wallet did not return a transaction signature.')
       }
 
       setTxState('confirming')
-      await confirmSolanaTransaction(executeResult.signature, 120_000)
+      await confirmSolanaTransaction(signature, 120_000)
 
       setVerificationStatus('verifying')
-      const verification = await verifySwapTransaction({ signature: executeResult.signature, wallet: wallet.address })
+      const verification = await verifySwapTransaction({ signature, wallet: wallet.address })
       setVerificationResult(verification)
 
       if (verification?.verified) {
         setVerificationStatus('verified')
         setPersistenceStatus('saving')
         try {
-          await recordVerifiedSwap({ signature: executeResult.signature, wallet: wallet.address })
+          await recordVerifiedSwap({ signature, wallet: wallet.address })
           setPersistenceStatus('saved')
           try {
-            const points = await processSamuraiPoints({ signature: executeResult.signature })
+            const points = await processSamuraiPoints({ signature })
             setPointsResult(points)
           } catch (pointsError) {
             console.error('Samurai Points processing failed:', pointsError)
@@ -1332,7 +1383,7 @@ export default function Swap() {
         setTxState('failed')
         setTxError(verification?.reason === 'WALLET_MISMATCH' ? 'The transaction was signed by a different wallet than the connected wallet.' : verification?.reason === 'TRANSACTION_FAILED' ? 'The on-chain transaction failed and cannot be verified as a successful swap.' : verification?.status === 'pending' ? 'The transaction is pending confirmation on-chain.' : 'Unable to verify this transaction on Solana.')
       }
-      setTxSignature(executeResult.signature)
+      setTxSignature(signature)
       if (verification?.verified) setTxError('')
     } catch (error) {
       const friendly = friendlySwapError(error)

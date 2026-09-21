@@ -181,6 +181,106 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
   }
 }
 
+/**
+ * Build a signable transaction from a v1 quote + user public key.
+ *
+ * Used as a fallback at sign-time when Jupiter's v2 /swap/v2/order refuses
+ * to build a transaction for a specific taker address (returns HTTP 400
+ * "Failed to get quotes"). The v1 flow is:
+ *
+ *   1. GET /api/jupiter/quote  (v1 quote — already proven to work for this
+ *                              wallet in the price-preview path)
+ *   2. POST /api/jupiter/swap  (v1 swap — assembles a signable transaction
+ *                              from the quote + userPublicKey)
+ *
+ * Returns the v1 swap response, which contains `swapTransaction` (base64)
+ * and other metadata. The caller is responsible for signing and submitting.
+ */
+export async function getJupiterSwapTransaction({ quoteResponse, userPublicKey, signal }) {
+  if (!quoteResponse || typeof quoteResponse !== 'object') {
+    throw new JupiterApiError('A Jupiter v1 quoteResponse object is required.')
+  }
+  if (!userPublicKey) {
+    throw new JupiterApiError('A userPublicKey is required to build a swap transaction.')
+  }
+
+  const response = await fetch('/api/jupiter/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quoteResponse, userPublicKey }),
+    signal,
+  })
+
+  const body = await parseJsonSafely(response)
+  if (!response.ok) {
+    throw new JupiterApiError(body?.error || body?.message || 'Jupiter could not build a swap transaction from this quote.', { status: response.status, detail: body })
+  }
+  if (!body?.swapTransaction) {
+    throw new JupiterApiError(body?.error || body?.message || 'Jupiter did not return a signable swap transaction.', { detail: body })
+  }
+  return body
+}
+
+/**
+ * v1 fallback for sign-time: fetch a v1 quote, then build a signable
+ * transaction from that quote + userPublicKey. Used when /swap/v2/order
+ * refuses to build a transaction for a specific taker (returns "Failed to
+ * get quotes" — Jupiter's v2 endpoint is stricter than v1 about which
+ * wallets it will build transactions for).
+ *
+ * Returns an object shaped like the v2 /order response (so callers can
+ * treat it the same way):
+ *   {
+ *     transaction: "<base64 swapTransaction from v1 /swap>",
+ *     inAmount, outAmount, otherAmountThreshold,
+ *     slippageBps, swapMode, routePlan,
+ *     lastValidBlockHeight: null (v1 /swap doesn't return this),
+ *     requestId: null,
+ *     source: 'v1-fallback',
+ *   }
+ *
+ * The caller signs the transaction and submits it via /api/jupiter/execute
+ * (v2 /execute accepts any signed transaction by requestId — but v1 doesn't
+ * return a requestId, so the caller must use signAndSendTransaction
+ * through the wallet provider directly instead).
+ */
+export async function getJupiterOrderV1Fallback({ inputMint, outputMint, amountLamports, slippageBps = DEFAULT_SLIPPAGE_BPS, userPublicKey, signal }) {
+  // Step 1: fetch v1 quote
+  const quoteParams = new URLSearchParams({
+    inputMint: String(inputMint),
+    outputMint: String(outputMint),
+    amount: String(amountLamports),
+    slippageBps: String(slippageBps),
+    swapMode: 'ExactIn',
+  })
+  const quoteResponse = await fetch(`/api/jupiter/quote?${quoteParams.toString()}`, { signal })
+  const quoteBody = await parseJsonSafely(quoteResponse)
+  if (!quoteResponse.ok || !quoteBody?.inAmount || !quoteBody?.outAmount) {
+    throw new JupiterApiError(quoteBody?.error || 'Jupiter v1 quote failed.', { status: quoteResponse.status, detail: quoteBody })
+  }
+
+  // Step 2: build swap transaction from the quote
+  const swapBody = await getJupiterSwapTransaction({ quoteResponse: quoteBody, userPublicKey, signal })
+
+  // Step 3: shape the response like v2 /order so callers can treat it the same
+  return {
+    transaction: swapBody.swapTransaction,
+    inAmount: quoteBody.inAmount,
+    outAmount: quoteBody.outAmount,
+    otherAmountThreshold: quoteBody.otherAmountThreshold,
+    slippageBps: quoteBody.slippageBps,
+    swapMode: quoteBody.swapMode,
+    priceImpactPct: quoteBody.priceImpactPct,
+    routePlan: quoteBody.routePlan,
+    lastValidBlockHeight: swapBody.lastValidBlockHeight || null,
+    requestId: null,  // v1 /swap doesn't return a requestId
+    feeBps: null,
+    feeMint: null,
+    platformFee: null,
+    source: 'v1-fallback',
+  }
+}
+
 /** Execute a signed Swap V2 order through the RONIN backend (proxied to Jupiter /execute). */
 export async function executeJupiterOrder({ signedTransaction, requestId, lastValidBlockHeight, signal }) {
   if (!signedTransaction || !requestId) throw new JupiterApiError('A signed transaction and requestId are required.')
