@@ -1377,7 +1377,8 @@ export default function Swap() {
         }
 
         if (!executeResult?.signature || executeResult?.status === 'Failed' || executeResult?.status === 'error' || (executeResult?.code != null && Number(executeResult.code) !== 0)) {
-          throw new Error(`Jupiter execution failed: ${executeResult?.error || executeResult?.message || 'The signed transaction was rejected.'}`)
+          const executionError = executeResult?.error?.message || executeResult?.error || executeResult?.message || 'The signed transaction was rejected.'
+          throw new Error(`Jupiter execution failed: ${typeof executionError === 'string' ? executionError : JSON.stringify(executionError)}`)
         }
         signature = executeResult.signature
       } else {

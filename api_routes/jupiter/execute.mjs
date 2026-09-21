@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   try {
     const payload = { signedTransaction: String(signedTransaction), requestId: String(requestId) }
     if (lastValidBlockHeight != null && lastValidBlockHeight !== '') {
-      payload.lastValidBlockHeight = Number(lastValidBlockHeight)
+      payload.lastValidBlockHeight = String(lastValidBlockHeight)
     }
 
     const upstream = await fetchJupiter('/swap/v2/execute', {
@@ -24,7 +24,10 @@ export default async function handler(req, res) {
     })
     const responseBody = await readUpstream(upstream)
     if (!upstream.ok || responseBody?.error || responseBody?.code != null && Number(responseBody.code) !== 0) {
-      return apiError(res, upstream.status >= 500 ? 502 : 400, 'JUPITER_API_ERROR', responseBody?.error || responseBody?.message || 'Jupiter execute failed.')
+      const upstreamError = typeof responseBody?.error === 'string'
+        ? responseBody.error
+        : responseBody?.error?.message || responseBody?.message || JSON.stringify(responseBody?.error || responseBody) || 'Jupiter execute failed.'
+      return apiError(res, upstream.status >= 500 ? 502 : 400, 'JUPITER_API_ERROR', upstreamError)
     }
     return json(res, 200, responseBody)
   } catch (error) {

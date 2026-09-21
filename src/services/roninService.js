@@ -51,8 +51,11 @@ async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
       return { ok: false, label, error: `${label} returned HTTP ${response.status}${detail}` }
     }
     const payload = await response.json()
-    if (payload.error) {
-      return { ok: false, label, error: `${label} returned RPC ${payload.error.code || 'error'}` }
+    if (payload?.error) {
+      const rpcError = payload.error
+      const message = rpcError.message || 'RPC request failed'
+      const code = rpcError.code != null ? ` ${rpcError.code}` : ''
+      return { ok: false, label, error: `${label} returned RPC${code}: ${message}` }
     }
     return { ok: true, result: payload.result }
   } catch (error) {

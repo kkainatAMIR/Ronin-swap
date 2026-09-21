@@ -25,6 +25,16 @@ async function parseJsonSafely(response) {
   }
 }
 
+function formatApiError(value, fallback = '') {
+  if (typeof value === 'string' && value.trim()) return value
+  if (value && typeof value === 'object') {
+    const nested = value.message || value.error || value.errorMessage || value.details
+    if (typeof nested === 'string' && nested.trim()) return nested
+    try { return JSON.stringify(value) } catch { return fallback }
+  }
+  return fallback
+}
+
 /** Read the server-side referral config so the UI always mirrors the backend. */
 export async function getJupiterReferralConfig() {
   try {
@@ -299,7 +309,7 @@ export async function executeJupiterOrder({ signedTransaction, requestId, lastVa
 
   const body = await parseJsonSafely(response)
   if (!response.ok || (!body?.signature && body?.status !== 'Success')) {
-    throw new JupiterApiError(body?.error || body?.message || 'The swap could not be executed.', { status: response.status, detail: body })
+    throw new JupiterApiError(formatApiError(body?.error || body?.message, 'The swap could not be executed.'), { status: response.status, detail: body })
   }
   return body
 }

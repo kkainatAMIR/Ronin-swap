@@ -4,7 +4,7 @@ import { Keypair } from "@solana/web3.js";
 import readline from "readline";
 
 const TARGET_PUBLIC_KEY =
-  "jcJnPd1i1VzaTy4gR4LrKcMyZSgKmC8vy5n5fLo7EHv";
+  "Askr5PWLAm1ukcoHE8nHQh9MEdxD4RtJ1f1qGQD7U9Wn";
 
 const rl = readline.createInterface({
   input: process.stdin,
