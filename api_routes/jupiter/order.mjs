@@ -55,6 +55,32 @@ export default async function handler(req, res) {
 
     const upstream = await fetchJupiter(`/swap/v2/order?${params}`, { headers: { Accept: 'application/json' } })
     const body = await readUpstream(upstream)
+
+    // ── DIAGNOSTIC LOGGING (safe fields only) ──────────────────────────
+    // Logs only public, non-secret information to help diagnose Jupiter
+    // "Failed to get quotes" errors. Does NOT log the Jupiter API key,
+    // private keys, or any wallet secrets.
+    // Remove or reduce this logging once the issue is resolved.
+    console.log('[JUPITER-ORDER-DIAG]', {
+      endpoint: '/swap/v2/order',
+      upstreamStatus: upstream.status,
+      upstreamOk: upstream.ok,
+      inputMint: String(inputMint),
+      outputMint: String(outputMint),
+      amount: String(amount),
+      slippageBps: String(slippageBps || DEFAULT_SLIPPAGE_BPS),
+      takerSupplied: Boolean(taker),
+      takerPrefix: taker ? String(taker).slice(0, 4) + '…' : null,
+      referralAccount: JUPITER_REFERRAL_ACCOUNT,
+      referralFeeBps: String(JUPITER_REFERRAL_FEE_BPS),
+      upstreamError: body?.error || null,
+      upstreamErrorCode: body?.errorCode ?? null,
+      upstreamHasInAmount: Boolean(body?.inAmount),
+      upstreamHasOutAmount: Boolean(body?.outAmount),
+      upstreamHasTransaction: Boolean(body?.transaction),
+    })
+    // ── END DIAGNOSTIC LOGGING ─────────────────────────────────────────
+
     if (!upstream.ok) {
       const referralError = /referralAccount is initialized/i.test(body?.error || body?.message || '')
       if (referralError) {
