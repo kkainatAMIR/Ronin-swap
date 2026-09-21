@@ -62,14 +62,23 @@ export default async function handler(req, res) {
       }
       return apiError(res, upstream.status >= 500 ? 502 : upstream.status, 'JUPITER_API_ERROR', body?.error || body?.message || 'Jupiter order request failed.')
     }
-    // Jupiter /swap/v2/order legitimately returns `transaction: null` when no
-    // `taker` was supplied — that is a valid "quote-only" response used by the
-    // BuyRonin panel to show a price before the wallet is connected. Only
-    // require a transaction when the caller actually passed a `taker` (i.e.,
-    // they want a signable transaction). Quote-only callers check
-    // `quote.transaction` themselves before signing.
-    if (body?.errorCode != null || body?.error || body?.errorMessage || (taker && !body?.transaction)) {
-      return apiError(res, 400, 'JUPITER_ORDER_ERROR', body?.errorMessage || body?.error || 'Jupiter could not prepare a signable transaction for this swap.')
+    // Jupiter /swap/v2/order returns quote data (inAmount + outAmount) in
+    // three shapes, ALL of which are HTTP 200:
+    //
+    //   1. No taker             → transaction: null       (quote-only preview)
+    //   2. Taker + enough SOL   → transaction: "base64…" (signable)
+    //   3. Taker + insufficient → transaction: ""        (price only, blocked at sign)
+    //
+    // Case (3) carries `errorCode: 1` and `error: "Insufficient funds"` — but
+    // it ALSO contains valid `inAmount`/`outAmount`/`routePlan`. The frontend
+    // should still show the price; the sign-time check on `quote.transaction`
+    // is the right place to block execution. Returning the body as-is keeps
+    // that flow working.
+    //
+    // Only reject when there is no quote data at all (e.g. Jupiter's HTTP 400
+    // "Failed to get quotes" for an invalid taker, or "No route found").
+    if (!body?.inAmount || !body?.outAmount) {
+      return apiError(res, 400, 'JUPITER_ORDER_ERROR', body?.errorMessage || body?.error || 'Jupiter could not prepare a quote for this swap.')
     }
     return json(res, 200, body)
   } catch (error) {

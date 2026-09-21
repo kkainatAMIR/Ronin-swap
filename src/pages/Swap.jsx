@@ -1122,6 +1122,13 @@ export default function Swap() {
       return 'Wallet changed after the quote was prepared. Please request a fresh quote and review it again.'
     }
     if (!quote?.transaction || typeof quote.transaction !== 'string' || !validateUnsignedTransactionPayload(quote.transaction)) {
+      // Jupiter returns an empty `transaction: ""` with `error: "Insufficient
+      // funds"` when the connected wallet doesn't have enough SOL to cover
+      // the swap amount + fees. Surface a clear, actionable message instead
+      // of the generic "invalid unsigned transaction payload" text.
+      if (quote?.error === 'Insufficient funds' || quote?.errorCode === 1 || /insufficient funds/i.test(quote?.errorMessage || '')) {
+        return 'Insufficient SOL balance for this swap. Add SOL to your wallet and try again.'
+      }
       return 'Jupiter returned an invalid unsigned transaction payload. Please request a fresh quote and try again.'
     }
     return ''
@@ -1168,6 +1175,11 @@ export default function Swap() {
       })
 
       if (!freshQuote || !freshQuote.transaction || !validateUnsignedTransactionPayload(freshQuote.transaction)) {
+        // Distinguish "Insufficient funds" (Jupiter returned a price but no
+        // signable tx) from a real invalid-payload error.
+        if (freshQuote?.error === 'Insufficient funds' || freshQuote?.errorCode === 1 || /insufficient funds/i.test(freshQuote?.errorMessage || '')) {
+          throw new Error('Insufficient SOL balance for this swap. Add SOL to your wallet and try again.')
+        }
         throw new Error('Jupiter returned an invalid or missing unsigned transaction payload.')
       }
 

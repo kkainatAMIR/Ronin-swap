@@ -73,16 +73,30 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
     throw new JupiterApiError(body?.error || 'Jupiter could not price this swap right now.', { status: response.status, detail: body })
   }
 
-  // Jupiter /swap/v2/order returns `transaction: null` when no `taker` is
-  // provided — that is a valid "quote-only" response used by the BuyRonin
-  // panel to show a price before the wallet is connected. Only require a
-  // transaction when the caller actually passed a `taker` (i.e., they want
-  // a signable transaction). Quote-only callers check `quote.transaction`
-  // themselves before signing.
-  if (body?.errorCode != null || body?.error || body?.errorMessage || (taker && !body?.transaction)) {
-    throw new JupiterApiError(body?.errorMessage || body?.error || 'Jupiter could not prepare a signable transaction for this swap.', { detail: body })
+  // Jupiter /swap/v2/order returns quote data (inAmount + outAmount +
+  // routePlan + priceImpactPct) in THREE different shapes:
+  //
+  //   1. No taker  → HTTP 200, transaction: null     ← "quote-only"
+  //   2. Taker + enough SOL  → HTTP 200, transaction: "base64..."  ← signable
+  //   3. Taker + insufficient SOL → HTTP 200, transaction: "" (empty string),
+  //      errorCode: 1, error: "Insufficient funds"   ← price shown, can't sign
+  //
+  // For (1) and (2) the response is obviously usable. For (3), the UI should
+  // STILL show the price — Jupiter is telling us "here's the rate, but the
+  // connected wallet can't actually pay for it". Downstream consumers
+  // (Swap.jsx handleSwapAction, BuyRonin executeSwap) already check
+  // `quote.transaction` before signing, so the empty-transaction case is
+  // safely blocked at sign time with a clear "insufficient balance" message.
+  //
+  // The ONLY case where we throw here is when Jupiter returned NO quote data
+  // at all (no inAmount/outAmount) — that means a real error like
+  // "Failed to get quotes" (invalid taker) or "No route found".
+  if (!body?.inAmount || !body?.outAmount) {
+    throw new JupiterApiError(
+      body?.errorMessage || body?.error || 'No route is currently available for this swap. Please try again shortly.',
+      { status: response.status, detail: body }
+    )
   }
-  if (!body?.inAmount || !body?.outAmount) throw new JupiterApiError('No route is currently available for this swap. Please try again shortly.', { detail: body })
   return body
 }
 

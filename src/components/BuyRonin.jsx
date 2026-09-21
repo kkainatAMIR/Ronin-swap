@@ -400,7 +400,18 @@ export default function BuyRonin() {
         taker: wallet.address,
       })
       if (!freshQuote.transaction) {
-        throw new JupiterApiError(freshQuote?.errorMessage || 'Jupiter could not build a transaction for this swap.', { detail: freshQuote })
+        // Jupiter returns empty `transaction: ""` with `error: "Insufficient
+        // funds"` when the wallet doesn't have enough SOL to cover the swap
+        // amount + fees. Surface a clear actionable message.
+        const isInsufficient = freshQuote?.error === 'Insufficient funds'
+          || freshQuote?.errorCode === 1
+          || /insufficient funds/i.test(freshQuote?.errorMessage || '')
+        throw new JupiterApiError(
+          isInsufficient
+            ? 'Insufficient SOL balance for this swap. Add SOL to your wallet and try again.'
+            : (freshQuote?.errorMessage || 'Jupiter could not build a transaction for this swap.'),
+          { detail: freshQuote }
+        )
       }
 
       // 2. Deserialize the assembled transaction.
