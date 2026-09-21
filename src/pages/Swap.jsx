@@ -1337,26 +1337,29 @@ export default function Swap() {
       }
       if (!transaction) throw new Error('Failed to deserialize the swap transaction.')
 
-      if (typeof provider.signTransaction !== 'function') {
-        throw new Error('The connected wallet does not expose signTransaction.')
+      // Verify the wallet supports at least ONE of the signing methods we
+      // need. v2 flow uses signTransaction; v1 fallback uses
+      // signAndSendTransaction. The actual check happens in each branch below.
+      if (typeof provider.signTransaction !== 'function' && typeof provider.signAndSendTransaction !== 'function') {
+        throw new Error('The connected wallet does not expose signTransaction or signAndSendTransaction.')
       }
 
-      const signed = await provider.signTransaction(transaction)
-      // Convert signed transaction to base64 without Buffer (browser-compatible)
-      const signedBytes = signed.serialize()
-      let binary = ''
-      for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i])
-      const signedTransaction = btoa(binary)
-      setTxState('submitted')
+      setTxState('signing')
 
-      // If the quote came from the v1 fallback, it has no requestId —
-      // Jupiter's v2 /execute endpoint requires one. Use the wallet's
-      // signAndSendTransaction instead, which submits the signed
-      // transaction directly to the Solana network via our RPC proxy.
       let signature
       let executeResult = null
+      let signedTransaction = null  // base64 of signed tx, only used for v2 /execute
+
       if (activeQuote.requestId) {
-        // v2 flow: submit via /api/jupiter/execute
+        // v2 flow: sign with signTransaction, then submit via /api/jupiter/execute
+        const signed = await provider.signTransaction(transaction)
+        // Convert signed transaction to base64 without Buffer (browser-compatible)
+        const signedBytes = signed.serialize()
+        let binary = ''
+        for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i])
+        signedTransaction = btoa(binary)
+        setTxState('submitted')
+
         executeResult = await executeJupiterOrder({
           signedTransaction,
           requestId: activeQuote.requestId,
@@ -1368,9 +1371,16 @@ export default function Swap() {
         }
         signature = executeResult.signature
       } else {
-        // v1 fallback flow: submit directly via the wallet provider
-        // (signAndSendTransaction sends the signed tx to the Solana network).
-        const sendResult = await provider.signAndSendTransaction?.(transaction)
+        // v1 fallback flow: use signAndSendTransaction directly (it signs AND
+        // sends in one step). Do NOT call signTransaction first — that would
+        // cause a double-sign attempt when signAndSendTransaction re-signs
+        // the same transaction, leading to "Wallet changed or quote expired"
+        // errors. signAndSendTransaction handles fresh blockhash internally.
+        if (typeof provider.signAndSendTransaction !== 'function') {
+          throw new Error('The connected wallet does not support signAndSendTransaction. Cannot submit v1 fallback transaction.')
+        }
+        setTxState('submitted')
+        const sendResult = await provider.signAndSendTransaction(transaction)
         signature = typeof sendResult === 'string' ? sendResult : sendResult?.signature
         if (!signature) throw new Error('The wallet did not return a transaction signature.')
       }
