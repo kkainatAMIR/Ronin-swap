@@ -13,7 +13,7 @@ import { SWAP_ENABLED } from '../config/features'
 import { FEATURED_TOKEN_SECTIONS, RONIN_QUICK_PAIRS, SOL_MINT, TOKEN_BY_MINT, TRUSTED_TOKENS } from '../config/tokenRegistry'
 import { RONIN_MINT } from '../data'
 import { executeJupiterOrder, getJupiterOrder, getJupiterOrderV1Fallback, JupiterApiError, processSamuraiPoints, recordVerifiedSwap, verifySwapTransaction } from '../services/jupiterService'
-import { confirmSolanaTransaction, getRoninBalance, getSolBalance } from '../services/roninService'
+import { confirmSolanaTransaction, getRoninBalance, getSolBalance, sendSignedSolanaTransaction } from '../services/roninService'
 import { getAllTokenAccounts } from '../services/shieldService'
 import { ETHEREUM_CHAIN_ID, ETHEREUM_FEATURED_SECTIONS, ETHEREUM_FEATURED_TOKENS, ETHEREUM_SWAP_TOKENS } from '../config/ethereumRegistry'
 
@@ -77,7 +77,10 @@ function friendlySwapError(error) {
   if (!error) return 'Something went wrong. Please try again.'
   const message = error?.message || String(error)
   if (/user rejected|rejected the request|4001/i.test(message)) return 'Transaction cancelled in wallet.'
-  if (/wallet changed|stale|expired|blockhash|fresh quote/i.test(message)) return 'Wallet changed or the quote expired. Please request a fresh quote before signing.'
+  if (/wallet signing failed/i.test(message)) return message
+  if (/jupiter execution failed/i.test(message)) return message
+  if (/failed to get quotes|insufficient funds|insufficient sol/i.test(message)) return 'Not enough SOL for this swap plus network fees. Enter a smaller amount and leave SOL for fees.'
+  if (/wallet changed|stale|expired|blockhash|fresh quote/i.test(message)) return `Wallet/Jupiter rejected the current order: ${message}`
   if (/insufficient balance/i.test(message)) return 'Insufficient balance to complete this swap.'
   if (/slippage|price impact/i.test(message)) return 'The swap failed because the price moved beyond the allowed slippage.'
   if (/simulation failed|execute.*failed|transaction failed|failed to simulate/i.test(message)) return 'The swap failed during execution or simulation.'
@@ -123,15 +126,18 @@ function solscanTxUrl(signature) {
 function deserializeTransaction(payload) {
   if (!payload || typeof payload !== 'string') return null
   const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0))
-  // Jupiter v2 /swap/v2/order returns VERSIONED transactions (first byte has
-  // bit 0x80 set). Jupiter v1 /swap/v1/swap returns LEGACY transactions
-  // (no version prefix byte). Detect the format and deserialize accordingly.
-  if (bytes.length > 0 && (bytes[0] & 0x80) !== 0) {
+  // The first byte is the compact signature count, not the message version,
+  // so it cannot identify a versioned transaction. Try Jupiter V2's versioned
+  // format first, then fall back to the legacy format used by V1 swaps.
+  try {
     return VersionedTransaction.deserialize(bytes)
+  } catch (versionedError) {
+    try {
+      return Transaction.from(bytes)
+    } catch {
+      throw versionedError
+    }
   }
-  // Legacy transaction — use Transaction.from with Uint8Array directly
-  // (Buffer polyfill can be unreliable in browser contexts).
-  return Transaction.from(bytes)
 }
 
 function validateUnsignedTransactionPayload(payload) {
@@ -1183,13 +1189,14 @@ export default function Swap() {
       if (!rawAmount || Number(rawAmount) <= 0) {
         throw new Error('Enter a valid amount to swap.')
       }
+      if (fromToken.mint === SOL_MINT && fromTokenBalance != null && Number(amountInput) >= Number(fromTokenBalance)) {
+        throw new Error('Not enough SOL for this swap plus network fees. Enter a smaller amount and leave SOL for fees.')
+      }
 
-      // requireTransaction: true → do NOT auto-retry without taker.
-      // At sign-time we NEED the real Jupiter error so we can tell the user
-      // exactly what's wrong: "Insufficient SOL" (add SOL), "Failed to get
-      // quotes" (wallet not supported), or a real network error.
-      // If v2 /order rejects the wallet, fall back to v1 /quote + /swap
-      // which is more lenient and works for wallets that v2 rejects.
+      // Use Jupiter V2 /order with the connected wallet and configured
+      // referral account for the real sign-time transaction. Keep the V1
+      // builder only as a compatibility fallback for wallets/routes V2 cannot
+      // assemble.
       let freshQuote
       try {
         freshQuote = await getJupiterOrder({
@@ -1201,20 +1208,10 @@ export default function Swap() {
           requireTransaction: true,
         })
       } catch (v2Error) {
-        // If v2 failed with "Insufficient funds", surface that — the wallet
-        // has enough SOL to PRICE the swap but not enough to PAY for it. The
-        // v1 fallback won't help here because the wallet genuinely can't
-        // afford the swap; the user needs to add SOL.
         const v2Message = v2Error?.message || ''
         if (/insufficient funds/i.test(v2Message) || v2Error?.detail?.error === 'Insufficient funds') {
-          throw new Error('Insufficient SOL balance for this swap. Add SOL to your wallet and try again.')
+          throw new Error('Insufficient SOL balance for this swap. Add SOL to this wallet and try again.')
         }
-        // For any other v2 error (Failed to get quotes, etc.), try v1 fallback:
-        // 1. GET /api/jupiter/quote (v1 — more lenient, doesn't need a taker)
-        // 2. POST /api/jupiter/swap (v1 — builds a signable transaction from
-        //    the quote + userPublicKey)
-        // This works for wallets that v2 /order rejects but v1 /quote+swap
-        // accepts (which includes most standard Phantom wallets).
         try {
           freshQuote = await getJupiterOrderV1Fallback({
             inputMint: fromToken.mint,
@@ -1224,11 +1221,7 @@ export default function Swap() {
             userPublicKey: wallet.address,
           })
         } catch (v1Error) {
-          // Both v2 and v1 failed. Throw the more informative of the two.
-          const v1Message = v1Error?.message || 'Jupiter could not build a transaction for this wallet.'
-          throw new Error(/failed to get quotes|no route|not found/i.test(v2Message)
-            ? 'Jupiter could not build a signable transaction for this wallet. Try a smaller amount, or use a different wallet.'
-            : v2Message || v1Message)
+          throw new Error(v2Message || v1Error?.message || 'Jupiter could not build a transaction for this wallet.')
         }
       }
 
@@ -1325,6 +1318,7 @@ export default function Swap() {
     setReceivedAmount(null)
     setPointsResult(null)
     setPointsError('')
+    let verificationStarted = false
 
     try {
       const base64Transaction = activeQuote.transaction
@@ -1336,6 +1330,13 @@ export default function Swap() {
         throw new Error('The swap transaction could not be parsed. Please request a fresh quote and try again.')
       }
       if (!transaction) throw new Error('Failed to deserialize the swap transaction.')
+
+      const transactionFeePayer = transaction?.feePayer?.toBase58?.()
+        || transaction?.message?.staticAccountKeys?.[0]?.toBase58?.()
+        || ''
+      if (transactionFeePayer && transactionFeePayer !== wallet.address) {
+        throw new Error(`Wallet mismatch: Jupiter prepared this transaction for ${transactionFeePayer}, but ${wallet.address} is connected.`)
+      }
 
       // Verify the wallet supports at least ONE of the signing methods we
       // need. v2 flow uses signTransaction; v1 fallback uses
@@ -1352,7 +1353,12 @@ export default function Swap() {
 
       if (activeQuote.requestId) {
         // v2 flow: sign with signTransaction, then submit via /api/jupiter/execute
-        const signed = await provider.signTransaction(transaction)
+        let signed
+        try {
+          signed = await provider.signTransaction(transaction)
+        } catch (signError) {
+          throw new Error(`Wallet signing failed: ${signError?.message || 'The wallet rejected this transaction.'}`)
+        }
         // Convert signed transaction to base64 without Buffer (browser-compatible)
         const signedBytes = signed.serialize()
         let binary = ''
@@ -1360,36 +1366,60 @@ export default function Swap() {
         signedTransaction = btoa(binary)
         setTxState('submitted')
 
-        executeResult = await executeJupiterOrder({
-          signedTransaction,
-          requestId: activeQuote.requestId,
-          lastValidBlockHeight: activeQuote.lastValidBlockHeight,
-        })
+        try {
+          executeResult = await executeJupiterOrder({
+            signedTransaction,
+            requestId: activeQuote.requestId,
+            lastValidBlockHeight: activeQuote.lastValidBlockHeight,
+          })
+        } catch (executeError) {
+          throw new Error(`Jupiter execution failed: ${executeError?.message || 'The signed transaction was rejected.'}`)
+        }
 
         if (!executeResult?.signature || executeResult?.status === 'Failed' || executeResult?.status === 'error' || (executeResult?.code != null && Number(executeResult.code) !== 0)) {
-          throw new Error(executeResult?.error || executeResult?.message || 'Jupiter execution failed.')
+          throw new Error(`Jupiter execution failed: ${executeResult?.error || executeResult?.message || 'The signed transaction was rejected.'}`)
         }
         signature = executeResult.signature
       } else {
-        // v1 fallback flow: use signAndSendTransaction directly (it signs AND
-        // sends in one step). Do NOT call signTransaction first — that would
-        // cause a double-sign attempt when signAndSendTransaction re-signs
-        // the same transaction, leading to "Wallet changed or quote expired"
-        // errors. signAndSendTransaction handles fresh blockhash internally.
-        if (typeof provider.signAndSendTransaction !== 'function') {
-          throw new Error('The connected wallet does not support signAndSendTransaction. Cannot submit v1 fallback transaction.')
+        // v1 fallback flow: sign once, then submit the signed bytes through
+        // the app RPC proxy. Using signAndSendTransaction here lets the wallet
+        // sign the Jupiter-built transaction a second time, which can trigger
+        // blockhash/wallet-change errors on fallback orders.
+        if (typeof provider.signTransaction !== 'function') {
+          throw new Error('The connected wallet does not support signTransaction. Cannot submit the v1 fallback transaction.')
         }
+        let signed
+        try {
+          signed = await provider.signTransaction(transaction)
+        } catch (signError) {
+          throw new Error(`Wallet signing failed: ${signError?.message || 'The wallet rejected this transaction.'}`)
+        }
+        const signedBytes = signed.serialize()
         setTxState('submitted')
-        const sendResult = await provider.signAndSendTransaction(transaction)
-        signature = typeof sendResult === 'string' ? sendResult : sendResult?.signature
-        if (!signature) throw new Error('The wallet did not return a transaction signature.')
+        signature = await sendSignedSolanaTransaction(signedBytes)
       }
 
       setTxState('confirming')
       await confirmSolanaTransaction(signature, 120_000)
 
       setVerificationStatus('verifying')
-      const verification = await verifySwapTransaction({ signature, wallet: wallet.address })
+      verificationStarted = true
+      let verification = null
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          verification = await verifySwapTransaction({ signature, wallet: wallet.address })
+        } catch (verificationError) {
+          if (attempt === 2) throw verificationError
+        }
+        const transient = verification?.status === 'error'
+          || verification?.status === 'not_found'
+          || verification?.status === 'pending'
+          || verification?.reason === 'RPC_UNAVAILABLE'
+          || verification?.reason === 'TRANSACTION_NOT_FOUND'
+          || verification?.reason === 'TRANSACTION_PENDING'
+        if (!transient || attempt === 2) break
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      }
       setVerificationResult(verification)
 
       if (verification?.verified) {
@@ -1438,7 +1468,7 @@ export default function Swap() {
       const friendly = friendlySwapError(error)
       setTxState('failed')
       setTxError(friendly)
-      setVerificationStatus('error')
+      setVerificationStatus(verificationStarted ? 'error' : 'idle')
       setVerificationResult(null)
       setPointsResult(null)
       setPointsError('')

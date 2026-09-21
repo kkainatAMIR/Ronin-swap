@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   try {
     const payload = { signedTransaction: String(signedTransaction), requestId: String(requestId) }
     if (lastValidBlockHeight != null && lastValidBlockHeight !== '') {
-      payload.lastValidBlockHeight = String(lastValidBlockHeight)
+      payload.lastValidBlockHeight = Number(lastValidBlockHeight)
     }
 
     const upstream = await fetchJupiter('/swap/v2/execute', {
@@ -23,7 +23,9 @@ export default async function handler(req, res) {
       body: JSON.stringify(payload),
     })
     const responseBody = await readUpstream(upstream)
-    if (!upstream.ok) return apiError(res, upstream.status >= 500 ? 502 : upstream.status, 'JUPITER_API_ERROR', responseBody?.error || responseBody?.message || 'Jupiter execute failed.')
+    if (!upstream.ok || responseBody?.error || responseBody?.code != null && Number(responseBody.code) !== 0) {
+      return apiError(res, upstream.status >= 500 ? 502 : 400, 'JUPITER_API_ERROR', responseBody?.error || responseBody?.message || 'Jupiter execute failed.')
+    }
     return json(res, 200, responseBody)
   } catch (error) {
     console.error('execute proxy error', error)

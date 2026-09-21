@@ -119,13 +119,11 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
     return body
   }
 
-  // First attempt: include the taker if the caller provided one. If Jupiter
-  // rejects the with-taker request for ANY reason (HTTP 400 "Failed to get
-  // quotes" for an off-curve taker, HTTP 500 transient error, etc.), retry
-  // WITHOUT the taker so the user still sees a price — UNLESS the caller
-  // passed `requireTransaction: true`, in which case we want the REAL error
-  // to surface (e.g. "Insufficient funds" at sign-time, so the user knows
-  // to add SOL rather than seeing a generic "invalid transaction payload").
+  // Price previews do not need a taker and are more reliable without one.
+  // Jupiter can reject a taker-bearing quote-only request with "Failed to get
+  // quotes" even though the same pair has a valid route. Only sign-time
+  // requests need the taker because Jupiter must assemble a transaction for
+  // that wallet.
   //
   // If the no-taker v2 attempt ALSO fails (rare — usually means Jupiter is
   // having a real routing issue, OR the amount is too small for /swap/v2/order
@@ -137,14 +135,14 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
   //   - AbortError (caller cancelled the request)
   //   - requireTransaction=true (sign-time — need the real error)
   try {
-    return await fetchOnce(Boolean(taker))
+    return await fetchOnce(requireTransaction && Boolean(taker))
   } catch (error) {
     // Never retry if the caller aborted, or if the caller explicitly asked
     // for the real error (sign-time).
     if (error?.name === 'AbortError' || requireTransaction) throw error
-    // Any other error from the first attempt → retry without taker (if
-    // we had one). If we DIDN'T have a taker, skip straight to v1 fallback.
-    if (taker) {
+    // Sign-time errors must remain visible to the caller so it can try the
+    // v1 transaction builder. Preview requests are already quote-only here.
+    if (requireTransaction && taker) {
       try {
         return await fetchOnce(false)
       } catch (retryError) {

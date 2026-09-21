@@ -285,19 +285,16 @@ export async function verifySwapSignature(signature, wallet) {
   const rpcResult = await getTransactionWithRetry(signature)
   if (rpcResult.kind === 'not_found') {
     const response = { verified: false, status: 'not_found', reason: 'TRANSACTION_NOT_FOUND', signature, wallet }
-    verificationCache.set(cacheKey, response)
     return { status: 200, result: response }
   }
   if (rpcResult.kind === 'rpc_error') {
     const response = { verified: false, status: 'error', reason: 'RPC_UNAVAILABLE', signature, wallet, detail: rpcResult.detail }
-    verificationCache.set(cacheKey, response)
     return { status: 502, result: response }
   }
 
   const result = rpcResult.result
   if (!result) {
     const response = { verified: false, status: 'pending', reason: 'TRANSACTION_PENDING', signature, wallet }
-    verificationCache.set(cacheKey, response)
     return { status: 200, result: response }
   }
 

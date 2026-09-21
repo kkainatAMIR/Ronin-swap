@@ -48,9 +48,11 @@ export default async function handler(req, res) {
       amount: String(amount),
       slippageBps: String(slippageBps || DEFAULT_SLIPPAGE_BPS),
       swapMode: 'ExactIn',
-      referralAccount: JUPITER_REFERRAL_ACCOUNT,
-      referralFee: String(JUPITER_REFERRAL_FEE_BPS),
     })
+    if (JUPITER_V2_REFERRAL_ENABLED) {
+      params.set('referralAccount', JUPITER_REFERRAL_ACCOUNT)
+      params.set('referralFee', String(JUPITER_REFERRAL_FEE_BPS))
+    }
     if (taker) params.set('taker', String(taker))
 
     const upstream = await fetchJupiter(`/swap/v2/order?${params}`, { headers: { Accept: 'application/json' } })
