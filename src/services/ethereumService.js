@@ -10,9 +10,26 @@ export function getEthereumProvider() {
   return metaMask || null
 }
 
+function isMobileBrowser() {
+  return typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+}
+
+function openMetaMaskMobile() {
+  if (typeof window === 'undefined') return false
+  const currentPath = `${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`
+  window.location.href = `https://metamask.app.link/dapp/${currentPath}`
+  return true
+}
+
 export async function connectEthereumWallet() {
   const provider = getEthereumProvider()
-  if (!provider) throw new Error('MetaMask is not installed.')
+  if (!provider) {
+    if (isMobileBrowser()) {
+      openMetaMaskMobile()
+      return null
+    }
+    throw new Error('MetaMask is not installed.')
+  }
   const accounts = await provider.request({ method: 'eth_requestAccounts' })
   if (!accounts?.[0]) throw new Error('MetaMask did not return an account.')
   await ensureEthereumMainnet(provider)
@@ -133,7 +150,13 @@ export async function ensureRobinhoodChain(provider = getEthereumProvider()) {
 
 export async function connectRobinhoodWallet() {
   const provider = getEthereumProvider()
-  if (!provider) throw new Error('MetaMask is not installed.')
+  if (!provider) {
+    if (isMobileBrowser()) {
+      openMetaMaskMobile()
+      return null
+    }
+    throw new Error('MetaMask is not installed.')
+  }
   const accounts = await provider.request({ method: 'eth_requestAccounts' })
   if (!accounts?.[0]) throw new Error('MetaMask did not return an account.')
   await ensureRobinhoodChain(provider)

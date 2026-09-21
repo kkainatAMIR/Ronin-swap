@@ -234,7 +234,14 @@ function EthereumSwapPanel() {
   }, [fromToken.address, toToken.address, amount, account])
 
   const connect = async () => {
-    try { setMessage(''); const nextAccount = await connectEthereumWallet(); setAccount(nextAccount); setBalances(await getEthereumTokenBalances(getEthereumProvider(), nextAccount, ETHEREUM_SWAP_TOKENS)); setPrices(await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS)) } catch (error) { setMessage(error.message) }
+    try {
+      setMessage('')
+      const nextAccount = await connectEthereumWallet()
+      if (!nextAccount) return
+      setAccount(nextAccount)
+      setBalances(await getEthereumTokenBalances(getEthereumProvider(), nextAccount, ETHEREUM_SWAP_TOKENS))
+      setPrices(await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS))
+    } catch (error) { setMessage(error.message) }
   }
 
   const etherscanTxUrl = (hash) => `https://etherscan.io/tx/${hash}`
