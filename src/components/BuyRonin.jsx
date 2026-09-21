@@ -431,10 +431,17 @@ export default function BuyRonin() {
       // 2. Deserialize the assembled transaction. Jupiter v2 /order returns
       // versioned transactions (first byte has bit 0x80 set); v1 /swap returns
       // legacy transactions. Detect the format and deserialize accordingly.
+      // Use Uint8Array directly (Buffer polyfill can be unreliable in browser).
       const transactionBytes = Uint8Array.from(atob(freshQuote.transaction), (c) => c.charCodeAt(0))
-      const transaction = (transactionBytes[0] & 0x80) !== 0
-        ? VersionedTransaction.deserialize(transactionBytes)
-        : Transaction.from(Buffer.from(transactionBytes))
+      let transaction
+      try {
+        transaction = (transactionBytes[0] & 0x80) !== 0
+          ? VersionedTransaction.deserialize(transactionBytes)
+          : Transaction.from(transactionBytes)
+      } catch (deserializeError) {
+        console.error('Transaction deserialization failed:', deserializeError)
+        throw new JupiterApiError('The swap transaction could not be parsed. Please request a fresh quote and try again.')
+      }
 
       setTxState('confirm-wallet')
 
@@ -444,7 +451,11 @@ export default function BuyRonin() {
       let signature
       if (typeof provider.signTransaction === 'function') {
         const signed = await provider.signTransaction(transaction)
-        const signedBase64 = Buffer.from(signed.serialize()).toString('base64')
+        // Convert signed transaction to base64 without Buffer (browser-compatible)
+        const signedBytes = signed.serialize()
+        let binary = ''
+        for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i])
+        const signedBase64 = btoa(binary)
 
         setTxState('processing')
 

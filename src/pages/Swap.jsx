@@ -129,12 +129,23 @@ function deserializeTransaction(payload) {
   if (bytes.length > 0 && (bytes[0] & 0x80) !== 0) {
     return VersionedTransaction.deserialize(bytes)
   }
-  return Transaction.from(Buffer.from(bytes))
+  // Legacy transaction — use Transaction.from with Uint8Array directly
+  // (Buffer polyfill can be unreliable in browser contexts).
+  return Transaction.from(bytes)
 }
 
 function validateUnsignedTransactionPayload(payload) {
+  // Only do a lightweight format check here — don't try to fully deserialize
+  // the transaction. The actual deserialization happens at sign time, where
+  // any format errors will surface with a clear message. Trying to
+  // deserialize here was causing false negatives (Transaction.from throwing
+  // on valid legacy transactions due to Buffer polyfill quirks).
+  if (!payload || typeof payload !== 'string') return false
+  if (payload.length < 100) return false  // too short to be a real transaction
+  // Must be valid base64
   try {
-    return Boolean(deserializeTransaction(payload))
+    const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0))
+    return bytes.length > 0
   } catch {
     return false
   }
@@ -1308,7 +1319,13 @@ export default function Swap() {
 
     try {
       const base64Transaction = quote.transaction
-      const transaction = deserializeTransaction(base64Transaction)
+      let transaction
+      try {
+        transaction = deserializeTransaction(base64Transaction)
+      } catch (deserializeError) {
+        console.error('Transaction deserialization failed:', deserializeError)
+        throw new Error('The swap transaction could not be parsed. Please request a fresh quote and try again.')
+      }
       if (!transaction) throw new Error('Failed to deserialize the swap transaction.')
 
       if (typeof provider.signTransaction !== 'function') {
@@ -1316,7 +1333,11 @@ export default function Swap() {
       }
 
       const signed = await provider.signTransaction(transaction)
-      const signedTransaction = Buffer.from(signed.serialize()).toString('base64')
+      // Convert signed transaction to base64 without Buffer (browser-compatible)
+      const signedBytes = signed.serialize()
+      let binary = ''
+      for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i])
+      const signedTransaction = btoa(binary)
       setTxState('submitted')
 
       // If the quote came from the v1 fallback, it has no requestId —
