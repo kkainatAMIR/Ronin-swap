@@ -45,59 +45,96 @@ export async function getJupiterReferralConfig() {
 
 /** Fetch a quote (and, when taker is provided, an assembled transaction) via Swap V2 /order. */
 export async function getJupiterOrder({ inputMint, outputMint, amountLamports, slippageBps = DEFAULT_SLIPPAGE_BPS, taker, signal }) {
-  const params = new URLSearchParams({
-    inputMint: String(inputMint),
-    outputMint: String(outputMint),
-    amount: String(amountLamports),
-    slippageBps: String(slippageBps),
-    swapMode: 'ExactIn',
-  })
-  if (taker) params.set('taker', String(taker))
+  const buildParams = (includeTaker) => {
+    const params = new URLSearchParams({
+      inputMint: String(inputMint),
+      outputMint: String(outputMint),
+      amount: String(amountLamports),
+      slippageBps: String(slippageBps),
+      swapMode: 'ExactIn',
+    })
+    if (includeTaker && taker) params.set('taker', String(taker))
+    return params
+  }
 
-  let response
+  const fetchOnce = async (includeTaker) => {
+    const params = buildParams(includeTaker)
+    let response
+    try {
+      response = await fetch(`/api/jupiter/order?${params.toString()}`, { signal })
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error
+      throw new JupiterApiError('Could not reach the RONIN swap service. Please try again.', { detail: error })
+    }
+    const body = await parseJsonSafely(response)
+    if (!response.ok) {
+      if (response.status === 400 && /referralAccount is initialized/i.test(body?.error || body?.detail?.error || '')) {
+        throw new JupiterApiError('Jupiter referral setup is incomplete. The referral account needs to be initialized for the Swap V2 / Ultra referral project before a fee-applied order can be created.', { status: response.status, detail: body })
+      }
+      if (response.status === 404 || /no route|not found|could not find any route/i.test(body?.error || body?.detail?.error || '')) {
+        throw new JupiterApiError('No route is currently available for this swap. Please try again shortly.', { status: response.status, detail: body })
+      }
+      // Surface Jupiter's actual error message + status so callers can retry
+      // with a different strategy (e.g. drop the taker) if they want to.
+      const err = new JupiterApiError(body?.error || 'Jupiter could not price this swap right now.', { status: response.status, detail: body })
+      err.httpStatus = response.status
+      err.jupiterError = body?.error || ''
+      throw err
+    }
+
+    // Jupiter /swap/v2/order returns quote data (inAmount + outAmount +
+    // routePlan + priceImpactPct) in THREE different shapes, ALL HTTP 200:
+    //
+    //   1. No taker  → HTTP 200, transaction: null     ← "quote-only"
+    //   2. Taker + enough SOL  → HTTP 200, transaction: "base64..."  ← signable
+    //   3. Taker + insufficient SOL → HTTP 200, transaction: "" (empty string),
+    //      errorCode: 1, error: "Insufficient funds"   ← price shown, can't sign
+    //
+    // For (1) and (2) the response is obviously usable. For (3), the UI should
+    // STILL show the price — Jupiter is telling us "here's the rate, but the
+    // connected wallet can't actually pay for it". Downstream consumers
+    // (Swap.jsx handleSwapAction, BuyRonin executeSwap) already check
+    // `quote.transaction` before signing, so the empty-transaction case is
+    // safely blocked at sign time with a clear "insufficient balance" message.
+    //
+    // The ONLY case where we throw here is when Jupiter returned NO quote data
+    // at all (no inAmount/outAmount) — that means a real error like
+    // "Failed to get quotes" (invalid taker) or "No route found".
+    if (!body?.inAmount || !body?.outAmount) {
+      const err = new JupiterApiError(
+        body?.errorMessage || body?.error || 'No route is currently available for this swap. Please try again shortly.',
+        { status: response.status, detail: body }
+      )
+      err.httpStatus = response.status
+      err.jupiterError = body?.error || ''
+      throw err
+    }
+    return body
+  }
+
+  // First attempt: include the taker if the caller provided one. If Jupiter
+  // rejects the with-taker request (e.g. "Failed to get quotes" for an
+  // off-curve / system-program / otherwise unsupported taker address), retry
+  // WITHOUT the taker so the user still sees a price. The sign-time check
+  // on `quote.transaction` (empty/null → "Insufficient SOL") blocks
+  // execution; we never silently let them sign an unbuildable transaction.
   try {
-    response = await fetch(`/api/jupiter/order?${params.toString()}`, { signal })
+    return await fetchOnce(Boolean(taker))
   } catch (error) {
-    if (error?.name === 'AbortError') throw error
-    throw new JupiterApiError('Could not reach the RONIN swap service. Please try again.', { detail: error })
+    const isAbort = error?.name === 'AbortError'
+    if (isAbort) throw error
+    const isJupiterRejection = error instanceof JupiterApiError
+      && error.httpStatus === 400
+      && /failed to get quotes|could not get quote|no route|not found/i.test(error.jupiterError || error.message || '')
+    // Only retry if we actually passed a taker on the first attempt AND
+    // Jupiter's error looks like a taker-specific rejection. Otherwise
+    // re-throw immediately so non-recoverable errors surface fast.
+    if (!taker || !isJupiterRejection) throw error
+    // Retry without taker — quote-only mode. Drop the original taker so
+    // Jupiter builds a quote that doesn't depend on the connected wallet's
+    // on-chain state.
+    return await fetchOnce(false)
   }
-
-  const body = await parseJsonSafely(response)
-  if (!response.ok) {
-    if (response.status === 400 && /referralAccount is initialized/i.test(body?.error || body?.detail?.error || '')) {
-      throw new JupiterApiError('Jupiter referral setup is incomplete. The referral account needs to be initialized for the Swap V2 / Ultra referral project before a fee-applied order can be created.', { status: response.status, detail: body })
-    }
-    if (response.status === 404 || /no route|not found|could not find any route/i.test(body?.error || body?.detail?.error || '')) {
-      throw new JupiterApiError('No route is currently available for this swap. Please try again shortly.', { status: response.status, detail: body })
-    }
-    throw new JupiterApiError(body?.error || 'Jupiter could not price this swap right now.', { status: response.status, detail: body })
-  }
-
-  // Jupiter /swap/v2/order returns quote data (inAmount + outAmount +
-  // routePlan + priceImpactPct) in THREE different shapes:
-  //
-  //   1. No taker  → HTTP 200, transaction: null     ← "quote-only"
-  //   2. Taker + enough SOL  → HTTP 200, transaction: "base64..."  ← signable
-  //   3. Taker + insufficient SOL → HTTP 200, transaction: "" (empty string),
-  //      errorCode: 1, error: "Insufficient funds"   ← price shown, can't sign
-  //
-  // For (1) and (2) the response is obviously usable. For (3), the UI should
-  // STILL show the price — Jupiter is telling us "here's the rate, but the
-  // connected wallet can't actually pay for it". Downstream consumers
-  // (Swap.jsx handleSwapAction, BuyRonin executeSwap) already check
-  // `quote.transaction` before signing, so the empty-transaction case is
-  // safely blocked at sign time with a clear "insufficient balance" message.
-  //
-  // The ONLY case where we throw here is when Jupiter returned NO quote data
-  // at all (no inAmount/outAmount) — that means a real error like
-  // "Failed to get quotes" (invalid taker) or "No route found".
-  if (!body?.inAmount || !body?.outAmount) {
-    throw new JupiterApiError(
-      body?.errorMessage || body?.error || 'No route is currently available for this swap. Please try again shortly.',
-      { status: response.status, detail: body }
-    )
-  }
-  return body
 }
 
 /** Execute a signed Swap V2 order through the RONIN backend (proxied to Jupiter /execute). */
