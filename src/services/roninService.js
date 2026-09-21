@@ -7,7 +7,17 @@ const CONFIGURED_SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || ''
 // RPC endpoints frequently reject POST requests with 403 responses.
 export const SOLANA_RPC_URL = CONFIGURED_SOLANA_RPC_URL || SOLANA_RPC_PROXY_URL
 const SOLANA_RPC_ENDPOINTS = [SOLANA_RPC_PROXY_URL]
-const RPC_TIMEOUT_MS = 5000
+// 15s matches shieldService.js and gives the server-side proxy enough
+// headroom to ride out Vercel cold-start latency (1-3s) plus a slow
+// upstream Solana RPC response without the browser aborting prematurely.
+// The previous 5s timeout was too tight and caused spurious
+// "All Solana RPC endpoints failed ... timed out after 5s" errors on
+// the first request after the function went idle.
+const RPC_TIMEOUT_MS = 15_000
+// Vercel serverless functions can take 1-3s to cold-start on the first
+// request after idle. If the very first request to the proxy times out
+// or fails, retry once before giving up — by then the function is warm.
+const RPC_RETRY_ONCE_ON_TIMEOUT = true
 export const RONIN_TOKEN_URL = `https://solscan.io/token/${RONIN_MINT}#holders`
 
 function extractHeliusKey(rpcUrl) {
@@ -23,37 +33,55 @@ function rpcEndpointLabel(endpoint) {
   try { return new URL(endpoint, window.location.origin).hostname } catch { return 'configured endpoint' }
 }
 
+async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const label = rpcEndpointLabel(endpoint)
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null)
+      const detail = errorBody?.error ? `: ${errorBody.error}` : ''
+      return { ok: false, label, error: `${label} returned HTTP ${response.status}${detail}` }
+    }
+    const payload = await response.json()
+    if (payload.error) {
+      return { ok: false, label, error: `${label} returned RPC ${payload.error.code || 'error'}` }
+    }
+    return { ok: true, result: payload.result }
+  } catch (error) {
+    return {
+      ok: false,
+      label,
+      error: `${label}: ${error.name === 'AbortError' ? `timed out after ${timeoutMs / 1000}s` : error.message || 'request failed'}`,
+      timedOut: error.name === 'AbortError',
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function rpcRequest(method, params) {
   const failures = []
   for (const endpoint of SOLANA_RPC_ENDPOINTS) {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS)
-    const label = rpcEndpointLabel(endpoint)
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
-        signal: controller.signal,
-      })
+    let attempt = await callRpcEndpoint(endpoint, method, params, RPC_TIMEOUT_MS)
+    if (attempt.ok) return attempt.result
 
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null)
-        const detail = errorBody?.error ? `: ${errorBody.error}` : ''
-        failures.push(`${label} returned HTTP ${response.status}${detail}`)
-        continue
-      }
-      const payload = await response.json()
-      if (payload.error) {
-        failures.push(`${label} returned RPC ${payload.error.code || 'error'}`)
-        continue
-      }
-      return payload.result
-    } catch (error) {
-      failures.push(`${label}: ${error.name === 'AbortError' ? `timed out after ${RPC_TIMEOUT_MS / 1000}s` : error.message || 'request failed'}`)
-    } finally {
-      clearTimeout(timeout)
+    // Retry once on timeout — Vercel cold-start can cause the first request
+    // to hit the 15s ceiling even when the proxy itself is healthy. By the
+    // time we retry, the function is warm and the second call usually
+    // returns in well under a second.
+    if (RPC_RETRY_ONCE_ON_TIMEOUT && attempt.timedOut) {
+      attempt = await callRpcEndpoint(endpoint, method, params, RPC_TIMEOUT_MS)
+      if (attempt.ok) return attempt.result
     }
+    if (attempt.error) failures.push(attempt.error)
   }
 
   throw new Error(`All Solana RPC endpoints failed for ${method}: ${failures.join('; ')}. Set VITE_SOLANA_RPC_URL to a working HTTPS RPC endpoint.`)
