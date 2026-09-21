@@ -43,8 +43,15 @@ export async function getJupiterReferralConfig() {
   }
 }
 
-/** Fetch a quote (and, when taker is provided, an assembled transaction) via Swap V2 /order. */
-export async function getJupiterOrder({ inputMint, outputMint, amountLamports, slippageBps = DEFAULT_SLIPPAGE_BPS, taker, signal }) {
+/** Fetch a quote (and, when taker is provided, an assembled transaction) via Swap V2 /order.
+ *
+ *  Parameters:
+ *   - requireTransaction: when true, do NOT auto-retry without taker on failure.
+ *     Use this at sign-time so the real Jupiter error (e.g. "Insufficient funds",
+ *     "Failed to get quotes") surfaces to the user instead of being masked by
+ *     a quote-only retry. Default false (price-preview calls use the retry).
+ */
+export async function getJupiterOrder({ inputMint, outputMint, amountLamports, slippageBps = DEFAULT_SLIPPAGE_BPS, taker, signal, requireTransaction = false }) {
   const buildParams = (includeTaker) => {
     const params = new URLSearchParams({
       inputMint: String(inputMint),
@@ -115,18 +122,21 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
   // First attempt: include the taker if the caller provided one. If Jupiter
   // rejects the with-taker request for ANY reason (HTTP 400 "Failed to get
   // quotes" for an off-curve taker, HTTP 500 transient error, etc.), retry
-  // WITHOUT the taker so the user still sees a price. The sign-time check
-  // on `quote.transaction` (empty/null → "Insufficient SOL") blocks execution;
-  // we never silently let them sign an unbuildable transaction.
+  // WITHOUT the taker so the user still sees a price — UNLESS the caller
+  // passed `requireTransaction: true`, in which case we want the REAL error
+  // to surface (e.g. "Insufficient funds" at sign-time, so the user knows
+  // to add SOL rather than seeing a generic "invalid transaction payload").
   //
   // The only errors we DON'T retry on are:
   //   - AbortError (caller cancelled the request)
+  //   - requireTransaction=true (sign-time — need the real error)
   //   - The second (no-taker) attempt also fails (real upstream issue)
   try {
     return await fetchOnce(Boolean(taker))
   } catch (error) {
-    // Never retry if the caller aborted, or if we never had a taker to drop.
-    if (error?.name === 'AbortError' || !taker) throw error
+    // Never retry if the caller aborted, if we never had a taker to drop,
+    // or if the caller explicitly asked for the real error (sign-time).
+    if (error?.name === 'AbortError' || !taker || requireTransaction) throw error
     // Any other error from the with-taker attempt → retry without taker.
     // Quote-only mode doesn't depend on the connected wallet's on-chain
     // state, so it succeeds in virtually every case where the with-taker

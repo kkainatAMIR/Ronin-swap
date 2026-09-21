@@ -1123,16 +1123,12 @@ export default function Swap() {
     if (quoteMeta?.walletAddress && String(quoteMeta.walletAddress).toLowerCase() !== String(wallet.address).toLowerCase()) {
       return 'Wallet changed after the quote was prepared. Please request a fresh quote and review it again.'
     }
-    if (!quote?.transaction || typeof quote.transaction !== 'string' || !validateUnsignedTransactionPayload(quote.transaction)) {
-      // Jupiter returns an empty `transaction: ""` with `error: "Insufficient
-      // funds"` when the connected wallet doesn't have enough SOL to cover
-      // the swap amount + fees. Surface a clear, actionable message instead
-      // of the generic "invalid unsigned transaction payload" text.
-      if (quote?.error === 'Insufficient funds' || quote?.errorCode === 1 || /insufficient funds/i.test(quote?.errorMessage || '')) {
-        return 'Insufficient SOL balance for this swap. Add SOL to your wallet and try again.'
-      }
-      return 'Jupiter returned an invalid unsigned transaction payload. Please request a fresh quote and try again.'
-    }
+    // NOTE: we intentionally do NOT check `quote.transaction` here anymore.
+    // The displayed quote may be a quote-only response (transaction: null)
+    // from the auto-retry without taker — that's fine for showing a price.
+    // The actual transaction check happens in handleSwapAction after it
+    // re-fetches WITH the taker (requireTransaction: true), which surfaces
+    // the real Jupiter error (Insufficient funds / wallet not supported).
     return ''
   }
 
@@ -1168,12 +1164,17 @@ export default function Swap() {
         throw new Error('Enter a valid amount to swap.')
       }
 
+      // requireTransaction: true → do NOT auto-retry without taker.
+      // At sign-time we NEED the real Jupiter error so we can tell the user
+      // exactly what's wrong: "Insufficient SOL" (add SOL), "Failed to get
+      // quotes" (wallet not supported), or a real network error.
       const freshQuote = await getJupiterOrder({
         inputMint: fromToken.mint,
         outputMint: toToken.mint,
         amountLamports: rawAmount,
         slippageBps: 100,
         taker: wallet.address,
+        requireTransaction: true,
       })
 
       if (!freshQuote || !freshQuote.transaction || !validateUnsignedTransactionPayload(freshQuote.transaction)) {
@@ -1182,7 +1183,13 @@ export default function Swap() {
         if (freshQuote?.error === 'Insufficient funds' || freshQuote?.errorCode === 1 || /insufficient funds/i.test(freshQuote?.errorMessage || '')) {
           throw new Error('Insufficient SOL balance for this swap. Add SOL to your wallet and try again.')
         }
-        throw new Error('Jupiter returned an invalid or missing unsigned transaction payload.')
+        // If Jupiter returned a quote-only response (transaction: null) even
+        // with the taker, the wallet is not supported by Jupiter's quote
+        // engine for this pair. Surface a clear actionable message.
+        if (freshQuote?.inAmount && freshQuote?.outAmount && !freshQuote?.transaction) {
+          throw new Error('Jupiter could not build a signable transaction for this wallet. Try a smaller amount, or use a different wallet.')
+        }
+        throw new Error('Jupiter returned an invalid or missing unsigned transaction payload. Please request a fresh quote and try again.')
       }
 
       const freshQuoteKey = getQuoteFingerprint({

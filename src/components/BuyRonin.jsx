@@ -392,12 +392,16 @@ export default function BuyRonin() {
     try {
       // 1. Re-fetch a fresh evaluated order with the connected taker so we get
       // the assembled transaction with the RoninSamurai.com referral applied.
+      // requireTransaction: true → do NOT auto-retry without taker at
+      // sign-time. We NEED the real Jupiter error so we can tell the user
+      // exactly what's wrong (Insufficient SOL vs. wallet not supported).
       setTxState('processing')
       const freshQuote = await getJupiterOrder({
         inputMint,
         outputMint,
         amountLamports: isSell ? Math.round(numericAmount * (10 ** inputDecimals)) : solToLamports(numericAmount),
         taker: wallet.address,
+        requireTransaction: true,
       })
       if (!freshQuote.transaction) {
         // Jupiter returns empty `transaction: ""` with `error: "Insufficient
@@ -406,10 +410,15 @@ export default function BuyRonin() {
         const isInsufficient = freshQuote?.error === 'Insufficient funds'
           || freshQuote?.errorCode === 1
           || /insufficient funds/i.test(freshQuote?.errorMessage || '')
+        // If we have inAmount/outAmount but no transaction, Jupiter priced the
+        // swap but can't build a signable tx for this wallet.
+        const hasPriceButNoTx = freshQuote?.inAmount && freshQuote?.outAmount && !freshQuote?.transaction
         throw new JupiterApiError(
           isInsufficient
             ? 'Insufficient SOL balance for this swap. Add SOL to your wallet and try again.'
-            : (freshQuote?.errorMessage || 'Jupiter could not build a transaction for this swap.'),
+            : hasPriceButNoTx
+              ? 'Jupiter could not build a signable transaction for this wallet. Try a smaller amount, or use a different wallet.'
+              : (freshQuote?.errorMessage || 'Jupiter could not build a transaction for this swap.'),
           { detail: freshQuote }
         )
       }
