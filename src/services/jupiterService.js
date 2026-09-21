@@ -127,10 +127,10 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
   // to surface (e.g. "Insufficient funds" at sign-time, so the user knows
   // to add SOL rather than seeing a generic "invalid transaction payload").
   //
-  // If BOTH attempts fail (rare — usually means Jupiter is having a real
-  // routing issue, OR the amount is too small for /swap/v2/order to price),
-  // fall back to /api/jupiter/quote (the v1 endpoint), which is more
-  // lenient and returns just a quote (no signable transaction). The user
+  // If the no-taker v2 attempt ALSO fails (rare — usually means Jupiter is
+  // having a real routing issue, OR the amount is too small for /swap/v2/order
+  // to price), fall back to /api/jupiter/quote (the v1 endpoint), which is
+  // more lenient and returns just a quote (no signable transaction). The user
   // still sees a price; sign-time will surface a clear error.
   //
   // The only errors we DON'T retry on are:
@@ -139,41 +139,45 @@ export async function getJupiterOrder({ inputMint, outputMint, amountLamports, s
   try {
     return await fetchOnce(Boolean(taker))
   } catch (error) {
-    // Never retry if the caller aborted, if we never had a taker to drop,
-    // or if the caller explicitly asked for the real error (sign-time).
-    if (error?.name === 'AbortError' || !taker || requireTransaction) throw error
-    // Any other error from the with-taker attempt → retry without taker.
-    try {
-      return await fetchOnce(false)
-    } catch (retryError) {
-      if (retryError?.name === 'AbortError') throw retryError
-      // Last-resort fallback: hit /api/jupiter/quote (v1), which uses a
-      // different Jupiter endpoint and is more lenient. It returns just a
-      // quote (transaction: null), so sign-time will need a fresh with-taker
-      // call — but at least the user sees a price instead of an error.
+    // Never retry if the caller aborted, or if the caller explicitly asked
+    // for the real error (sign-time).
+    if (error?.name === 'AbortError' || requireTransaction) throw error
+    // Any other error from the first attempt → retry without taker (if
+    // we had one). If we DIDN'T have a taker, skip straight to v1 fallback.
+    if (taker) {
       try {
-        const v1Params = new URLSearchParams({
-          inputMint: String(inputMint),
-          outputMint: String(outputMint),
-          amount: String(amountLamports),
-          slippageBps: String(slippageBps),
-          swapMode: 'ExactIn',
-        })
-        const v1Response = await fetch(`/api/jupiter/quote?${v1Params.toString()}`, { signal })
-        if (v1Response.ok) {
-          const v1Body = await parseJsonSafely(v1Response)
-          if (v1Body?.inAmount && v1Body?.outAmount) {
-            // v1 doesn't return a transaction. Mark as quote-only so the
-            // sign-time check on quote.transaction surfaces a clear message.
-            return { ...v1Body, transaction: null, source: 'v1-fallback' }
-          }
-        }
-      } catch (v1Error) {
-        if (v1Error?.name === 'AbortError') throw v1Error
+        return await fetchOnce(false)
+      } catch (retryError) {
+        if (retryError?.name === 'AbortError') throw retryError
+        // Fall through to v1 fallback below.
       }
-      // All retries failed — throw the original error (most informative).
-      throw error
     }
+    // Last-resort fallback: hit /api/jupiter/quote (v1), which uses a
+    // different Jupiter endpoint and is more lenient. It returns just a
+    // quote (transaction: null), so sign-time will need a fresh with-taker
+    // call — but at least the user sees a price instead of an error.
+    try {
+      const v1Params = new URLSearchParams({
+        inputMint: String(inputMint),
+        outputMint: String(outputMint),
+        amount: String(amountLamports),
+        slippageBps: String(slippageBps),
+        swapMode: 'ExactIn',
+      })
+      const v1Response = await fetch(`/api/jupiter/quote?${v1Params.toString()}`, { signal })
+      if (v1Response.ok) {
+        const v1Body = await parseJsonSafely(v1Response)
+        if (v1Body?.inAmount && v1Body?.outAmount) {
+          // v1 doesn't return a transaction. Mark as quote-only so the
+          // sign-time check on quote.transaction surfaces a clear message.
+          return { ...v1Body, transaction: null, source: 'v1-fallback' }
+        }
+      }
+    } catch (v1Error) {
+      if (v1Error?.name === 'AbortError') throw v1Error
+    }
+    // All retries failed — throw the original error (most informative).
+    throw error
   }
 }
 
