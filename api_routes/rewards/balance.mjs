@@ -1,4 +1,4 @@
-import { apiError, json, rateLimit } from '../../api/_lib/roninBackend.mjs'
+import { apiError, json, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../../api/_lib/supabaseBackend.mjs'
 import { getRewardsNetwork } from '../../api/_lib/solanaRewardsAdmin.mjs'
 
@@ -26,7 +26,7 @@ function isValidWallet(value) {
 // trusted source) — the frontend never sends earned points.
 export default async function handler(req, res) {
   if (req.method !== 'GET') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
-  if (!rateLimit(req, 'rewards_balance', 60)) return apiError(res, 429, 'RATE_LIMITED', 'Too many requests. Try again shortly.')
+  if (!(await rateLimitPersistent(req, 'rewards_balance', 60))) return apiError(res, 429, 'RATE_LIMITED', 'Too many requests. Try again shortly.')
   if (!isSupabaseConfigured()) return apiError(res, 503, 'DATABASE_NOT_CONFIGURED', 'Rewards are not configured on the server.')
 
   const wallet = String(req.query?.wallet || '').trim()

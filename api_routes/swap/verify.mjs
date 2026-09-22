@@ -1,4 +1,4 @@
-import { apiError, json, parseBody, RONIN_MINT } from '../../api/_lib/roninBackend.mjs'
+import { apiError, json, parseBody, rateLimitPersistent, RONIN_MINT } from '../../api/_lib/roninBackend.mjs'
 
 const verificationCache = new Map()
 const rateLimitWindowMs = 60_000
@@ -306,7 +306,7 @@ export async function verifySwapSignature(signature, wallet) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
 
-  if (!enforceRateLimit(req)) {
+  if (!(await rateLimitPersistent(req, 'swap-verify', maxRequestsPerWindow, rateLimitWindowMs))) {
     return apiError(res, 429, 'RATE_LIMITED', 'Too many verification requests. Please wait a moment and try again.')
   }
 

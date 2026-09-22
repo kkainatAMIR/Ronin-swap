@@ -176,8 +176,8 @@ export default function ShieldSupport({ wallet, treasuryAddress = SHIELD_TREASUR
         })
       )
       transaction.feePayer = fromPubkey
-      // Blockhash comes from the same-origin server proxy first (uses the
-      // server-side RPC/HELIUS_API_KEY), with a direct browser fallback.
+      // Blockhash comes from the same-origin server proxy; provider signing
+      // remains in the wallet and no RPC credential reaches the browser.
       const { blockhash, lastValidBlockHeight } = await getLatestBlockhashSmart()
       transaction.recentBlockhash = blockhash
 

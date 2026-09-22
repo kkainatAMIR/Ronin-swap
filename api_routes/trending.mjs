@@ -48,7 +48,11 @@ async function discoverAddresses(chainSlug) {
     .map((item) => String(item?.tokenAddress || '').trim())
     .filter(Boolean)
   if (chainSlug === 'ethereum' && candidates.length < 10) {
-    const searchTerms = ['ETH', 'USDC', 'USDT', 'WETH', 'PEPE', 'UNI', 'AAVE', 'LINK', 'SHIB', 'MKR']
+    const searchTerms = [
+      'ETH', 'USDC', 'USDT', 'WETH', 'WBTC', 'DAI', 'PEPE', 'UNI', 'AAVE', 'LINK',
+      'SHIB', 'MKR', 'CRV', 'LDO', 'APE', 'ARB', 'OP', 'stETH', 'rETH', 'cbETH',
+      'PENDLE', 'ONDO', 'MATIC', 'TUSD', 'COMP', 'SNX', 'GRT', 'SUSHI', 'MKR', 'XRP',
+    ]
     const searchResults = await Promise.all(searchTerms.map((term) => getJson(`/latest/dex/search?q=${encodeURIComponent(term)}`).catch(() => ({ pairs: [] }))))
     for (const result of searchResults) {
       for (const pair of Array.isArray(result?.pairs) ? result.pairs : []) {

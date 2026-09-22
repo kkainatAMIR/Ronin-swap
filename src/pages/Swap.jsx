@@ -354,17 +354,7 @@ function EthereumSwapPanel() {
   }
 
   const busy = ['loading', 'approval_required', 'approval_pending', 'approval_confirmed', 'signing', 'pending'].includes(status)
-  const holdings = ETHEREUM_SWAP_TOKENS.map((token) => {
-    const entry = balances.get(token.address || 'native')
-    if (!entry || entry.raw === 0n) return null
-    const amountValue = Number(formatEvmAmount(entry.raw.toString(), entry.decimals))
-    const price = prices.get(token.address || 'native')
-    return { token, amount: formatEvmAmount(entry.raw.toString(), entry.decimals), usd: Number.isFinite(amountValue) && price ? amountValue * price : null }
-  }).filter(Boolean)
-  const holdingsMessage = account
-    ? `Balance: ${fromToken.symbol} ${balanceLabel(fromToken)} | ${toToken.symbol} ${balanceLabel(toToken)} · Holdings: ${holdings.map(({ token, amount: holdingAmount, usd }) => `${token.symbol} ${holdingAmount}${usd != null ? ` ($${usd.toLocaleString(undefined, { maximumFractionDigits: 2 })})` : ''}`).join(' | ') || 'none detected'}`
-    : ''
-  const statusMessage = [holdingsMessage, { loading: 'Finding best route...', approval_required: 'Approval required. Review the exact allowance in MetaMask.', approval_pending: 'Approval pending...', approval_confirmed: 'Approval confirmed. Refreshing quote...', signing: 'Confirm the transaction in MetaMask.', pending: 'Transaction submitted. Waiting for confirmation...', confirmed: 'Swap confirmed.' }[status]].filter(Boolean).join(' · ')
+  const statusMessage = { loading: 'Finding best route...', approval_required: 'Approval required. Review the exact allowance in MetaMask.', approval_pending: 'Approval pending...', approval_confirmed: 'Approval confirmed. Refreshing quote...', signing: 'Confirm the transaction in MetaMask.', pending: 'Transaction submitted. Waiting for confirmation...', confirmed: 'Swap confirmed.' }[status] || ''
   const submit = () => { if (!account) return connect(); if (quote) return execute(); return requestQuote() }
   return (
     <div className="evm-swap-panel">
@@ -786,31 +776,55 @@ function shortMint(mint) {
   return `${mint.slice(0, 5)}...${mint.slice(-5)}`
 }
 
-function TokenSelector({ side, selected, other, onSelect, onClose }) {
+function isWalletImpersonation(token) {
+  if (token.trust !== 'wallet') return false
+  const symbol = String(token.symbol || '').trim().toLowerCase()
+  const name = String(token.name || '').trim().toLowerCase()
+  if (!symbol && !name) return false
+  return TRUSTED_TOKENS.some((trusted) => trusted.mint !== token.mint && (
+    (symbol && symbol === String(trusted.symbol || '').toLowerCase()) ||
+    (name && name === String(trusted.name || '').toLowerCase())
+  ))
+}
+
+function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose }) {
   const [search, setSearch] = useState('')
   const query = search.trim().toLowerCase()
-  const results = useMemo(() => TRUSTED_TOKENS.filter((token) => {
+  const selectorTokens = useMemo(() => {
+    const map = new Map(TRUSTED_TOKENS.map((token) => [token.mint, token]))
+    for (const token of walletTokens) {
+      const existing = map.get(token.mint)
+      map.set(token.mint, existing ? { ...existing, walletBalance: token.amount } : {
+        ...token,
+        trust: 'wallet',
+        walletBalance: token.amount,
+        logoURI: token.logo || null,
+      })
+    }
+    return Array.from(map.values()).map((token) => isWalletImpersonation(token) ? {
+      ...token,
+      securityWarning: 'Possible token impersonation. Mint does not match the curated token.',
+      blocked: true,
+    } : token)
+  }, [walletTokens])
+  const results = useMemo(() => selectorTokens.filter((token) => {
     if (token.mint === other.mint) return false
-    return !query || [token.symbol, token.name, token.mint].some((value) => value.toLowerCase().includes(query))
-  }), [other.mint, query])
+    return !query || [token.symbol, token.name, token.mint].some((value) => String(value || '').toLowerCase().includes(query))
+  }), [other.mint, query, selectorTokens])
+
+  const walletOwnedTokens = useMemo(() => walletTokens
+    .map((token) => selectorTokens.find((candidate) => candidate.mint === token.mint))
+    .filter((token) => token && token.mint !== other.mint && Number(token.walletBalance || token.amount || 0) > 0), [other.mint, selectorTokens, walletTokens])
 
   const sectionTokens = (name) => FEATURED_TOKEN_SECTIONS[name]
     .map((symbol) => TRUSTED_TOKENS.find((token) => token.symbol === symbol))
     .filter((token) => token && token.mint !== other.mint)
 
   const choose = (token) => {
+    if (token.blocked) return
     onSelect(token)
     onClose()
   }
-
-  const walletBalanceMap = useMemo(() => {
-    const map = new Map()
-    if (!window.__RONIN_SWAP_WALLET_TOKENS) return map
-    for (const token of window.__RONIN_SWAP_WALLET_TOKENS) {
-      map.set(String(token.mint), Number(token.amount || 0))
-    }
-    return map
-  }, [])
 
   return (
     <div className="swap-token-picker-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -819,8 +833,9 @@ function TokenSelector({ side, selected, other, onSelect, onClose }) {
           <div><span className="swap-field-label">SELECT {side.toUpperCase()} TOKEN</span><strong>{selected.symbol}</strong></div>
           <button type="button" className="swap-token-picker-close" onClick={onClose} aria-label="Close token selector">×</button>
         </div>
-        <input className="swap-token-search" autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search symbol, name, or mint" aria-label="Search trusted tokens" />
+        <input className="swap-token-search" autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search symbol, name, or mint" aria-label="Search Solana tokens" />
         {!query && <div className="swap-token-picker-sections">
+          {walletOwnedTokens.length > 0 && <div><span className="swap-token-section-title">YOUR WALLET</span><div className="swap-token-quick-row">{walletOwnedTokens.map((token) => <button type="button" key={token.mint} disabled={token.blocked} title={token.securityWarning || undefined} onClick={() => choose(token)}><TokenMark token={token} size={22} /><span>{token.symbol}<small style={{ display: 'block', color: token.blocked ? 'var(--red)' : 'var(--muted)', fontSize: '9px', fontWeight: 500 }}>{token.blocked ? 'BLOCKED' : Number(token.walletBalance || token.amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}</small></span></button>)}</div></div>}
           {['popular', 'memes', 'featured'].map((section) => {
             const tokens = sectionTokens(section)
             if (!tokens.length) return null
@@ -829,18 +844,18 @@ function TokenSelector({ side, selected, other, onSelect, onClose }) {
         </div>}
         <div className="swap-token-results" role="listbox">
           {results.length ? results.map((token) => {
-            const balance = walletBalanceMap.get(token.mint)
+            const balance = Number(token.walletBalance || 0)
             return (
-              <button type="button" className="swap-token-result" key={token.mint} onClick={() => choose(token)} role="option">
+              <button type="button" className="swap-token-result" key={token.mint} disabled={token.blocked} title={token.securityWarning || undefined} onClick={() => choose(token)} role="option">
                 <TokenMark token={token} size={30} />
-                <span className="swap-token-result-copy"><strong>{token.symbol}</strong><small>{token.name}</small><small>{shortMint(token.mint)}</small></span>
+                <span className="swap-token-result-copy"><strong>{token.symbol}</strong><small>{token.blocked ? token.securityWarning : token.name}</small><small>{shortMint(token.mint)}</small></span>
                 <span className="swap-token-trust" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                  <span>{token.trust}</span>
-                  {typeof balance === 'number' && balance > 0 && <small style={{ color: '#ff8d8d', fontSize: '10px' }}>{balance.toLocaleString(undefined, { maximumFractionDigits: 6 })}</small>}
+                  <span>{token.blocked ? 'BLOCKED' : token.trust}</span>
+                  {balance > 0 && <small style={{ color: '#ff8d8d', fontSize: '10px' }}>{balance.toLocaleString(undefined, { maximumFractionDigits: 6 })}</small>}
                 </span>
               </button>
             )
-          }) : <p className="swap-token-empty-state">No validated token matches that search.</p>}
+          }) : <p className="swap-token-empty-state">No token matches that search.</p>}
         </div>
       </div>
     </div>
@@ -931,6 +946,9 @@ export default function Swap() {
           : TRUSTED_TOKENS.filter((token) => token.section.includes(tokenFilter))
 
   useEffect(() => {
+    setWalletTokens([])
+    setSolBalance(null)
+    setRoninBalance(null)
     if (!wallet?.address || !isValidWalletAddress(wallet.address)) return undefined
     let cancelled = false
     const loadBalances = async () => {
@@ -948,11 +966,11 @@ export default function Swap() {
             const uiAmount = Number(token.uiAmount ?? token.uiAmountString ?? '0')
             return {
               mint: token.mint,
-              symbol: token.symbol || tokenMeta?.symbol || 'TOKEN',
-              name: token.name || tokenMeta?.name || 'Unknown token',
+              symbol: tokenMeta?.symbol || token.symbol || shortMint(token.mint),
+              name: tokenMeta?.name || token.name || 'Wallet Token',
               amount: Number.isFinite(uiAmount) ? uiAmount : 0,
-              decimals: Number(token.decimals ?? tokenMeta?.decimals ?? 0),
-              logo: token.logo || tokenMeta?.logoURI || null,
+              decimals: Number(tokenMeta?.decimals ?? token.decimals ?? 0),
+              logo: tokenMeta?.logoURI || token.logo || null,
             }
           })
           .filter((token) => token.amount > 0)
@@ -980,7 +998,6 @@ export default function Swap() {
         for (const item of merged) deduped.set(item.mint, item)
         const tokenBalances = Array.from(deduped.values()).sort((a, b) => b.amount - a.amount)
         setWalletTokens(tokenBalances)
-        window.__RONIN_SWAP_WALLET_TOKENS = tokenBalances
         setSolBalance(solResult?.sol ?? 0)
         setRoninBalance(roninResult?.amount ?? 0)
       } catch {
@@ -988,7 +1005,6 @@ export default function Swap() {
           setSolBalance(null)
           setRoninBalance(null)
           setWalletTokens([])
-          delete window.__RONIN_SWAP_WALLET_TOKENS
         }
       }
     }
@@ -1522,11 +1538,10 @@ export default function Swap() {
             </div>
 
             <h2 className="swap-hero-sub">
-              SWAP ANY TOKEN.<br />
-              FAST. SECURE. ON <em>SOLANA.</em>
+              SWAP ANY TOKEN ON <em>SOLANA, ETH &amp; ROBINHOOD</em>
             </h2>
             <p className="swap-hero-text">
-              Access the best prices and lowest fees across the entire Solana ecosystem
+              Access the best prices and lowest fees across supported ecosystems
               — all from the Ronin Samurai hub.
             </p>
 
@@ -1732,11 +1747,35 @@ export default function Swap() {
             <section className="swap-reference-card swap-reference-points">
               <div className="swap-reference-card-title"><span className="swap-reference-icon">♜</span><strong>SAMURAI POINTS</strong></div>
               <div className="swap-reference-points-body"><div><small>Earn points per qualifying swap.</small><b>YOUR JOURNEY</b></div><ul><li>Earn Points Per Swap</li><li>Leaderboard &amp; Seasons</li><li>Future Airdrops</li><li>More Utilities Coming</li></ul></div>
-              <button type="button" className="swap-reference-outline-button" onClick={handleSwapAction}>VIEW POINTS &amp; REWARDS</button>
+              <a className="swap-reference-outline-button" href="#profile">VIEW POINTS &amp; REWARDS</a>
             </section>
             <section className="swap-reference-card swap-reference-clan"><div className="swap-reference-card-title"><span className="swap-reference-icon">♨</span><strong>EVERY SWAP FUELS THE CLAN</strong></div><p>A portion of platform fees supports LP, buy &amp; burns, validator development and future utilities.</p><a href="#tokenomics" className="swap-reference-card-link">VIEW TOKENOMICS →</a></section>
             <section className="swap-reference-card swap-reference-live"><div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>LIVE ECOSYSTEM STATS</strong><span className="swap-reference-live-dot">● Live</span></div><div className="swap-reference-live-grid">{ecosystemStats.slice(0, 4).map((stat) => <div key={stat.label}><small>{stat.label}</small><b>{stat.value}</b><em>{stat.note || 'Live data'}</em></div>)}</div></section>
           </aside>
+        </div>
+      </section>
+
+      <section className="swap-tokens-section swap-trending-section">
+        <div className="swap-tokens-card">
+          <div className="swap-tokens-head">
+            <div>
+              <h3>TRENDING ON {network === 'ethereum' ? 'ETHEREUM' : network === 'robinhood' ? 'ROBINHOOD' : 'SOLANA'}</h3>
+              <span className="swap-tokens-note">Live market activity · refreshes every 45 seconds.</span>
+            </div>
+          </div>
+          <div className="swap-tokens-row">
+            {trendingState.state === 'loading' && <p className="swap-token-empty-state">Loading live trending data...</p>}
+            {trendingState.state === 'error' && <p className="swap-token-empty-state">Trending data temporarily unavailable.</p>}
+            {trendingState.state === 'empty' && <p className="swap-token-empty-state">No live trending tokens are available for this chain right now.</p>}
+            {dashboardTrending.map((token) => (
+              <button type="button" className="swap-token" key={token.mint || token.address || token.symbol} onClick={() => network === 'solana' && selectToken('to', token)}>
+                <TokenMark token={token} size={38} />
+                <strong>{token.symbol}</strong>
+                <small>{token.name}</small>
+                <small>${Number(token.priceUsd || 0).toLocaleString('en-US', { maximumSignificantDigits: 6 })} · {Number(token.priceChange || 0).toFixed(2)}%</small>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -1830,7 +1869,7 @@ export default function Swap() {
           <div className="swap-purpose-torii" aria-hidden="true">⛩</div>
         </div>
       </section>
-      {pickerSide && <TokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} onSelect={(token) => selectToken(pickerSide, token)} onClose={() => setPickerSide(null)} />}
+      {pickerSide && <TokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => selectToken(pickerSide, token)} onClose={() => setPickerSide(null)} />}
     </div>
   )
 }

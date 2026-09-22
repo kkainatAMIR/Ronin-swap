@@ -10,6 +10,33 @@ function runtimeEnv() {
   return globalThis.__RONIN_LOCAL_ENV__ || process.env
 }
 
+function supabaseConfig() {
+  const env = { ...readLocalEnvFile(), ...runtimeEnv() }
+  return { url: String(env.SUPABASE_URL || '').replace(/\/$/, ''), key: String(env.SUPABASE_SERVICE_ROLE_KEY || '') }
+}
+
+function durableChallengesConfigured() {
+  const config = supabaseConfig()
+  return Boolean(config.url && config.key)
+}
+
+async function supabaseChallengeRequest(path, options = {}) {
+  const config = supabaseConfig()
+  if (!config.url || !config.key) throw new Error('ADMIN_CHALLENGE_STORE_UNAVAILABLE')
+  const response = await fetch(`${config.url}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    signal: AbortSignal.timeout(8_000),
+  })
+  if (!response.ok) throw new Error('ADMIN_CHALLENGE_STORE_UNAVAILABLE')
+  return response.json().catch(() => [])
+}
+
 function readLocalEnvFile() {
   const localEnvPath = path.resolve(process.cwd(), '.env.local')
   if (!fs.existsSync(localEnvPath)) return {}
@@ -67,17 +94,40 @@ export function getAdminWallets() {
   return configuredWallets()
 }
 
-export function createAdminChallenge(wallet) {
+export async function createAdminChallenge(wallet) {
   if (!configuredWallets().includes(wallet)) throw new Error('ADMIN_WALLET_NOT_ALLOWED')
   const nonce = crypto.randomBytes(24).toString('hex')
   const message = `RONIN Admin Login\nWallet: ${wallet}\nNonce: ${nonce}\nExpires: ${new Date(Date.now() + 5 * 60_000).toISOString()}`
-  challenges.set(nonce, { wallet, message, expiresAt: Date.now() + 5 * 60_000 })
+  const challenge = { wallet, message, expiresAt: Date.now() + 5 * 60_000 }
+  if (durableChallengesConfigured()) {
+    await supabaseChallengeRequest('admin_auth_challenges', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify([{ nonce, wallet, message, expires_at: new Date(challenge.expiresAt).toISOString() }]),
+    })
+  } else {
+    challenges.set(nonce, challenge)
+  }
   return { nonce, message }
 }
 
-export function verifyAdminChallenge({ wallet, nonce, signature }) {
-  const challenge = challenges.get(nonce)
-  challenges.delete(nonce)
+export async function verifyAdminChallenge({ wallet, nonce, signature }) {
+  let challenge
+  if (durableChallengesConfigured()) {
+    const rows = await supabaseChallengeRequest(`admin_auth_challenges?nonce=eq.${encodeURIComponent(nonce)}&used_at=is.null&select=wallet,message,expires_at&limit=1`)
+    const row = rows?.[0]
+    challenge = row ? { wallet: row.wallet, message: row.message, expiresAt: Date.parse(row.expires_at) } : null
+    if (challenge) {
+      await supabaseChallengeRequest(`admin_auth_challenges?nonce=eq.${encodeURIComponent(nonce)}&used_at=is.null`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ used_at: new Date().toISOString() }),
+      })
+    }
+  } else {
+    challenge = challenges.get(nonce)
+    challenges.delete(nonce)
+  }
   if (!challenge || challenge.wallet !== wallet || challenge.expiresAt < Date.now()) throw new Error('ADMIN_CHALLENGE_INVALID')
   let publicKey
   try { publicKey = new PublicKey(wallet) } catch { throw new Error('INVALID_ADMIN_WALLET') }
@@ -100,5 +150,7 @@ export async function requireAdmin(req, res) {
 }
 
 export function isAdminConfigured() {
-  return configuredWallets().length > 0 && Boolean(sessionSecret())
+  const env = { ...readLocalEnvFile(), ...runtimeEnv() }
+  const production = String(env.NODE_ENV || '').toLowerCase() === 'production' || Boolean(env.VERCEL)
+  return configuredWallets().length > 0 && Boolean(sessionSecret()) && (!production || durableChallengesConfigured())
 }

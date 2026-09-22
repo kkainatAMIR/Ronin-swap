@@ -68,6 +68,7 @@ import samuraiSeason from '../api_routes/samurai/season.mjs'
 import samuraiSeasons from '../api_routes/samurai/seasons.mjs'
 
 import solanaRpc from '../api_routes/solana/rpc.mjs'
+import solanaEnhanced from '../api_routes/solana/enhanced.mjs'
 
 import swapHistory from '../api_routes/swap/history.mjs'
 import swapVerify from '../api_routes/swap/verify.mjs'
@@ -164,6 +165,7 @@ export const ROUTES = {
 
   // ─── Solana RPC proxy ───
   'POST /api/solana/rpc': solanaRpc,
+  'GET /api/solana/enhanced': solanaEnhanced,
 
   // ─── Swap ───
   'GET /api/swap/history':  swapHistory,

@@ -2,10 +2,9 @@ import { RONIN_MINT } from '../data'
 
 export { RONIN_MINT }
 const SOLANA_RPC_PROXY_URL = '/api/solana/rpc'
-const CONFIGURED_SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC_URL || ''
 // Keep provider credentials and retry policy on the server. Public browser
 // RPC endpoints frequently reject POST requests with 403 responses.
-export const SOLANA_RPC_URL = CONFIGURED_SOLANA_RPC_URL || SOLANA_RPC_PROXY_URL
+export const SOLANA_RPC_URL = SOLANA_RPC_PROXY_URL
 const SOLANA_RPC_ENDPOINTS = [SOLANA_RPC_PROXY_URL]
 // 15s matches shieldService.js and gives the server-side proxy enough
 // headroom to ride out Vercel cold-start latency (1-3s) plus a slow
@@ -19,15 +18,6 @@ const RPC_TIMEOUT_MS = 15_000
 // or fails, retry once before giving up — by then the function is warm.
 const RPC_RETRY_ONCE_ON_TIMEOUT = true
 export const RONIN_TOKEN_URL = `https://solscan.io/token/${RONIN_MINT}#holders`
-
-function extractHeliusKey(rpcUrl) {
-  try {
-    const u = new URL(rpcUrl)
-    return u.searchParams.get('api-key') || u.searchParams.get('api_key') || ''
-  } catch {
-    return ''
-  }
-}
 
 function rpcEndpointLabel(endpoint) {
   try { return new URL(endpoint, window.location.origin).hostname } catch { return 'configured endpoint' }
@@ -192,10 +182,8 @@ export async function getTokenLargestAccounts() {
 }
 
 export async function getHeliusHolders() {
-  const apiKey = extractHeliusKey(SOLANA_RPC_URL)
-  if (!apiKey) return { count: null, holders: [], source: null }
   try {
-    const url = `https://api.helius.xyz/v0/tokens/${RONIN_MINT}/holders?api-key=${apiKey}`
+    const url = `/api/solana/enhanced?resource=holders&owner=${encodeURIComponent(RONIN_MINT)}&mint=${encodeURIComponent(RONIN_MINT)}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`Helius holders ${res.status}`)
     const data = await res.json()

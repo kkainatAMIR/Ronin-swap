@@ -1,4 +1,6 @@
-import { RONIN_MINT } from '../data'
+const DEFAULT_RONIN_MINT = '2JVEVXoRsskapZ8T56MjMNJq6Dk3feEUYSRmzkkipump'
+const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || globalThis.process?.env || {}
+const RONIN_MINT = globalThis.__RONIN_MINT_ADDRESS__ || runtimeEnv.VITE_RONIN_MINT_ADDRESS || DEFAULT_RONIN_MINT
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'

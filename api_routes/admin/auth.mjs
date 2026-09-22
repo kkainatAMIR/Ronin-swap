@@ -1,13 +1,14 @@
-import { apiError, json, parseBody } from '../../api/_lib/roninBackend.mjs'
+import { apiError, json, parseBody, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { createAdminChallenge, verifyAdminChallenge, isAdminConfigured, requireAdmin } from '../../api/_lib/adminAuth.mjs'
 
 export default async function handler(req, res) {
   if (!isAdminConfigured()) return apiError(res, 503, 'ADMIN_NOT_CONFIGURED', 'Admin wallet authentication is not configured.')
+  if (!(await rateLimitPersistent(req, `admin_auth:${req.query?.action || 'unknown'}`, 10, 60_000))) return apiError(res, 429, 'RATE_LIMITED', 'Authentication is temporarily rate limited.')
   try {
     const body = parseBody(req) || {}
-    if (req.method === 'POST' && req.query?.action === 'challenge') return json(res, 200, createAdminChallenge(String(body.wallet || '').trim()))
+    if (req.method === 'POST' && req.query?.action === 'challenge') return json(res, 200, await createAdminChallenge(String(body.wallet || '').trim()))
     if (req.method === 'POST' && req.query?.action === 'verify') {
-      const result = verifyAdminChallenge({ wallet: String(body.wallet || '').trim(), nonce: String(body.nonce || ''), signature: body.signature })
+      const result = await verifyAdminChallenge({ wallet: String(body.wallet || '').trim(), nonce: String(body.nonce || ''), signature: body.signature })
       res.setHeader('Set-Cookie', result.cookie)
       return json(res, 200, { authenticated: true, wallet: result.wallet })
     }

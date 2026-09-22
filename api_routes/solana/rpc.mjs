@@ -1,9 +1,10 @@
-import { rateLimit } from '../../api/_lib/roninBackend.mjs'
+import { rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com'
 const ALLOWED_METHODS = new Set([
   'getBalance',
   'getTokenAccountsByOwner',
+  'getAsset',
   'getTokenLargestAccounts',
   'getTokenSupply',
   'getSignaturesForAddress',
@@ -67,7 +68,7 @@ async function callRpc(endpoint, requestBody) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed.' })
-  if (!rateLimit(req, 'solana-rpc', 120)) return json(res, 429, { error: 'Too many Solana RPC requests. Try again shortly.' })
+  if (!(await rateLimitPersistent(req, 'solana-rpc', 120))) return json(res, 429, { error: 'Too many Solana RPC requests. Try again shortly.' })
 
   const body = parseBody(req)
   if (!body || typeof body.method !== 'string' || !ALLOWED_METHODS.has(body.method) || !Array.isArray(body.params)) {

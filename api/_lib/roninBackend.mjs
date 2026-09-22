@@ -39,6 +39,31 @@ export function rateLimit(req, key, max = 60, windowMs = 60_000) {
   return current.count <= max
 }
 
+export async function rateLimitPersistent(req, key, max = 60, windowMs = 60_000) {
+  const env = globalThis.__RONIN_LOCAL_ENV__ || process.env
+  const supabaseUrl = String(env.SUPABASE_URL || '').replace(/\/$/, '')
+  const serviceKey = String(env.SUPABASE_SERVICE_ROLE_KEY || '')
+  if (!supabaseUrl || !serviceKey) return rateLimit(req, key, max, windowMs)
+  const forwarded = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim()
+  const identity = forwarded || req.socket?.remoteAddress || 'unknown'
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_api_rate_limit`, {
+      method: 'POST',
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_bucket: key, p_identity: identity, p_max_requests: max, p_window_seconds: Math.ceil(windowMs / 1000) }),
+      signal: AbortSignal.timeout(4_000),
+    })
+    if (!response.ok) return rateLimit(req, key, max, windowMs)
+    const payload = await response.json()
+    if (payload && typeof payload === 'object' && 'data' in payload) {
+      return payload.data === true
+    }
+    return payload === true
+  } catch {
+    return rateLimit(req, key, max, windowMs)
+  }
+}
+
 export function requestBodyWithinLimit(req, maxBytes = MAX_REQUEST_BODY_BYTES) {
   const length = Number(req.headers?.['content-length'])
   return !Number.isFinite(length) || length <= maxBytes

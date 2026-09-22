@@ -1,4 +1,4 @@
-import { apiError, json, rateLimit } from '../../api/_lib/roninBackend.mjs'
+import { apiError, json, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../../api/_lib/supabaseBackend.mjs'
 import {
   isRewardsAdminConfigured,
@@ -64,7 +64,7 @@ function isValidClaimId(value) {
 //     so the same claim_id can never create a second on-chain claim).
 export default async function handler(req, res) {
   if (req.method !== 'POST') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
-  if (!rateLimit(req, 'rewards_claim', 10)) return apiError(res, 429, 'RATE_LIMITED', 'Too many claim attempts. Try again shortly.')
+  if (!(await rateLimitPersistent(req, 'rewards_claim', 10))) return apiError(res, 429, 'RATE_LIMITED', 'Too many claim attempts. Try again shortly.')
   if (!isSupabaseConfigured()) return apiError(res, 503, 'DATABASE_NOT_CONFIGURED', 'Rewards are not configured on the server.')
 
   // Solana rewards program integration requires:
