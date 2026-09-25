@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatCompact, formatNumber, getCurrentRank, getNextRank, getRankProgress } from '../data'
 import { useWallet } from '../context/WalletContext'
-import { getProfileData } from '../services/profileService'
+import { getAggregatedProfileData } from '../services/profileService'
 import { Button, ProgressBar, Sakura, SectionHeading, StatCard, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
 import RewardClaimPanel from '../components/RewardClaimPanel'
@@ -113,32 +113,49 @@ function NotConnected({ onConnect }) {
 }
 
 export default function Profile() {
-  const { wallet, profile, walletDataState, openWalletModal } = useWallet()
+  const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses } = useWallet()
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
   const [error, setError] = useState('')
 
+  // Fetch aggregated profile data across ALL connected wallets (Phantom
+  // + any MetaMask addresses tracked in localStorage). The list of
+  // wallets comes from WalletContext.allWalletAddresses — the Phantom
+  // address (if connected) is first, followed by any EVM addresses
+  // the user has ever connected.
+  //
+  // If only the Phantom wallet is connected (no EVM activity), the
+  // aggregated fetch degrades to a single-wallet fetch — equivalent to
+  // the previous behavior.
   useEffect(() => {
     let cancelled = false
-    if (!wallet || wallet.isDemo) {
+    // Don't fetch if we have no wallets at all OR if the only "wallet"
+    // is a demo profile (no real address).
+    if (!allWalletAddresses || allWalletAddresses.length === 0) {
       setData(null)
       setState(wallet?.isDemo ? 'demo' : 'idle')
       setError('')
       return undefined
     }
+    if (wallet?.isDemo) {
+      setData(null)
+      setState('demo')
+      setError('')
+      return undefined
+    }
     setState('loading')
     setError('')
-    getProfileData(wallet.address)
+    getAggregatedProfileData(allWalletAddresses)
       .then((result) => { if (!cancelled) { setData(result); setState('ready') } })
       .catch((loadError) => { if (!cancelled) { setData(null); setState('error'); setError(loadError?.message || 'Your profile could not be loaded.') } })
     return () => { cancelled = true }
-  }, [wallet?.address, wallet?.isDemo])
+  }, [allWalletAddresses.join(','), wallet?.isDemo])
 
   const retry = () => {
-    if (!wallet || wallet.isDemo) return
+    if (!allWalletAddresses || allWalletAddresses.length === 0) return
     setState('loading')
     setError('')
-    getProfileData(wallet.address)
+    getAggregatedProfileData(allWalletAddresses)
       .then(setData)
       .then(() => setState('ready'))
       .catch((loadError) => { setState('error'); setError(loadError?.message || 'Your profile could not be loaded.') })
@@ -147,8 +164,14 @@ export default function Profile() {
   // Derived purely from the live swap history fetched above — no hardcoding.
   const frequentPairs = useMemo(() => buildFrequentPairs(data?.swaps || []), [data?.swaps])
 
-  if (!wallet) return <NotConnected onConnect={openWalletModal} />
-  if (wallet.isDemo) return <section className="profile-empty-state"><div className="profile-avatar">侍</div><Tag tone="red">UI PREVIEW</Tag><h1>SAMURAI PROFILE</h1><p>Connect a real wallet to load personal points, verified swaps, rank position, and live balance data.</p><Button variant="outline" icon="wallet" onClick={openWalletModal}>Connect real wallet</Button></section>
+  // The user is "connected" if EITHER a Phantom wallet is connected OR
+  // at least one EVM wallet is tracked (i.e. the user has previously
+  // swapped on Ethereum or Robinhood Chain via MetaMask). This lets
+  // users view their multi-chain profile even if they don't have Phantom
+  // installed.
+  const hasAnyWallet = Boolean(wallet) || (allWalletAddresses && allWalletAddresses.length > 0)
+  if (!hasAnyWallet) return <NotConnected onConnect={openWalletModal} />
+  if (wallet?.isDemo) return <section className="profile-empty-state"><div className="profile-avatar">侍</div><Tag tone="red">UI PREVIEW</Tag><h1>SAMURAI PROFILE</h1><p>Connect a real wallet to load personal points, verified swaps, rank position, and live balance data.</p><Button variant="outline" icon="wallet" onClick={openWalletModal}>Connect real wallet</Button></section>
   if (state === 'loading' || walletDataState === 'loading') return <main className="profile-page"><ProfileSkeleton /></main>
   if (state === 'error') return <section className="profile-empty-state profile-error-state"><div className="profile-avatar profile-avatar-muted"><Icon name="info" size={24} /></div><h1>PROFILE UNAVAILABLE</h1><p>{error}</p><Button icon="refresh" onClick={retry}>Retry</Button></section>
 
@@ -157,12 +180,21 @@ export default function Profile() {
   const currentRank = getCurrentRank(rankProfile)
   const nextRank = getNextRank(rankProfile)
   const rankProgress = getRankProgress(rankProfile, nextRank)
-  const points = Number(stats.lifetimePoints || 0)
+  // Aggregated stats: the new getAggregatedProfileData sums these
+  // across all of the user's wallets (Phantom + MetaMask). The fields
+  // fall back to the single-wallet leaderboard shape for backward
+  // compatibility.
+  const points = Number(stats.samuraiPoints || stats.lifetimePoints || 0)
   const volume = Number(stats.lifetimeVolume || 0)
-  const swaps = Number(stats.lifetimeSwaps || 0)
+  const swaps = Number(stats.swapsCount || stats.lifetimeSwaps || 0)
   const hasActivity = data?.swaps?.length > 0
   const neighborEntries = data?.neighbors || []
   const noStats = !data || (!points && !volume && !swaps && !hasActivity)
+  // The per-wallet breakdown — used to render the multi-chain balance
+  // display. Empty when only one wallet is tracked (the previous
+  // single-wallet behavior).
+  const perWallet = Array.isArray(stats.perWallet) ? stats.perWallet : []
+  const trackedWalletCount = (data?.allWalletAddresses || []).length
 
   return (
     <main className="profile-page">
@@ -184,17 +216,17 @@ export default function Profile() {
       {noStats && <div className="profile-notice"><Icon name="info" size={16} /> No Samurai activity yet. Make your first verified swap to begin your journey.</div>}
 
       <section className="profile-stats-grid">
-        <StatCard stat={{ icon: 'coins', label: 'RONIN BALANCE', value: profile?.balance == null ? '—' : formatCompact(profile.balance), detail: walletDataState === 'error' ? 'Balance unavailable' : 'Solana mainnet' }} />
-        <StatCard stat={{ icon: 'award', label: 'SAMURAI POINTS', value: formatNumber(points), detail: 'Lifetime awarded points' }} />
+        <StatCard stat={{ icon: 'coins', label: 'RONIN BALANCE', value: profile?.balance == null ? '—' : formatCompact(profile.balance), detail: walletDataState === 'error' ? 'Balance unavailable' : (trackedWalletCount > 1 ? `Solana mainnet · ${trackedWalletCount} wallets` : 'Solana mainnet') }} />
+        <StatCard stat={{ icon: 'award', label: 'SAMURAI POINTS', value: formatNumber(points), detail: trackedWalletCount > 1 ? `Aggregated across ${trackedWalletCount} wallets` : 'Lifetime awarded points' }} />
         <StatCard stat={{ icon: 'chart', label: 'TOTAL VOLUME', value: volume ? `$${formatCompact(volume)}` : '$0', detail: 'Qualifying swap volume' }} />
         <StatCard stat={{ icon: 'swapVertical', label: 'TOTAL SWAPS', value: formatNumber(swaps), detail: 'Qualifying swaps' }} />
       </section>
 
-      <RewardClaimPanel wallet={wallet.address} />
+      <RewardClaimPanel wallet={wallet?.address || allWalletAddresses?.[0] || null} />
 
       <section className="profile-main-grid">
         <div className="profile-panel profile-rank-panel"><SectionHeading eyebrow="THE WAY FORWARD" title="Rank progress" text={nextRank ? `${formatNumber(Math.max(0, Number(nextRank.minBalance || 0) - Number(profile?.balance || 0)))} RONIN until ${nextRank.name}.` : 'You hold the highest configured rank.'} /><div className="profile-rank-line"><strong>{currentRank?.name || 'Unranked'}</strong><span>{nextRank?.name || 'MAX RANK'}</span></div><ProgressBar value={rankProgress} rightLabel={`${rankProgress}%`} /><small className="profile-muted">Rank is calculated from the existing RONIN holding system.</small></div>
-        <div className="profile-panel"><SectionHeading eyebrow="YOUR POSITION" title="Leaderboard" /><div className="profile-leaderboard-position">{stats.currentRank ? `#${formatNumber(Number(stats.currentRank))}` : '—'}<span>YOUR LEADERBOARD POSITION</span></div><div className="profile-neighbors">{neighborEntries.length ? neighborEntries.map((entry) => <div className={entry.wallet?.toLowerCase() === wallet.address.toLowerCase() ? 'is-you' : ''} key={`${entry.rank}-${entry.wallet}`}><span>#{entry.rank}</span><span>{entry.wallet?.toLowerCase() === wallet.address.toLowerCase() ? 'YOU' : short(entry.wallet)}</span><strong>{formatNumber(entry.samuraiPoints)} SP</strong></div>) : <p className="profile-muted">Your position will appear after your first qualifying swap.</p>}</div></div>
+        <div className="profile-panel"><SectionHeading eyebrow="YOUR POSITION" title="Leaderboard" /><div className="profile-leaderboard-position">{stats.currentRank ? `#${formatNumber(Number(stats.currentRank))}` : '—'}<span>YOUR LEADERBOARD POSITION</span></div><div className="profile-neighbors">{neighborEntries.length ? neighborEntries.map((entry) => <div className={(entry.wallet && allWalletAddresses.some((addr) => addr.toLowerCase() === entry.wallet.toLowerCase())) ? 'is-you' : ''} key={`${entry.rank}-${entry.wallet}`}><span>#{entry.rank}</span><span>{(entry.wallet && allWalletAddresses.some((addr) => addr.toLowerCase() === entry.wallet.toLowerCase())) ? 'YOU' : short(entry.wallet)}</span><strong>{formatNumber(entry.samuraiPoints)} SP</strong></div>) : <p className="profile-muted">Your position will appear after your first qualifying swap.</p>}</div></div>
       </section>
 
       <section className="profile-panel profile-journey-panel"><SectionHeading eyebrow="PERSONAL PROGRESS" title="Your Samurai journey" /><div className="profile-journey-grid"><div><span className="profile-data-label">POINTS</span><strong>{formatNumber(points)} SP</strong></div><div><span className="profile-data-label">VOLUME</span><strong>${volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div><div><span className="profile-data-label">RANK</span><strong>{currentRank?.name || 'UNRANKED'}</strong></div><div><span className="profile-data-label">REWARDS</span><strong>—</strong><small>Not configured</small></div></div></section>

@@ -300,6 +300,7 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
 }
 
 function EthereumSwapPanel() {
+  const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [fromToken, setFromToken] = useState(ETHEREUM_SWAP_TOKENS[0])
   const [toToken, setToToken] = useState(ETHEREUM_SWAP_TOKENS[2])
@@ -314,6 +315,14 @@ function EthereumSwapPanel() {
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
   const executeInFlightRef = useRef(false)
+
+  // Track the connected MetaMask account so the Profile page can
+  // aggregate samurai points earned by this EVM wallet. The account
+  // is also persisted to localStorage by the WalletContext so it
+  // survives page reloads.
+  useEffect(() => {
+    if (account) addEvmWallet(account)
+  }, [account, addEvmWallet])
 
   useEffect(() => {
     const provider = getEthereumProvider()
@@ -722,6 +731,7 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
 }
 
 function RobinhoodSwapPanel() {
+  const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [sections, setSections] = useState({ all: [], tokens: [], memes: [], popular: [] })
   const [sectionsState, setSectionsState] = useState('loading')
@@ -736,6 +746,14 @@ function RobinhoodSwapPanel() {
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
   const executeInFlightRef = useRef(false)
+
+  // Track the connected MetaMask account so the Profile page can
+  // aggregate samurai points earned by this EVM wallet. The account
+  // is also persisted to localStorage by the WalletContext so it
+  // survives page reloads.
+  useEffect(() => {
+    if (account) addEvmWallet(account)
+  }, [account, addEvmWallet])
 
   useEffect(() => {
     let cancelled = false
@@ -1181,7 +1199,7 @@ function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose 
 }
 
 export default function Swap() {
-  const { wallet, openWalletModal, liveStats, liveStatsState } = useWallet()
+  const { wallet, openWalletModal, liveStats, liveStatsState, addEvmWallet } = useWallet()
   const [network, setNetwork] = useState('solana')
   const [tab, setTab] = useState('swap')
   const [fromToken, setFromToken] = useState(TOKEN_BY_MINT[SOL_MINT])

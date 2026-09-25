@@ -5,6 +5,40 @@ import { getRoninBalance, getRoninSupply, getLiveRoninStats } from '../services/
 
 const WalletContext = createContext(null)
 
+// localStorage key for the user's known EVM wallet addresses (Ethereum
+// Mainnet + Robinhood Chain — both use the same MetaMask account but are
+// tracked separately per-chain on the backend). The Profile page reads
+// this list to aggregate samurai points across ALL of the user's
+// connected wallets, not just the Phantom (Solana) one.
+//
+// Without this, a user who swaps on Ethereum with MetaMask sees 0 points
+// on their profile page (which only queries the Phantom address).
+const EVM_WALLETS_STORAGE_KEY = 'ronin.evmWallets.v1'
+const EVM_WALLETS_MAX = 10  // safety cap
+
+function readStoredEvmWallets() {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(EVM_WALLETS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    // Validate each entry is a 0x... 40-hex address
+    return parsed.filter((addr) => typeof addr === 'string' && /^0x[0-9a-fA-F]{40}$/.test(addr)).slice(0, EVM_WALLETS_MAX)
+  } catch {
+    return []
+  }
+}
+
+function writeStoredEvmWallets(addresses) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(EVM_WALLETS_STORAGE_KEY, JSON.stringify(addresses.slice(0, EVM_WALLETS_MAX)))
+  } catch {
+    // localStorage may be unavailable (private mode) — silently fail.
+  }
+}
+
 const shortAddress = (address = '') => {
   if (address.length <= 12) return address
   return `${address.slice(0, 4)}...${address.slice(-4)}`
@@ -37,6 +71,12 @@ export function WalletProvider({ children }) {
   const [walletDataError, setWalletDataError] = useState('')
   const [lastUpdated, setLastUpdated] = useState(null)
   const [tokenSupply, setTokenSupply] = useState(null)
+  // EVM wallets (MetaMask) the user has ever connected on any swap tab.
+  // These are tracked separately from the Phantom (Solana) wallet
+  // because the backend's samurai_points table is keyed on wallet_address
+  // — a Solana address and a MetaMask address are different rows even
+  // if they belong to the same user.
+  const [evmWallets, setEvmWallets] = useState(readStoredEvmWallets)
   const [tokenSupplyState, setTokenSupplyState] = useState('loading')
   const [liveStats, setLiveStats] = useState(null)
   const [liveStatsState, setLiveStatsState] = useState('loading')
@@ -248,6 +288,81 @@ export function WalletProvider({ children }) {
     setNotice('Wallet disconnected.')
   }
 
+  // ---- EVM (MetaMask) wallet tracking ----
+  //
+  // The Swap page's Ethereum and Robinhood panels call addEvmWallet(address)
+  // whenever the user connects MetaMask. We persist the address to
+  // localStorage so the Profile page can read it on subsequent loads even
+  // if the user hasn't reconnected MetaMask yet — points earned by an
+  // EVM wallet are forever tied to that address, so we need to remember it.
+  const addEvmWallet = useCallback((address) => {
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return
+    const normalized = address.toLowerCase()
+    setEvmWallets((current) => {
+      if (current.includes(normalized)) return current  // already tracked
+      const next = [...current, normalized]
+      writeStoredEvmWallets(next)
+      return next
+    })
+  }, [])
+
+  // Removes an EVM wallet from the tracked list + localStorage.
+  // Called when the user explicitly disconnects MetaMask from the
+  // Ethereum or Robinhood swap panels.
+  const removeEvmWallet = useCallback((address) => {
+    if (!address) return
+    const normalized = address.toLowerCase()
+    setEvmWallets((current) => {
+      const next = current.filter((addr) => addr !== normalized)
+      writeStoredEvmWallets(next)
+      return next
+    })
+  }, [])
+
+  // Auto-detect a previously-authorized MetaMask account on mount.
+  // This makes the EVM wallet available to the Profile page without
+  // requiring the user to click CONNECT on the swap tab first.
+  // Uses eth_accounts (silent, no popup) — only requests accounts if
+  // the user has previously authorized this dapp.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const injected = window.ethereum
+    if (!injected) return undefined
+    // Find the MetaMask provider (skip Phantom, which also injects window.ethereum)
+    const providers = Array.isArray(injected?.providers) ? injected.providers : []
+    const metaMask = providers.find((p) => p?.isMetaMask && !p?.isPhantom)
+      || (injected?.isMetaMask && !injected?.isPhantom ? injected : null)
+    if (!metaMask) return undefined
+
+    let cancelled = false
+    metaMask.request({ method: 'eth_accounts' })
+      .then((accounts) => {
+        if (cancelled) return
+        if (Array.isArray(accounts) && accounts[0]) {
+          addEvmWallet(accounts[0])
+        }
+      })
+      .catch(() => {
+        // User hasn't authorized MetaMask yet — that's fine, the Swap
+        // page will call addEvmWallet when they click CONNECT.
+      })
+
+    // Listen for account changes — if the user switches MetaMask account,
+    // track the new one too (and keep the old one tracked, since its
+    // historical points are still associated with that address).
+    const handleAccountsChanged = (accounts) => {
+      if (cancelled) return
+      if (Array.isArray(accounts) && accounts[0]) {
+        addEvmWallet(accounts[0])
+      }
+    }
+    metaMask.on?.('accountsChanged', handleAccountsChanged)
+    return () => {
+      cancelled = true
+      metaMask.removeListener?.('accountsChanged', handleAccountsChanged)
+    }
+  }, [addEvmWallet])
+
   const value = useMemo(() => ({
     wallet,
     profile,
@@ -263,6 +378,18 @@ export function WalletProvider({ children }) {
     hasSolanaProvider,
     isMobileDevice,
     walletModalOpen,
+    // EVM wallet tracking — used by the Profile page to aggregate
+    // samurai points across ALL connected wallets (Phantom + MetaMask).
+    evmWallets,
+    addEvmWallet,
+    removeEvmWallet,
+    // Convenience: returns ALL known wallet addresses (Phantom + EVM)
+    // for the current user. Used by the Profile page to fetch
+    // aggregated stats. The Phantom address comes first if connected.
+    allWalletAddresses: [
+      ...(wallet?.address && !wallet.isDemo ? [wallet.address] : []),
+      ...evmWallets,
+    ],
     openWalletModal: () => { setError(''); setWalletModalOpen(true) },
     closeWalletModal: () => setWalletModalOpen(false),
     buyModalOpen,
@@ -289,7 +416,7 @@ export function WalletProvider({ children }) {
     },
     disconnect,
     notice,
-  }), [wallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, tokenSupply, tokenSupplyState, liveStats, liveStatsState, error, hasSolanaProvider, isMobileDevice, walletModalOpen, buyModalOpen, notice, refreshWalletData])
+  }), [wallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, tokenSupply, tokenSupplyState, liveStats, liveStatsState, error, hasSolanaProvider, isMobileDevice, walletModalOpen, buyModalOpen, notice, refreshWalletData, evmWallets, addEvmWallet, removeEvmWallet])
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
 }
