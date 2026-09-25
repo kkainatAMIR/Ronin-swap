@@ -102,8 +102,14 @@ export default async function handler(req, res) {
   const request = {
     fromChain,
     toChain,
-    fromToken: body.fromToken,
-    toToken: body.toToken,
+    // IMPORTANT: lowercase token addresses before sending to LI.FI.
+    // LI.FI's /quote endpoint is case-sensitive — addresses in mixed
+    // case (e.g. EIP-55 checksum format from Blockscout) return 404,
+    // while the same address in lowercase returns the route. Blockscout
+    // returns mixed-case addresses for wallet holdings, so we MUST
+    // normalize here or wallet-discovered tokens fail with "No route".
+    fromToken: String(body.fromToken).toLowerCase(),
+    toToken: String(body.toToken).toLowerCase(),
     fromAmount: body.fromAmount,
     fromAddress: body.fromAddress,
     toAddress: body.toAddress,
@@ -154,9 +160,39 @@ export default async function handler(req, res) {
     let code = 'LIFI_QUOTE_ERROR'
     let message = 'LI.FI quote service is unavailable.'
     if (upstreamStatus === 404) {
+      // LI.FI returns 404 when none of its routers (fly, nordstern,
+      // etc.) can find a route. The 404 body's top-level `message` is
+      // generic ("No available quotes for the requested transfer") but
+      // the per-router detail in `errors.failed[].subpaths.*.[].message`
+      // contains the real reason — usually "NO_POSSIBLE_ROUTE" (no
+      // liquidity) or "couldn't recognize to token" (the token isn't
+      // in LI.FI's internal catalog for that router).
+      //
+      // Extract the most specific per-router reason so the user knows
+      // exactly why and what to try instead.
       status = 404
       code = 'NO_ROUTE'
-      message = 'No LI.FI route is available for this pair.'
+      const failedErrors = error?.body?.errors?.failed
+      const subpathReasons = []
+      if (Array.isArray(failedErrors)) {
+        for (const failed of failedErrors) {
+          const subpaths = failed?.subpaths || {}
+          for (const subpathKey of Object.keys(subpaths)) {
+            const attempts = subpaths[subpathKey]
+            if (Array.isArray(attempts)) {
+              for (const attempt of attempts) {
+                if (attempt?.message) {
+                  subpathReasons.push(`${attempt.tool || 'router'}: ${attempt.message}`)
+                }
+              }
+            }
+          }
+        }
+      }
+      const detail = subpathReasons.length > 0
+        ? ` — ${subpathReasons.slice(0, 3).join(' | ')}`
+        : (upstreamMessage ? `: ${upstreamMessage}` : '.')
+      message = `No LI.FI route is available for this pair${detail} Try a different output token (e.g. WETH) — LI.FI's routers may not recognize this specific token.`
     } else if (upstreamStatus === 429) {
       status = 429
       code = 'LIFI_RATE_LIMITED'
