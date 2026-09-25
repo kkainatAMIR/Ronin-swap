@@ -56,6 +56,9 @@ import lifiComplete from '../api_routes/lifi/complete.mjs'
 
 import rewardsBalance from '../api_routes/rewards/balance.mjs'
 import rewardsClaim from '../api_routes/rewards/claim.mjs'
+import rewardsClaimPrepare from '../api_routes/rewards/claim-prepare.mjs'
+import rewardsClaimConfirm from '../api_routes/rewards/claim-confirm.mjs'
+import rewardsClaimCancel from '../api_routes/rewards/claim-cancel.mjs'
 
 import robinhoodTokens from '../api_routes/robinhood/tokens.mjs'
 import robinhoodTrending from '../api_routes/robinhood/trending.mjs'
@@ -149,8 +152,21 @@ export const ROUTES = {
   'POST /api/lifi/complete': lifiComplete,
 
   // ─── Rewards (claim flow) ───
-  'GET /api/rewards/balance': rewardsBalance,
-  'POST /api/rewards/claim':  rewardsClaim,
+  // Three endpoints implement the USER-PAYS-FEE flow:
+  //   1. POST /api/rewards/claim-prepare  — backend creates ENTITLED row,
+  //      returns partially-signed tx (admin signs instruction, user is fee payer)
+  //   2. POST /api/rewards/claim-confirm  — frontend calls after user signs +
+  //      submits via Phantom; backend verifies tx landed + marks COMPLETED
+  //   3. POST /api/rewards/claim-cancel   — frontend calls if user rejects
+  //      Phantom popup; backend reverts ENTITLED row + restores points
+  //
+  // The legacy POST /api/rewards/claim endpoint is retained as a
+  // custodial fallback (admin pays fee) for admins / devnet tests.
+  'GET /api/rewards/balance':          rewardsBalance,
+  'POST /api/rewards/claim':           rewardsClaim,
+  'POST /api/rewards/claim-prepare':    rewardsClaimPrepare,
+  'POST /api/rewards/claim-confirm':    rewardsClaimConfirm,
+  'POST /api/rewards/claim-cancel':     rewardsClaimCancel,
 
   // ─── Robinhood Chain ───
   'GET /api/robinhood/tokens':         robinhoodTokens,

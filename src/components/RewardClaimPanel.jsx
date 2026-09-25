@@ -1,25 +1,36 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, SectionHeading, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
-import { claimReward, formatRewardAmount, getRewardBalance, solanaTxExplorerUrl } from '../services/rewardsService'
+import { getSolanaProvider } from '../context/WalletContext'
+import { confirmRewardClaim, cancelRewardClaim, claimReward, formatRewardAmount, getRewardBalance, prepareRewardClaim, solanaTxExplorerUrl } from '../services/rewardsService'
+import { sendSignedSolanaTransaction, confirmSolanaTransaction } from '../services/roninService'
+import { Transaction } from '@solana/web3.js'
 
 // RewardClaimPanel — shows the user's earned / claimed / claimable Samurai
-// points balance and lets them claim available rewards. The claim is
-// recorded by the backend (service_role) calling the public.claim_reward
-// Postgres RPC. This panel never sends earned_points or reward_amount to
-// the backend — those values are derived server-side.
+// points balance and lets them claim available rewards.
 //
-// Status flow:
-//   ENTITLED       → claim recorded, awaiting future on-chain payout
-//   PENDING_PAYOUT → backend has signed authorization for the Solana program
-//   COMPLETED      → on-chain payout confirmed
-//   FAILED         → on-chain payout failed (points remain claimed; admin resolves)
-//   CANCELLED      → admin voided the claim
+// USER-PAYS-FEE FLOW (default):
+//   1. prepareRewardClaim() → backend creates ENTITLED row + returns
+//      partially-signed tx (admin signs instruction, user is fee payer)
+//   2. Phantom signs the tx (user adds fee-payer signature)
+//   3. Frontend submits the tx to Solana via sendSignedSolanaTransaction
+//   4. confirmRewardClaim(claimId, signature) → backend verifies tx landed
+//      + marks COMPLETED
+//
+// If the user rejects the Phantom popup:
+//   cancelRewardClaim(claimId) → backend reverts ENTITLED row + restores points
+//
+// FALLBACK (admin-pays-fee): if a Phantom provider is not detected (e.g.
+// mobile browser without Phantom, or admin testing), the panel falls back
+// to the legacy /api/rewards/claim endpoint which uses the admin wallet
+// as the fee payer.
 export default function RewardClaimPanel({ wallet }) {
   const [balance, setBalance] = useState(null)
-  const [state, setState] = useState('idle') // idle | loading | claiming | error
+  // state: idle | loading | preparing | signing | submitting | confirming | success | error
+  const [state, setState] = useState('idle')
   const [error, setError] = useState('')
   const [lastClaim, setLastClaim] = useState(null)
+  const [activeClaimId, setActiveClaimId] = useState(null)
 
   const load = useCallback(async () => {
     if (!wallet) return
@@ -46,21 +57,126 @@ export default function RewardClaimPanel({ wallet }) {
   const estimatedReward = claimable > 0 && rate > 0 ? claimable / rate : 0
 
   const handleClaim = async () => {
-    if (!wallet || claimable <= 0 || state === 'claiming') return
-    // Confirmation dialog — show the user exactly what they're about to claim.
-    const confirmMsg = `Claim ${claimable.toLocaleString('en-US', { maximumFractionDigits: 2 })} Samurai Points for ${formatRewardAmount(estimatedReward, rewardAsset)}?\n\n` +
-      `This is a REAL on-chain Solana transaction. The payout will be signed by the backend admin and sent to your connected wallet.`
+    if (!wallet || claimable <= 0 || state !== 'idle') return
+
+    // Confirmation dialog — warn the user they will pay the network fee.
+    const hasPhantom = Boolean(getSolanaProvider())
+    const confirmMsg = hasPhantom
+      ? `Claim ${claimable.toLocaleString('en-US', { maximumFractionDigits: 2 })} Samurai Points for ${formatRewardAmount(estimatedReward, rewardAsset)}?\n\n` +
+        `This is a REAL on-chain Solana transaction.\n` +
+        `• You will sign the transaction in your wallet.\n` +
+        `• You will pay the network fee (~0.000005 SOL).\n` +
+        `• The reward SOL will be transferred to your wallet.`
+      : `Claim ${claimable.toLocaleString('en-US', { maximumFractionDigits: 2 })} Samurai Points for ${formatRewardAmount(estimatedReward, rewardAsset)}?\n\n` +
+        `This will use the backend admin-pays flow (no Phantom wallet detected).\n` +
+        `The payout will be signed by the backend admin and sent to your connected wallet.`
     if (!window.confirm(confirmMsg)) return
-    setState('claiming')
+
+    // Fallback path: no Phantom → use legacy admin-pays custodial flow.
+    if (!hasPhantom) {
+      setState('preparing')
+      setError('')
+      try {
+        const result = await claimReward(wallet)
+        setLastClaim(result.claim ? { ...result, claim_tx_signature: result.claim_tx_signature, claim: result.claim, message: result.message, payout_succeeded: result.payout_succeeded, previously_failed: result.previously_failed, pending_payout: result.pending_payout, db_status_update_pending: result.db_status_update_pending, already_completed: result.already_completed } : result)
+        await load()
+        setState('idle')
+      } catch (e) {
+        setError(e?.message || 'The reward claim was rejected.')
+        setState('error')
+      }
+      return
+    }
+
+    // USER-PAYS-FEE FLOW
+    const provider = getSolanaProvider()
+    let claimId = null
     setError('')
+
     try {
-      const result = await claimReward(wallet) // claim all available
-      setLastClaim(result.claim ? { ...result, claim_tx_signature: result.claim_tx_signature, claim: result.claim, message: result.message, payout_succeeded: result.payout_succeeded, previously_failed: result.previously_failed, pending_payout: result.pending_payout, db_status_update_pending: result.db_status_update_pending, already_completed: result.already_completed } : result)
+      // --- STEP 1: prepare ---
+      setState('preparing')
+      const prepared = await prepareRewardClaim(wallet)
+      claimId = prepared.claimId
+      setActiveClaimId(claimId)
+
+      if (!prepared.partiallySignedTx) {
+        throw new Error('The backend did not return a partially-signed transaction.')
+      }
+
+      // --- STEP 2: Phantom signs ---
+      setState('signing')
+      const partialTxBytes = Uint8Array.from(atob(prepared.partiallySignedTx), (c) => c.charCodeAt(0))
+      const partialTx = Transaction.from(partialTxBytes)
+      let signedTx
+      try {
+        signedTx = await provider.signTransaction(partialTx)
+      } catch (signError) {
+        // User rejected the Phantom popup — cancel the claim.
+        if (claimId) {
+          try { await cancelRewardClaim(claimId, `USER_REJECTED_SIGNATURE: ${signError?.message || ''}`) }
+          catch (cancelErr) { console.warn('Failed to cancel rejected claim:', cancelErr?.message) }
+        }
+        setActiveClaimId(null)
+        setState('idle')
+        setError('Signature cancelled. Your points have been restored.')
+        return
+      }
+
+      // --- STEP 3: submit to Solana ---
+      setState('submitting')
+      const signedBytes = signedTx.serialize()
+      const signature = await sendSignedSolanaTransaction(signedBytes)
+
+      // --- STEP 4: wait for confirmation (frontend polls) ---
+      setState('confirming')
+      try {
+        await confirmSolanaTransaction(signature, 90_000)
+      } catch (confirmError) {
+        // The tx may still land — leave the claim ENTITLED and let the
+        // user retry /claim-confirm later.
+        console.warn('Frontend confirmation timed out — backend will reconcile:', confirmError?.message)
+        setLastClaim({
+          claim_tx_signature: signature,
+          claim: prepared.claim,
+          pending_confirmation: true,
+          message: 'Transaction submitted but confirmation timed out. The backend will verify it shortly.',
+        })
+        // Best-effort: call /claim-confirm in the background.
+        try {
+          await confirmRewardClaim(claimId, signature, wallet)
+        } catch (confirmRetryErr) {
+          console.warn('Background /claim-confirm failed (will need admin reconciliation):', confirmRetryErr?.message)
+        }
+        await load()
+        setActiveClaimId(null)
+        setState('idle')
+        return
+      }
+
+      // --- STEP 5: backend verifies + marks COMPLETED ---
+      const confirmed = await confirmRewardClaim(claimId, signature, wallet)
+      setLastClaim({
+        claim_tx_signature: signature,
+        claim: confirmed.claim || prepared.claim,
+        message: confirmed.message,
+        payout_succeeded: confirmed.success,
+      })
+
       // Refresh the balance so the new claimable_points shows.
       await load()
+      setActiveClaimId(null)
+      setState('idle')
     } catch (e) {
-      setError(e?.message || 'The reward claim was rejected.')
+      // On any unexpected error, try to cancel the in-flight claim so the
+      // user's points are restored. The /claim-cancel RPC is idempotent.
+      if (claimId) {
+        try { await cancelRewardClaim(claimId, `FRONTEND_ERROR: ${e?.message || 'unknown'}`) }
+        catch (cancelErr) { console.warn('Failed to cancel claim after error:', cancelErr?.message) }
+      }
+      setError(e?.message || 'The reward claim failed.')
       setState('error')
+      setActiveClaimId(null)
     }
   }
 
@@ -88,12 +204,19 @@ export default function RewardClaimPanel({ wallet }) {
     )
   }
 
+  const stateLabel = {
+    preparing: 'Preparing claim…',
+    signing: 'Sign in your wallet…',
+    submitting: 'Submitting transaction…',
+    confirming: 'Confirming on Solana…',
+  }[state] || 'Claiming…'
+
   return (
     <section className="profile-panel profile-rewards-panel">
       <SectionHeading
         eyebrow="REWARD ACCOUNTING"
         title="Your reward balance"
-        text={`Earned points convert to ${rewardAsset} at ${rate.toLocaleString('en-US')} points per ${rewardAsset}.`}
+        text={`Earned points convert to ${rewardAsset} at ${rate.toLocaleString('en-US')} points per ${rewardAsset}. You pay the network fee when claiming.`}
       />
 
       <div className="profile-rewards-status-row">
@@ -124,35 +247,33 @@ export default function RewardClaimPanel({ wallet }) {
           variant="primary"
           icon="gift"
           onClick={handleClaim}
-          disabled={claimable <= 0 || !rewardsEnabled || state === 'claiming'}
+          disabled={claimable <= 0 || !rewardsEnabled || state !== 'idle'}
         >
-          {state === 'claiming' ? 'Claiming…' : `Claim all claimable points`}
+          {state !== 'idle' ? stateLabel : `Claim all claimable points`}
         </Button>
-        <Button variant="outline" icon="refresh" onClick={load} disabled={state === 'loading'}>Refresh</Button>
+        <Button variant="outline" icon="refresh" onClick={load} disabled={state === 'loading' || state !== 'idle'}>Refresh</Button>
       </div>
+
+      <p className="profile-rewards-fee-note">
+        <Icon name="info" size={12} /> You pay the Solana network fee (~0.000005 SOL). Make sure your wallet has enough SOL for gas.
+      </p>
 
       {error && <div className="profile-rewards-error-text"><Icon name="info" size={14} /> {error}</div>}
 
       {lastClaim && (
-        <div className={`profile-rewards-success ${lastClaim.payout_succeeded === false || lastClaim.previously_failed ? 'profile-rewards-success-warn' : ''}`}>
-          <Icon name={lastClaim.payout_succeeded === false || lastClaim.previously_failed ? 'info' : 'check'} size={16} />
+        <div className={`profile-rewards-success ${lastClaim.payout_succeeded === false || lastClaim.pending_confirmation ? 'profile-rewards-success-warn' : ''}`}>
+          <Icon name={lastClaim.payout_succeeded === false || lastClaim.pending_confirmation ? 'info' : 'check'} size={16} />
           <div>
-            {lastClaim.payout_succeeded === false ? (
+            {lastClaim.pending_confirmation ? (
+              <strong>Awaiting confirmation</strong>
+            ) : lastClaim.payout_succeeded === false ? (
               <strong>Payout failed</strong>
-            ) : lastClaim.previously_failed ? (
-              <strong>Previous attempt failed</strong>
-            ) : lastClaim.db_status_update_pending ? (
-              <strong>Payout confirmed on-chain</strong>
-            ) : lastClaim.pending_payout ? (
-              <strong>Payout in progress</strong>
-            ) : lastClaim.already_completed ? (
-              <strong>Already claimed</strong>
             ) : (
               <strong>Claim paid!</strong>
             )}
             <small>
               {Number(lastClaim.claim?.points_claimed || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} points →{' '}
-              {formatRewardAmount(lastClaim.claim?.reward_amount, lastClaim.claim?.reward_asset)} ({lastClaim.claim?.status})
+              {formatRewardAmount(lastClaim.claim?.reward_amount, lastClaim.claim?.reward_asset)} ({lastClaim.claim?.status || 'COMPLETED'})
             </small>
             {lastClaim.claim_tx_signature && (
               <small className="profile-rewards-tx-sig">
@@ -162,7 +283,9 @@ export default function RewardClaimPanel({ wallet }) {
                 </a>
               </small>
             )}
-            <small className="profile-rewards-claim-id">Claim ID: <code>{lastClaim.claim?.claim_id}</code></small>
+            {lastClaim.claim?.claim_id && (
+              <small className="profile-rewards-claim-id">Claim ID: <code>{lastClaim.claim.claim_id}</code></small>
+            )}
             {lastClaim.message && <small className="profile-rewards-message">{lastClaim.message}</small>}
           </div>
         </div>
@@ -209,3 +332,4 @@ export default function RewardClaimPanel({ wallet }) {
     </section>
   )
 }
+

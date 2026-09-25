@@ -57,6 +57,117 @@ export async function claimReward(wallet, { pointsToClaim = null } = {}) {
   return body
 }
 
+// =====================================================================
+// USER-PAYS-FEE FLOW
+// =====================================================================
+// Three-step flow that lets the USER pay the Solana transaction fee
+// (instead of the admin wallet). The user must have at least
+// ~0.000005 SOL for gas.
+//
+//   Step 1: prepareRewardClaim(wallet, { pointsToClaim? })
+//           → backend creates ENTITLED row + returns partially-signed tx
+//   Step 2: user signs + submits via Phantom (handled in RewardClaimPanel)
+//   Step 3: confirmRewardClaim(claimId, signature)
+//           → backend verifies tx landed + marks COMPLETED
+//
+// If the user rejects the Phantom popup:
+//   cancelRewardClaim(claimId)
+//   → backend reverts ENTITLED row + restores claimed_points
+// =====================================================================
+
+// Step 1: prepare the claim and get a partially-signed transaction.
+//
+// Returns {
+//   success, flow: 'user-pays-fee',
+//   claim: { claim_id, points_claimed, reward_amount, ... },
+//   partiallySignedTx: <base64 string>,
+//   feePayer: <user wallet address>,
+//   blockhash, lastValidBlockHeight,
+//   rewardAmountLamports, pointsClaimed,
+//   programId, network, explorerUrl,
+//   earned_points, claimed_points, claimable_points,
+//   message
+// }
+//
+// The `partiallySignedTx` should be passed to Phantom's signTransaction().
+// Phantom will add the user's signature (as fee payer) and return a
+// fully-signed tx that the frontend submits via connection.sendRawTransaction.
+export async function prepareRewardClaim(wallet, { pointsToClaim = null, claimId: claimIdOverride = null } = {}) {
+  if (!wallet) throw new Error('A wallet address is required.')
+  const claimId = claimIdOverride || newClaimId()
+  const response = await fetch('/api/rewards/claim-prepare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wallet, claimId, pointsToClaim }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const err = new Error(body?.error || 'The reward claim could not be prepared.')
+    err.code = body?.code || 'CLAIM_PREPARE_FAILED'
+    err.claimId = claimId
+    throw err
+  }
+  return { ...body, claimId }
+}
+
+// Step 3: confirm a user-submitted claim transaction.
+//
+// Called AFTER the user has signed the partially-signed tx (returned by
+// prepareRewardClaim) in Phantom AND submitted it to Solana.
+//
+// Returns {
+//   success,
+//   claim_id, signature, explorer_url,
+//   claim?: { ... },
+//   recipient_balance_before, recipient_balance_after,
+//   message,
+//   // OR if the tx is not yet confirmed:
+//   pending: true,
+//   message: 'The transaction has not been confirmed on Solana yet...'
+// }
+export async function confirmRewardClaim(claimId, signature, wallet) {
+  if (!claimId) throw new Error('A claimId is required.')
+  if (!signature) throw new Error('A transaction signature is required.')
+  const response = await fetch('/api/rewards/claim-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ claimId, signature, wallet }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const err = new Error(body?.error || 'The reward claim could not be confirmed.')
+    err.code = body?.code || 'CLAIM_CONFIRM_FAILED'
+    throw err
+  }
+  return body
+}
+
+// Cancel a claim that the user rejected in Phantom.
+//
+// Reverts the ENTITLED row and restores the user's claimed_points.
+// Idempotent — calling it twice is safe (returns success with
+// idempotent: true on the second call).
+//
+// Returns {
+//   success, reverted, idempotent?,
+//   claim_id, claim?, points_restored, message
+// }
+export async function cancelRewardClaim(claimId, reason = 'USER_CANCELLED') {
+  if (!claimId) throw new Error('A claimId is required.')
+  const response = await fetch('/api/rewards/claim-cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ claimId, reason }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const err = new Error(body?.error || 'The reward claim could not be cancelled.')
+    err.code = body?.code || 'CLAIM_CANCEL_FAILED'
+    throw err
+  }
+  return body
+}
+
 export function formatRewardAmount(amount, asset = 'SOL') {
   if (!Number.isFinite(Number(amount))) return '—'
   const n = Number(amount)
