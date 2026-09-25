@@ -13,19 +13,30 @@
 // does NOT index ERC-20 Transfer events under the standard topic
 // 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df9089b1c.
 // `eth_getLogs` for that topic returns 0 results for any wallet, even
-// wallets with extensive transfer history. This was the original
-// implementation and it silently returned no tokens.
+// wallets with extensive transfer history. (Verified live.)
 //
-// Instead, we use the LI.FI token catalog (https://li.quest/v1/tokens?chains=4663)
-// as the candidate list — ~316 known Robinhood Chain tokens — and
-// `balanceOf()` each one against the wallet in parallel batches. Any
-// token with balance > 0 is included. This works for arbitrary wallet-
-// held tokens, not just our curated registry, because LI.FI's catalog
-// is comprehensive (it includes tokens we don't have in our registry).
+// IMPORTANT — why we don't scan LI.FI/Blockscout catalogs via balanceOf:
+// Scanning ~1500 candidates against the Robinhood RPC triggers rate
+// limits (rate-limit reset window is 60s) and takes 50+ seconds — too
+// slow for the 45s polling the frontend uses.
 //
-// No third-party API key required. Uses the existing LI.FI base URL
-// already configured in api/_lib/lifi.mjs, and the existing Robinhood
-// RPC via lifiRpc(4663, ...).
+// Strategy:
+//   PRIMARY: Blockscout /api/v2/addresses/<wallet>/tokens — returns the
+//            wallet's actual token holdings in ONE HTTP call (~200ms).
+//            This is the same explorer that powers the official Robinhood
+//            Chain blockscout UI, and it indexes ALL token balances.
+//
+//   FALLBACK: If Blockscout is unavailable (5xx / timeout / Cloudflare
+//             challenge), use the merged LI.FI + Blockscout token catalogs
+//             (~1500+ unique candidates) + batched balanceOf() via the
+//             Robinhood RPC. This is slower (50s+) and rate-limited, but
+//             works without the explorer.
+//
+//   NATIVE ETH: Always fetched via lifiRpc(4663, 'eth_getBalance') —
+//               works regardless of which path discovered the ERC-20s.
+//
+// No third-party API key required. Uses the existing Robinhood RPC
+// via lifiRpc(4663, ...) for native balance and the on-chain fallback.
 // =====================================================================
 
 import { apiError, json, rateLimit } from '../../api/_lib/roninBackend.mjs'
@@ -38,19 +49,20 @@ const BALANCE_OF_SELECTOR = '0x70a08231'
 const SYMBOL_SELECTOR = '0x95d89b41'
 const NAME_SELECTOR = '0x06fdde03'
 const DECIMALS_SELECTOR = '0x313ce567'
-// Cap the number of tokens we resolve metadata for, to keep response
-// time bounded even for wallets holding many tokens.
-const MAX_TOKENS_TO_RESOLVE = 80
-// Batch size for parallel eth_call — keeps the RPC happy without
-// overwhelming it.
-const BATCH_SIZE = 16
+const BLOCKSCOUT_BASE = 'https://robinhoodchain.blockscout.com/api/v2'
+const BLOCKSCOUT_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+  Accept: 'application/json',
+}
 
-// 5-minute cache of the LI.FI token catalog for chain 4663.
+// -------- Catalog fallback constants (only used if Blockscout is down) ---
+const MAX_TOKENS_TO_RESOLVE = 100
+const BATCH_SIZE = 32
+const BLOCKSCOUT_MAX_PAGES = 20
 let catalogCache = { at: 0, tokens: [] }
 const CATALOG_TTL_MS = 5 * 60_000
 
-// Verified tokens from robinhoodRegistry.js — used to skip expensive
-// metadata eth_call round-trips for tokens we already know.
+// Verified tokens from robinhoodRegistry.js
 const VERIFIED_BY_ADDRESS = new Map(
   ROBINHOOD_VERIFIED_TOKENS.map((token) => [String(token.address).toLowerCase(), token]),
 )
@@ -74,58 +86,188 @@ function shortAddress(address) {
   return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'UNKNOWN'
 }
 
-// -------- LI.FI token catalog (cached) -------------------------------
-// Fetches all known Robinhood Chain tokens from LI.FI. This is the
-// candidate list we balanceOf() against. LI.FI's catalog includes
-// tokens NOT in our curated registry, so wallet-held tokens we don't
-// track will still be discovered.
+// =====================================================================
+// PRIMARY PATH: Blockscout /api/v2/addresses/<wallet>/tokens
+// =====================================================================
+// Returns all ERC-20 token balances for the wallet in ONE HTTP call.
+// The Blockscout explorer indexes all token balances on Robinhood Chain.
+// Pagination is via next_page_params (returns null when no more pages).
 //
-// LI.FI catalog entries look like:
-//   { address, symbol, name, decimals, chainId, logoURI? }
-async function getRobinhoodCatalog() {
-  if (Date.now() - catalogCache.at < CATALOG_TTL_MS && catalogCache.tokens.length > 0) {
-    return catalogCache.tokens
+// Response shape (Blockscout v2):
+//   {
+//     items: [
+//       {
+//         value: "1234567890",           // raw balance as decimal string
+//         token: {
+//           address_hash: "0x...",
+//           symbol: "USDG",
+//           name: "USDG",
+//           decimals: "6",
+//           ...
+//         }
+//       },
+//       ...
+//     ],
+//     next_page_params: { ... } | null
+//   }
+async function fetchWalletTokensViaBlockscout(wallet) {
+  const allItems = []
+  let url = `${BLOCKSCOUT_BASE}/addresses/${wallet}/tokens`
+
+  // Cap at 10 pages (50 tokens each) = 500 holdings max. No wallet will
+  // hold more than this in practice.
+  for (let page = 0; page < 10; page++) {
+    try {
+      const response = await fetch(url, {
+        headers: BLOCKSCOUT_HEADERS,
+        signal: AbortSignal.timeout(10_000),
+      })
+      // Cloudflare sometimes returns 403 with a JS challenge page.
+      // In that case, fall through to the balanceOf fallback.
+      if (response.status === 403) {
+        return { ok: false, reason: 'CLOUDFLARE_BLOCKED', items: [] }
+      }
+      if (!response.ok) {
+        return { ok: false, reason: `HTTP_${response.status}`, items: [] }
+      }
+      const body = await response.json().catch(() => null)
+      if (!body || !Array.isArray(body.items)) {
+        return { ok: false, reason: 'MALFORMED_RESPONSE', items: [] }
+      }
+      allItems.push(...body.items)
+      if (!body.next_page_params) break
+      // Rebuild URL with next_page_params
+      const params = new URLSearchParams()
+      for (const [k, v] of Object.entries(body.next_page_params)) params.set(k, String(v))
+      url = `${BLOCKSCOUT_BASE}/addresses/${wallet}/tokens?${params}`
+    } catch (error) {
+      // Network error / timeout — fall through to the balanceOf fallback.
+      return { ok: false, reason: error?.name === 'TimeoutError' ? 'TIMEOUT' : (error?.message || 'NETWORK_ERROR'), items: [] }
+    }
   }
+
+  return { ok: true, items: allItems }
+}
+
+// Convert Blockscout wallet-tokens response to the normalized shape
+// the frontend expects.
+function normalizeBlockscoutWalletTokens(items) {
+  const tokens = []
+  for (const item of items) {
+    const tokenAddr = String(item?.token?.address_hash || '').toLowerCase()
+    if (!ADDRESS_PATTERN.test(tokenAddr)) continue
+    const decimals = Number(item?.token?.decimals) || 18
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) continue
+    const balanceRaw = String(item?.value || '0')
+    if (!/^\d+$/.test(balanceRaw) || BigInt(balanceRaw) <= 0n) continue
+    const symbol = item?.token?.symbol || shortAddress(tokenAddr)
+    const name = item?.token?.name || symbol
+    const verified = VERIFIED_BY_ADDRESS.get(tokenAddr)
+    tokens.push({
+      chainId: ROBINHOOD_CHAIN_ID,
+      chainKey: 'robinhood',
+      type: 'erc20',
+      address: tokenAddr,
+      symbol,
+      name,
+      decimals,
+      logoURI: verified?.logoURI || item?.token?.icon_url || null,
+      balance: balanceRaw,
+      source: verified ? 'blockscout+verified-registry' : 'blockscout-explorer',
+    })
+  }
+  return tokens
+}
+
+// =====================================================================
+// FALLBACK PATH: LI.FI + Blockscout catalog + batched balanceOf
+// =====================================================================
+// Used only if the Blockscout /addresses/<wallet>/tokens endpoint fails
+// (Cloudflare block, timeout, 5xx). Slower (~50s for 1500 candidates)
+// and rate-limited by the Robinhood RPC.
+
+async function fetchLifiCatalog() {
   try {
     const response = await fetch(`${LIFI_BASE_URL}/tokens?chains=${ROBINHOOD_CHAIN_ID}`, {
       headers: lifiHeaders({ Accept: 'application/json' }),
       signal: AbortSignal.timeout(15_000),
     })
-    if (!response.ok) return catalogCache.tokens
+    if (!response.ok) return []
     const body = await response.json().catch(() => null)
     const tokens = Array.isArray(body?.tokens?.[String(ROBINHOOD_CHAIN_ID)])
       ? body.tokens[String(ROBINHOOD_CHAIN_ID)]
       : Array.isArray(body?.tokens?.[ROBINHOOD_CHAIN_ID])
         ? body.tokens[ROBINHOOD_CHAIN_ID]
         : []
-    const cleaned = tokens.filter((token) => ADDRESS_PATTERN.test(String(token?.address || '')))
-    catalogCache = { at: Date.now(), tokens: cleaned }
-    return cleaned
+    return tokens.filter((token) => ADDRESS_PATTERN.test(String(token?.address || '')))
   } catch {
-    // On failure (LI.FI down, timeout, etc.) return the cached list if
-    // we have one, otherwise fall back to just the verified registry.
-    if (catalogCache.tokens.length > 0) return catalogCache.tokens
-    return ROBINHOOD_VERIFIED_TOKENS.map((t) => ({ address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, chainId: ROBINHOOD_CHAIN_ID }))
+    return []
   }
 }
 
-// -------- Batched balanceOf via JSON-RPC -----------------------------
-// Solana's RPC supports batched JSON-RPC (multiple methods in one
-// HTTP request). Robinhood RPC also supports this — we use it to
-// fetch 16 balances in one round-trip instead of 16 sequential calls.
-//
-// Falls back to sequential eth_call if the batch endpoint isn't supported.
+async function fetchBlockscoutCatalog() {
+  const allTokens = []
+  let url = `${BLOCKSCOUT_BASE}/tokens`
+  let page = 0
+
+  while (url && page < BLOCKSCOUT_MAX_PAGES) {
+    try {
+      const response = await fetch(url, { headers: BLOCKSCOUT_HEADERS, signal: AbortSignal.timeout(15_000) })
+      if (!response.ok) break
+      const body = await response.json().catch(() => null)
+      const items = Array.isArray(body?.items) ? body.items : []
+      if (items.length === 0) break
+      allTokens.push(...items)
+      page++
+      if (body?.next_page_params) {
+        const params = new URLSearchParams()
+        for (const [k, v] of Object.entries(body.next_page_params)) params.set(k, String(v))
+        url = `${BLOCKSCOUT_BASE}/tokens?${params}`
+      } else {
+        url = null
+      }
+    } catch {
+      break
+    }
+  }
+
+  return allTokens.filter((t) => {
+    const addr = String(t?.address_hash || '')
+    return ADDRESS_PATTERN.test(addr) && t?.decimals != null && Number(t.decimals) > 0
+  })
+}
+
+async function getCandidateCatalog() {
+  if (Date.now() - catalogCache.at < CATALOG_TTL_MS && catalogCache.tokens.length > 0) {
+    return catalogCache.tokens
+  }
+  const [lifiTokens, blockscoutTokens] = await Promise.all([fetchLifiCatalog(), fetchBlockscoutCatalog()])
+  const merged = new Map()
+  for (const t of lifiTokens) {
+    const addr = String(t.address).toLowerCase()
+    if (!merged.has(addr)) merged.set(addr, { address: addr, symbol: t.symbol, name: t.name, decimals: Number(t.decimals) || 18, source: 'lifi' })
+  }
+  for (const t of blockscoutTokens) {
+    const addr = String(t.address_hash).toLowerCase()
+    if (!merged.has(addr)) merged.set(addr, { address: addr, symbol: t.symbol || null, name: t.name || null, decimals: Number(t.decimals) || 18, source: 'blockscout' })
+  }
+  for (const t of ROBINHOOD_VERIFIED_TOKENS) {
+    const addr = String(t.address).toLowerCase()
+    if (!merged.has(addr)) merged.set(addr, { address: addr, symbol: t.symbol, name: t.name, decimals: Number(t.decimals) || 18, source: 'verified-registry' })
+  }
+  const result = Array.from(merged.values())
+  catalogCache = { at: Date.now(), tokens: result }
+  return result
+}
+
 async function batchBalanceOf(chainId, tokenAddresses, owner) {
   const ownerPadded = owner.slice(2).padStart(64, '0')
-
-  // Try batched JSON-RPC first (single HTTP request, multiple methods)
   const batchPayload = tokenAddresses.map((addr, index) => ({
     jsonrpc: '2.0',
     id: index,
     method: 'eth_call',
     params: [{ to: addr, data: `${BALANCE_OF_SELECTOR}${ownerPadded}` }, 'latest'],
   }))
-
   const rpcUrl = lifiRpcUrl(chainId)
   try {
     const response = await fetch(rpcUrl, {
@@ -136,7 +278,6 @@ async function batchBalanceOf(chainId, tokenAddresses, owner) {
     })
     const body = await response.json()
     if (Array.isArray(body)) {
-      // Batch succeeded — sort results by id to maintain order
       const resultsById = new Map(body.map((r) => [r.id, r]))
       return tokenAddresses.map((_, index) => {
         const result = resultsById.get(index)
@@ -144,12 +285,7 @@ async function batchBalanceOf(chainId, tokenAddresses, owner) {
         return hexToBigInt(result?.result)
       })
     }
-    // Some RPCs return a single object instead of an array when batching
-    // is unsupported. Fall back to sequential.
-  } catch {
-    // Network error — fall back to sequential.
-  }
-
+  } catch {}
   // Sequential fallback
   const balances = []
   for (const addr of tokenAddresses) {
@@ -163,31 +299,16 @@ async function batchBalanceOf(chainId, tokenAddresses, owner) {
   return balances
 }
 
-// -------- Fetch metadata for tokens with balance > 0 ----------------
-// For tokens in our verified registry, use cached metadata.
-// For unknown tokens, fetch symbol/name/decimals via eth_call.
-async function fetchTokenMetadata(chainId, address) {
-  const verified = VERIFIED_BY_ADDRESS.get(address)
-  if (verified) {
-    return {
-      symbol: verified.symbol,
-      name: verified.name,
-      decimals: Number(verified.decimals || 18),
-      logoURI: verified.logoURI || null,
-    }
-  }
-  const [symbolHex, nameHex, decimalsHex] = await Promise.all([
-    lifiRpc(chainId, 'eth_call', [{ to: address, data: SYMBOL_SELECTOR }, 'latest']).catch(() => '0x'),
-    lifiRpc(chainId, 'eth_call', [{ to: address, data: NAME_SELECTOR }, 'latest']).catch(() => '0x'),
-    lifiRpc(chainId, 'eth_call', [{ to: address, data: DECIMALS_SELECTOR }, 'latest']).catch(() => '0x'),
-  ])
-  const decimals = Number.parseInt(decimalsHex || '0x0', 16)
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) return null
-  const symbol = decodeString(symbolHex) || shortAddress(address)
-  const name = decodeString(nameHex) || symbol
-  return { symbol, name, decimals, logoURI: null }
+function chunkBatch(arr, size) {
+  if (size <= 0) return [arr]
+  const chunks = []
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
+  return chunks
 }
 
+// =====================================================================
+// Handler
+// =====================================================================
 export default async function handler(req, res) {
   if (req.method !== 'GET') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
   if (!rateLimit(req, 'robinhood-wallet-tokens', 30, 60_000)) return apiError(res, 429, 'RATE_LIMITED', 'Too many wallet-token requests. Try again shortly.')
@@ -199,65 +320,64 @@ export default async function handler(req, res) {
   if (!rpcUrl) return apiError(res, 503, 'RPC_NOT_CONFIGURED', 'Robinhood Chain RPC is not configured.')
 
   try {
-    // 1. Fetch LI.FI token catalog (cached for 5 min) — this is the
-    //    candidate list of ~316 known Robinhood Chain tokens.
-    const catalog = await getRobinhoodCatalog()
+    // Always fetch native ETH balance via the Robinhood RPC (works on any path)
+    const nativeHexPromise = lifiRpc(ROBINHOOD_CHAIN_ID, 'eth_getBalance', [address, 'latest'])
 
-    // Always include verified registry tokens too (in case LI.FI catalog
-    // is missing any). Dedupe by lowercase address.
-    const candidateMap = new Map()
-    for (const t of catalog) candidateMap.set(String(t.address).toLowerCase(), t)
-    for (const t of ROBINHOOD_VERIFIED_TOKENS) {
-      const key = String(t.address).toLowerCase()
-      if (!candidateMap.has(key)) candidateMap.set(key, { address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, chainId: ROBINHOOD_CHAIN_ID })
+    // PRIMARY PATH: Blockscout /addresses/<wallet>/tokens
+    // Returns ALL wallet holdings in 1-2 HTTP calls (~200ms typical).
+    const blockscoutResult = await fetchWalletTokensViaBlockscout(address)
+    const nativeHex = await nativeHexPromise
+
+    if (blockscoutResult.ok) {
+      const tokens = normalizeBlockscoutWalletTokens(blockscoutResult.items)
+      return json(res, 200, {
+        success: true,
+        chainId: ROBINHOOD_CHAIN_ID,
+        chainKey: 'robinhood',
+        source: 'blockscout-explorer',
+        note: 'Wallet token discovery via Blockscout /api/v2/addresses/<wallet>/tokens. Returns ALL ERC-20 holdings in 1-2 HTTP calls.',
+        native: { balance: hexToBigInt(nativeHex).toString(), decimals: 18, symbol: 'ETH', name: 'Ether' },
+        tokens,
+        dataAvailable: true,
+        generatedAt: new Date().toISOString(),
+      })
     }
-    const candidates = Array.from(candidateMap.values())
 
-    // 2. Native ETH balance + batched balanceOf for all candidates, in parallel.
-    const [nativeHex, ...balanceBatches] = await Promise.all([
-      lifiRpc(ROBINHOOD_CHAIN_ID, 'eth_getBalance', [address, 'latest']),
-      // Run balanceOf in batches of BATCH_SIZE to keep the RPC happy.
-      ...chunkBatch(candidates, BATCH_SIZE).map((batch) =>
+    // FALLBACK PATH: catalog + batched balanceOf via the Robinhood RPC
+    // Slower (~50s for 1500 candidates) and rate-limited, but works
+    // without the explorer.
+    console.warn('Blockscout wallet-tokens endpoint failed:', blockscoutResult.reason, '— falling back to catalog + balanceOf scan')
+    const candidates = await getCandidateCatalog()
+
+    const balanceBatches = await Promise.all(
+      chunkBatch(candidates, BATCH_SIZE).map((batch) =>
         batchBalanceOf(ROBINHOOD_CHAIN_ID, batch.map((t) => t.address), address),
       ),
-    ])
-
-    // Flatten the balance batches back into a single array aligned with candidates
+    )
     const allBalances = balanceBatches.flat()
 
-    // 3. Filter to tokens with balance > 0
     const heldTokens = []
     for (let i = 0; i < candidates.length; i++) {
       const balance = allBalances[i] ?? 0n
-      if (balance > 0n) {
-        heldTokens.push({ candidate: candidates[i], balance })
-      }
+      if (balance > 0n) heldTokens.push({ candidate: candidates[i], balance })
     }
-
-    // Cap the number we resolve metadata for (defensive — wallets
-    // rarely hold more than 80 distinct tokens)
     const resolved = heldTokens.slice(0, MAX_TOKENS_TO_RESOLVE)
 
-    // 4. Fetch metadata for each held token in parallel
     const tokens = await Promise.all(resolved.map(async ({ candidate, balance }) => {
       const addressLower = String(candidate.address).toLowerCase()
-      try {
-        const meta = await fetchTokenMetadata(ROBINHOOD_CHAIN_ID, addressLower)
-        if (!meta) return null
-        return {
-          chainId: ROBINHOOD_CHAIN_ID,
-          chainKey: 'robinhood',
-          type: 'erc20',
-          address: addressLower,
-          symbol: meta.symbol || candidate.symbol || 'UNKNOWN',
-          name: meta.name || candidate.name || meta.symbol || 'Wallet Token',
-          decimals: meta.decimals || Number(candidate.decimals) || 18,
-          logoURI: meta.logoURI || candidate.logoURI || null,
-          balance: balance.toString(),
-          source: VERIFIED_BY_ADDRESS.has(addressLower) ? 'verified-registry' : 'lifi-catalog',
-        }
-      } catch {
-        return null
+      const verified = VERIFIED_BY_ADDRESS.get(addressLower)
+      const symbol = candidate.symbol || (verified?.symbol) || shortAddress(addressLower)
+      return {
+        chainId: ROBINHOOD_CHAIN_ID,
+        chainKey: 'robinhood',
+        type: 'erc20',
+        address: addressLower,
+        symbol,
+        name: candidate.name || symbol,
+        decimals: Number(candidate.decimals) || 18,
+        logoURI: verified?.logoURI || candidate.logoURI || null,
+        balance: balance.toString(),
+        source: candidate.source || (verified ? 'verified-registry' : 'on-chain-fallback'),
       }
     }))
 
@@ -265,8 +385,9 @@ export default async function handler(req, res) {
       success: true,
       chainId: ROBINHOOD_CHAIN_ID,
       chainKey: 'robinhood',
-      source: 'lifi-catalog-balance-of',
-      note: 'Robinhood Chain RPC does not index ERC-20 Transfer events under eth_getLogs; wallet token discovery uses the LI.FI token catalog (~316 known Robinhood tokens) + balanceOf() instead.',
+      source: 'catalog-balance-of-fallback',
+      note: `Blockscout explorer was unavailable (${blockscoutResult.reason}); fell back to merged LI.FI + Blockscout catalog (~${candidates.length} candidates) + batched balanceOf.`,
+      catalogSize: candidates.length,
       native: { balance: hexToBigInt(nativeHex).toString(), decimals: 18, symbol: 'ETH', name: 'Ether' },
       tokens: tokens.filter(Boolean),
       dataAvailable: true,
@@ -276,12 +397,4 @@ export default async function handler(req, res) {
     console.error('robinhood wallet-tokens failed:', error?.message || error)
     return apiError(res, 502, 'WALLET_TOKENS_UNAVAILABLE', error?.message || 'Robinhood wallet tokens are unavailable right now.')
   }
-}
-
-// Helper: split an array into chunks of the given size
-function chunkBatch(arr, size) {
-  if (size <= 0) return [arr]
-  const chunks = []
-  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size))
-  return chunks
 }
