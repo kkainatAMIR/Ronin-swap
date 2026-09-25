@@ -148,9 +148,19 @@ console.log(JSON.stringify(out))
 # =====================================================================
 # Test 4: buildClaimRewardInstruction byte layout
 # =====================================================================
+# The UPGRADED contract (2026-09) accepts exactly FOUR accounts in the
+# claim_reward instruction:
+#   0. admin          (signer, mut)
+#   1. reward_config  (mut, has_one=admin)
+#   2. reward_vault   (mut)
+#   3. recipient      (mut, SystemAccount)
+#
+# The previous contract had a 5th `claim` PDA and a 6th `system_program`
+# account. Those are GONE in the upgraded contract. This test verifies
+# the backend no longer emits them.
 def test_instruction_byte_layout():
     snippet = """
-import { buildClaimRewardInstruction, getRewardConfigPda, getRewardVaultPda, getClaimPda, RONIN_REWARDS_PROGRAM_ID } from './api/_lib/solanaRewardsAdmin.mjs'
+import { buildClaimRewardInstruction, getRewardConfigPda, getRewardVaultPda, RONIN_REWARDS_PROGRAM_ID } from './api/_lib/solanaRewardsAdmin.mjs'
 import { Keypair } from '@solana/web3.js'
 import { createHash } from 'node:crypto'
 
@@ -169,17 +179,14 @@ const ix = buildClaimRewardInstruction({
   rewardAmountLamports: lamports,
 })
 
-// Verify accounts
+// Verify accounts — upgraded contract expects exactly 4
 const [rc] = getRewardConfigPda()
 const [rv] = getRewardVaultPda()
-const [cp] = getClaimPda(claimId)
 const expectedKeys = [
   admin.toString(),
   rc.toString(),
   rv.toString(),
   recipient.toString(),
-  cp.toString(),
-  '11111111111111111111111111111111',  // system program
 ]
 const gotKeys = ix.keys.map(k => k.pubkey.toString())
 
@@ -205,6 +212,8 @@ console.log(JSON.stringify({
   gotLamports: gotLamports.toString(), expectedLamports: String(BigInt(lamports)), lamportsOk: gotLamports === BigInt(lamports),
   programId: gotProgramId, expectedProgramId: RONIN_REWARDS_PROGRAM_ID.toString(),
   programIdOk: gotProgramId === RONIN_REWARDS_PROGRAM_ID.toString(),
+  accountCount: gotKeys.length, expectedAccountCount: 4,
+  accountCountOk: gotKeys.length === 4,
 }))
 """
     result = run_js(snippet)
@@ -212,7 +221,8 @@ console.log(JSON.stringify({
     for k, v in result.items():
         if k.endswith('Ok'):
             assert v is True, f"{k} = {v}"
-    print(f"  keys match: {result['keysOk']}")
+    print(f"  keys match (4-account upgraded layout): {result['keysOk']}")
+    print(f"  account count: {result['accountCount']} (expected {result['expectedAccountCount']})")
     print(f"  length: {result['gotLength']} bytes (expected {result['expectedLength']})")
     print(f"  discriminator matches sha256('global:claim_reward')[0..8]: {result['discriminatorOk']}")
     print(f"  points (u64 LE): {result['gotPoints']} == {result['expectedPoints']}: {result['pointsOk']}")
@@ -223,6 +233,11 @@ console.log(JSON.stringify({
 # =====================================================================
 # Test 5: claim PDA is deterministic per claim_id
 # =====================================================================
+# NOTE: getClaimPda is still exported for backward compatibility with
+# legacy on-chain Claim PDAs (created by the previous program version).
+# The upgraded contract no longer USES this PDA in claim_reward, but
+# the helper still needs to deterministically reproduce the legacy
+# derivation for tools that inspect old claims.
 def test_claim_pda_deterministic():
     snippet = """
 import { getClaimPda } from './api/_lib/solanaRewardsAdmin.mjs'

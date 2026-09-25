@@ -311,13 +311,25 @@ export function solToLamports(rewardAmountSol) {
 // Anchor instruction layout:
 //   [discriminator (8 bytes)] [length-prefix u32 LE] [claim_id UTF-8] [u64 LE points] [u64 LE lamports]
 //
-// Accounts (in the order the deployed instruction expects them):
-//   0. admin        (signer, mut)   — the configured backend admin
-//   1. reward_config (mut)           — program's RewardConfig PDA
-//   2. reward_vault  (mut)           — the SOL vault PDA
-//   3. recipient     (mut)           — the user's wallet address
-//   4. claim         (mut)          — per-claim PDA derived from claim_id
-//   5. system_program               — System program
+// IMPORTANT — upgraded contract (2026-09):
+// The deployed program's `claim_reward` instruction no longer creates a
+// per-claim PDA and no longer needs the System Program. The on-chain
+// `ClaimReward` accounts struct accepts exactly FOUR accounts in this
+// order:
+//
+//   0. admin         (signer, mut) — the configured backend admin
+//   1. reward_config (mut)          — program's RewardConfig PDA (has_one = admin)
+//   2. reward_vault  (mut)          — the SOL vault PDA (transfers lamports directly)
+//   3. recipient     (mut)          — the user's wallet (SystemAccount)
+//
+// Old per-claim PDAs created by the previous program version remain on
+// chain untouched — the new contract simply stops creating new ones.
+// On-chain idempotency for the upgraded contract is enforced by the
+// backend (DB unique constraint on reward_claims.claim_id + atomic
+// ENTITLED → PENDING_PAYOUT → COMPLETED state transitions).
+//
+// DO NOT add a `claim` PDA or `system_program` to the keys array —
+// Anchor will reject the instruction with an account-count mismatch.
 export function buildClaimRewardInstruction({
   admin,
   recipient,
@@ -339,7 +351,6 @@ export function buildClaimRewardInstruction({
 
   const [rewardConfig] = getRewardConfigPda(programId)
   const [rewardVault] = getRewardVaultPda(programId)
-  const [claimPda] = getClaimPda(claimId, programId)
 
   // Build data buffer: 8 (discriminator) + 4 (string length) + N (utf8) + 8 (u64 points) + 8 (u64 lamports)
   const claimIdBytes = Buffer.from(claimId, 'utf8')
@@ -352,13 +363,13 @@ export function buildClaimRewardInstruction({
   data.writeBigUInt64LE(BigInt(pointsClaimed), offset); offset += 8
   data.writeBigUInt64LE(BigInt(rewardAmountLamports), offset); offset += 8
 
+  // Exactly the 4 accounts the upgraded ClaimReward struct expects.
+  // Order matters — Anchor validates them positionally.
   const keys = [
     { pubkey: admin, isSigner: true, isWritable: true },
     { pubkey: rewardConfig, isSigner: false, isWritable: true },
     { pubkey: rewardVault, isSigner: false, isWritable: true },
     { pubkey: recipient, isSigner: false, isWritable: true },
-    { pubkey: claimPda, isSigner: false, isWritable: true },
-    { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false }, // system_program
   ]
 
   return new TransactionInstruction({
