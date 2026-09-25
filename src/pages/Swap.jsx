@@ -768,6 +768,48 @@ function RobinhoodSwapPanel() {
     if (status !== 'idle') setStatus('idle')
   }, [fromToken, toToken, amount, account])
 
+  // Map wallet-discovered tokens (from /api/robinhood/wallet-tokens) by
+  // lowercase address → { balance, decimals }. Used to render the
+  // "Balance: X.XX SYMBOL" label under the selected token, matching the
+  // Solana and Ethereum panels' UX. Native ETH balance is read separately.
+  const walletTokensMap = useMemo(() => {
+    const map = new Map()
+    for (const token of walletTokens) {
+      const key = (token.address || (token.type === 'native' ? 'native' : '')).toLowerCase()
+      if (key) map.set(key, token)
+    }
+    return map
+  }, [walletTokens])
+
+  // Returns a human-readable balance string for the selected token,
+  // e.g. "3.887518" — or '--' if the wallet isn't connected or the
+  // token isn't held.
+  const balanceLabel = (token) => {
+    if (!account) return '--'
+    // Native ETH
+    if (token?.type === 'native') {
+      const nativeEntry = walletTokens.find((t) => t.type === 'native')
+      if (!nativeEntry) return '--'
+      const raw = BigInt(nativeEntry.balance || nativeEntry.rawBalance || '0')
+      const decimals = Number(nativeEntry.decimals || 18)
+      return formatEvmAmount(raw.toString(), decimals)
+    }
+    const addr = String(token?.address || '').toLowerCase()
+    const entry = walletTokensMap.get(addr)
+    if (!entry) return '--'
+    const raw = BigInt(entry.balance || entry.rawBalance || '0')
+    const decimals = Number(entry.decimals || 18)
+    return formatEvmAmount(raw.toString(), decimals)
+  }
+
+  // Click MAX to fill the input with the wallet's full balance of the
+  // currently-selected fromToken. Disabled for native ETH to leave
+  // room for gas (matches Ethereum panel's behavior).
+  const fillMaxAmount = () => {
+    const label = balanceLabel(fromToken)
+    if (label && label !== '--') setAmount(label)
+  }
+
   const connect = async () => {
     try { setMessage(''); setAccount(await connectRobinhoodWallet()) } catch (error) { setMessage(error.message) }
   }
@@ -924,13 +966,13 @@ function RobinhoodSwapPanel() {
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
         <div className="swap-field-row"><input className="swap-field-input" disabled={busy} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0" inputMode="decimal" aria-label="Amount you pay" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('from')}><TokenMark token={fromToken} /><strong>{fromToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span>$0.00</span><span>Robinhood Chain · 4663</span></div>
+        <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{fromToken.type === 'native' && account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy}>MAX</button>}</span></div>
       </div>
       <div className="swap-flip-row"><button type="button" className="swap-flip" disabled={busy} onClick={() => { setFromToken(toToken); setToToken(fromToken); setQuote(null) }} aria-label="Reverse Robinhood swap"><Icon name="swapVertical" size={16} /></button></div>
       <div className="swap-field">
         <span className="swap-field-label">YOU RECEIVE</span>
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quoteOutputAmount} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span>$0.00</span><span>{sectionsState === 'loading' ? 'Loading live catalog…' : sectionsState === 'error' ? 'Live catalog unavailable' : `${sections.all.length} tokens indexed`}</span></div>
+        <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(toToken)} {toToken.symbol}</span></div>
       </div>
       <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {quoteOutputAmount || '0.00'} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Robinhood Chain</strong></div><div className="swap-quote-row"><span>Route</span><strong>{quote?.tool?.name || quote?.provider || 'LI.FI'}</strong></div><div className="swap-quote-row"><span>Quote ID</span><strong>{quote?.quoteId || '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? formatTokenAmount(quote.minimumReceived, toToken.decimals || 18, 6) : '—'}</strong></div></div>}
@@ -973,24 +1015,62 @@ function UnifiedSwapHistory({ solanaWallet }) {
 }
 
 function TokenMark({ token, size = 25 }) {
-  const [imageFailed, setImageFailed] = useState(false)
-  const logoUri = token?.logoURI || token?.logo || token?.icon || token?.image || token?.fallbackLogoURI || null
+  const [fallbackStep, setFallbackStep] = useState(0)
+  // Build the candidate logo URL list in priority order. Each step is
+  // tried only if the previous one fails (onError). The list always
+  // includes:
+  //   1. The token's own logoURI (from any source — Blockscout icon_url,
+  //      LI.FI logoURI, the verified registry, etc.)
+  //   2. The token's fallbackLogoURI (used by Ethereum registry tokens
+  //      — points to the TrustWallet assets CDN)
+  //   3. The 1inch token image CDN — covers almost every ERC-20 on every
+  //      chain (https://tokens.1inch.io/<address>.png)
+  //   4. The Robinhood Chain logo CDN — covers tokens deployed via the
+  //      Robinhood tokenization pipeline (https://cdn.robinhood.com/
+  //      ncw_assets/logos/<address>.png)
+  //
+  // The final fallback (when all URLs fail or no address) is the first
+  // letter of the symbol in a styled circle — so a logo ALWAYS renders.
+  const candidateLogos = useMemo(() => {
+    const list = []
+    if (token?.logoURI) list.push(token.logoURI)
+    if (token?.logo) list.push(token.logo)
+    if (token?.icon) list.push(token.icon)
+    if (token?.image) list.push(token.image)
+    if (token?.fallbackLogoURI) list.push(token.fallbackLogoURI)
+    const addr = String(token?.address || '').toLowerCase()
+    if (/^0x[0-9a-f]{40}$/.test(addr)) {
+      list.push(`https://tokens.1inch.io/${addr}.png`)
+      list.push(`https://cdn.robinhood.com/ncw_assets/logos/${addr}.png`)
+    }
+    return list
+  }, [token?.logoURI, token?.logo, token?.icon, token?.image, token?.fallbackLogoURI, token?.address])
 
   useEffect(() => {
-    setImageFailed(false)
-  }, [logoUri])
+    setFallbackStep(0)
+  }, [candidateLogos.join('|')])
 
-  if (logoUri && !imageFailed) {
-    return <img className="swap-token-dot swap-token-logo" src={logoUri} alt="" width={size} height={size} onError={(event) => {
-      if (token?.fallbackLogoURI && event.currentTarget.src !== token.fallbackLogoURI) {
-        event.currentTarget.src = token.fallbackLogoURI
-        return
-      }
-      setImageFailed(true)
-    }} />
+  const currentLogo = candidateLogos[fallbackStep]
+
+  if (currentLogo) {
+    return <img
+      className="swap-token-dot swap-token-logo"
+      src={currentLogo}
+      alt=""
+      width={size}
+      height={size}
+      onError={() => {
+        // Advance to the next candidate. If we've exhausted all
+        // candidates, fallbackStep will exceed candidateLogos.length - 1
+        // and the component will fall through to the letter glyph below.
+        setFallbackStep((step) => step + 1)
+      }}
+    />
   }
 
-  return <span className={`swap-token-dot ${token.className || 'tok-empty'}`} aria-hidden="true">{token.glyph || token.symbol?.slice(0, 1) || '?'}</span>
+  // Final fallback: a styled circle with the first letter of the symbol.
+  // This ALWAYS renders — never blank.
+  return <span className={`swap-token-dot ${token?.className || 'tok-empty'}`} aria-hidden="true">{token?.glyph || (token?.symbol ? token.symbol.slice(0, 1) : '?')}</span>
 }
 
 function shortMint(mint) {
