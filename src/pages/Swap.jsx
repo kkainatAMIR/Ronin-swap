@@ -2,6 +2,7 @@ import { connectEthereumWallet, connectRobinhoodWallet, ensureEthereumMainnet, e
 import { approveLifiTransaction, getLifiApprovalRequest, getLifiQuote, getLifiStatus, lifiStatusIsComplete, lifiStatusIsFailed, sendLifiTransaction } from '../services/lifiService'
 import { getRobinhoodTokenSections, getRobinhoodTrending } from '../services/robinhoodTokenService'
 import { getLiveTrendingTokens } from '../services/liveTrendingService'
+import { getEvmWalletTokensForSelector } from '../services/evmWalletTokens'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Transaction, VersionedTransaction } from '@solana/web3.js'
@@ -185,13 +186,117 @@ function JupiterMark({ size = 16 }) {
   )
 }
 
-function EthereumTokenSelector({ side, selected, other, onSelect, onClose }) {
+function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, onClose }) {
   const [search, setSearch] = useState('')
   const query = search.trim().toLowerCase()
-  const tokens = ETHEREUM_FEATURED_TOKENS.filter((token) => token !== other && (!query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)))
-  const sectionTokens = (section) => ETHEREUM_FEATURED_SECTIONS[section].map((symbol) => ETHEREUM_FEATURED_TOKENS.find((token) => token.symbol === symbol)).filter((token) => token && token !== other && (!query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)))
+
+  // Merge wallet-discovered tokens with the curated catalog. Tokens that
+  // exist in both get their live balance attached; tokens that only the
+  // wallet holds (not in the featured list) get added as 'wallet' trust.
+  const selectorTokens = useMemo(() => {
+    const map = new Map(ETHEREUM_FEATURED_TOKENS.map((token) => [token.address?.toLowerCase() || 'native', token]))
+    for (const token of walletTokens) {
+      const key = token.address?.toLowerCase() || (token.type === 'native' ? 'native' : token.address)
+      if (!key) continue
+      const existing = map.get(key)
+      if (existing) {
+        map.set(key, { ...existing, walletBalance: token.amount })
+      } else {
+        map.set(key, {
+          chainId: ETHEREUM_CHAIN_ID,
+          type: token.type || 'erc20',
+          address: token.address || null,
+          symbol: token.symbol || 'UNKNOWN',
+          name: token.name || token.symbol || 'Wallet Token',
+          decimals: token.decimals || 18,
+          category: 'wallet',
+          logoURI: token.logoURI || (token.address ? `https://tokens.1inch.io/${token.address}.png` : null),
+          fallbackLogoURI: token.address ? `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${token.address}/logo.png` : null,
+          featured: false,
+          verified: false,
+          trust: 'wallet',
+          walletBalance: token.amount,
+        })
+      }
+    }
+    return Array.from(map.values())
+  }, [walletTokens])
+
+  const tokens = selectorTokens.filter((token) => token !== other && (!query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)))
+  const sectionTokens = (section) => ETHEREUM_FEATURED_SECTIONS[section].map((symbol) => selectorTokens.find((token) => token.symbol === symbol)).filter((token) => token && token !== other && (!query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)))
+
+  const walletOwnedTokens = useMemo(() => walletTokens
+    .map((token) => selectorTokens.find((candidate) => (candidate.address?.toLowerCase() || (candidate.type === 'native' ? 'native' : '')) === (token.address?.toLowerCase() || (token.type === 'native' ? 'native' : ''))))
+    .filter((token) => token && token !== other && Number(token.walletBalance || 0) > 0), [other, selectorTokens, walletTokens])
+
   const choose = (token) => { onSelect(token); onClose() }
-  return createPortal(<div className="swap-token-picker-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div className="swap-token-picker" role="dialog" aria-modal="true" aria-label={`Select Ethereum ${side} token`}><div className="swap-token-picker-head"><div><span className="swap-field-label">SELECT {side.toUpperCase()} TOKEN</span><strong>{selected.symbol}</strong></div><button type="button" className="swap-token-picker-close" onClick={onClose} aria-label="Close token selector">×</button></div><input className="swap-token-search" autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search Ethereum token" aria-label="Search Ethereum tokens" />{!query && <div className="swap-token-picker-sections">{['popular', 'memes', 'featured'].map((section) => <div key={section}><span className="swap-token-section-title">{section}</span><div className="swap-token-quick-row">{sectionTokens(section).map((token) => <button type="button" key={token.address || 'native'} onClick={() => choose(token)}><TokenMark token={token} size={22} /><span>{token.symbol}</span></button>)}</div></div>)}</div>}<div className="swap-token-results" role="listbox">{tokens.map((token) => <button type="button" className="swap-token-result" key={token.address || 'native'} onClick={() => choose(token)} role="option"><TokenMark token={token} size={30} /><span className="swap-token-result-copy"><strong>{token.symbol}</strong><small>{token.name}</small><small>{token.type === 'native' ? 'Native ETH' : token.address}</small></span><span className="swap-token-trust">FEATURED</span></button>)}</div></div></div>, document.body)
+
+  return createPortal(
+    <div className="swap-token-picker-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="swap-token-picker" role="dialog" aria-modal="true" aria-label={`Select Ethereum ${side} token`}>
+        <div className="swap-token-picker-head">
+          <div><span className="swap-field-label">SELECT {side.toUpperCase()} TOKEN</span><strong>{selected.symbol}</strong></div>
+          <button type="button" className="swap-token-picker-close" onClick={onClose} aria-label="Close token selector">×</button>
+        </div>
+        <input className="swap-token-search" autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search Ethereum token" aria-label="Search Ethereum tokens" />
+        {!query && (
+          <div className="swap-token-picker-sections">
+            {walletOwnedTokens.length > 0 && (
+              <div>
+                <span className="swap-token-section-title">YOUR WALLET</span>
+                <div className="swap-token-quick-row">
+                  {walletOwnedTokens.map((token) => (
+                    <button type="button" key={token.address || 'native'} onClick={() => choose(token)}>
+                      <TokenMark token={token} size={22} />
+                      <span>
+                        {token.symbol}
+                        <small style={{ display: 'block', color: 'var(--muted)', fontSize: '9px', fontWeight: 500 }}>
+                          {Number(token.walletBalance || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                        </small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {['popular', 'memes', 'featured'].map((section) => (
+              <div key={section}>
+                <span className="swap-token-section-title">{section}</span>
+                <div className="swap-token-quick-row">
+                  {sectionTokens(section).map((token) => (
+                    <button type="button" key={token.address || 'native'} onClick={() => choose(token)}>
+                      <TokenMark token={token} size={22} />
+                      <span>{token.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="swap-token-results" role="listbox">
+          {tokens.length ? tokens.map((token) => {
+            const balance = Number(token.walletBalance || 0)
+            return (
+              <button type="button" className="swap-token-result" key={token.address || 'native'} onClick={() => choose(token)} role="option">
+                <TokenMark token={token} size={30} />
+                <span className="swap-token-result-copy">
+                  <strong>{token.symbol}</strong>
+                  <small>{token.name}</small>
+                  <small>{token.type === 'native' ? 'Native ETH' : token.address}</small>
+                </span>
+                <span className="swap-token-trust" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                  <span>{token.trust === 'wallet' ? 'WALLET' : 'FEATURED'}</span>
+                  {balance > 0 && <small style={{ color: '#ff8d8d', fontSize: '10px' }}>{balance.toLocaleString(undefined, { maximumFractionDigits: 6 })}</small>}
+                </span>
+              </button>
+            )
+          }) : <p className="swap-token-empty-state">No token matches that search.</p>}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
 }
 
 function EthereumSwapPanel() {
@@ -207,6 +312,7 @@ function EthereumSwapPanel() {
   const [balances, setBalances] = useState(new Map())
   const [prices, setPrices] = useState(new Map())
   const [completion, setCompletion] = useState(null)
+  const [walletTokens, setWalletTokens] = useState([])
   const executeInFlightRef = useRef(false)
 
   useEffect(() => {
@@ -226,6 +332,22 @@ function EthereumSwapPanel() {
     refresh(); provider.on?.('accountsChanged', changed); provider.on?.('chainChanged', chainChanged)
     return () => { provider.removeListener?.('accountsChanged', changed); provider.removeListener?.('chainChanged', chainChanged) }
   }, [])
+
+  // Discover every ERC-20 the connected MetaMask wallet actually holds
+  // (plus native ETH). This is what powers the "YOUR WALLET" section in
+  // the token picker — the Ethereum equivalent of getAllTokenAccounts()
+  // on Solana. Re-fetches when the account changes or every 45s.
+  useEffect(() => {
+    if (!account) { setWalletTokens([]); return undefined }
+    let cancelled = false
+    const load = async () => {
+      const tokens = await getEvmWalletTokensForSelector('ethereum', account)
+      if (!cancelled) setWalletTokens(tokens)
+    }
+    load()
+    const interval = window.setInterval(load, 45_000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [account])
 
   useEffect(() => {
     setQuote(null)
@@ -366,7 +488,20 @@ function EthereumSwapPanel() {
         </div>
         <button type="button" className="swap-widget-gear" aria-label="Swap settings" disabled><Icon name="settings" size={18} /></button>
       </div>
-      {account && <div className="swap-wallet-strip" style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '12px', color: '#ff5c5c', background: 'rgba(255, 92, 92, 0.08)', border: '1px solid rgba(255, 92, 92, 0.32)', borderRadius: '10px', padding: '8px 10px' }}><span style={{ color: '#ff8d8d' }}>Wallet</span><strong style={{ color: '#ff5c5c', fontFamily: 'var(--mono)' }}>{account.slice(0, 6)}...{account.slice(-4)}</strong></div>}
+      {account && (
+        <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div className="swap-wallet-strip" style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '12px', color: '#ff5c5c', background: 'rgba(255, 92, 92, 0.08)', border: '1px solid rgba(255, 92, 92, 0.32)', borderRadius: '10px', padding: '8px 10px' }}>
+            <span style={{ color: '#ff8d8d' }}>Wallet</span>
+            <strong style={{ color: '#ff5c5c', fontFamily: 'var(--mono)' }}>{account.slice(0, 6)}...{account.slice(-4)}</strong>
+          </div>
+          {walletTokens.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--muted)', padding: '0 4px' }}>
+              <span>Discovered {walletTokens.length} wallet token{walletTokens.length === 1 ? '' : 's'}</span>
+              <span style={{ color: 'var(--gold, #d4a017)', fontSize: '10px' }}>YOUR WALLET shown in picker ↓</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="swap-widget-tabs" role="tablist" aria-label="Swap mode"><button type="button" role="tab" aria-selected="true" className="active">SWAP</button><button type="button" role="tab" aria-selected="false" disabled>LIMIT ORDER <span className="swap-soon-chip">SOON</span></button></div>
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
@@ -429,14 +564,14 @@ function EthereumSwapPanel() {
       {message && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot" style={{ color: '#ba3c3c' }}>{message}</p>}
       {txHash && <p className="evm-success">Transaction: {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}
       <p className="swap-widget-foot"><Icon name="shield" size={12} /> {status === 'confirmed' ? 'Swap confirmed on Ethereum Mainnet.' : 'Secure. Non-Custodial. Powered by 0x on Ethereum Mainnet.'}</p>
-      {pickerSide && <EthereumTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} onSelect={(token) => pickerSide === 'from' ? setFromToken(token) : setToToken(token)} onClose={() => setPickerSide(null)} />}
+      {pickerSide && <EthereumTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => pickerSide === 'from' ? setFromToken(token) : setToToken(token)} onClose={() => setPickerSide(null)} />}
     </div>
   )
 }
 
 const ROBINHOOD_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const ROBINHOOD_NATIVE_TOKEN = Object.freeze({ chainId: 4663, chainKey: 'robinhood', type: 'native', address: null, symbol: 'ETH', name: 'Ether', decimals: 18 })
-const ROBINHOOD_TOKEN_FILTERS = ['all', 'tokens', 'memes', 'pop', 'trending']
+const ROBINHOOD_TOKEN_FILTERS = ['all', 'wallet', 'tokens', 'memes', 'pop', 'trending']
 
 function robinhoodTokenKey(token) {
   return token?.type === 'native' ? 'native' : String(token?.address || '').toLowerCase()
@@ -459,7 +594,7 @@ function isSuccessfulRobinhoodReceipt(receipt) {
   return status === '0x1' || status === '0x01' || status === 1 || status === '1' || status === true
 }
 
-function RobinhoodTokenSelector({ side, selected, other, sections, onSelect, onClose }) {
+function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens, onSelect, onClose }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [trending, setTrending] = useState({ state: 'idle', results: [] })
@@ -475,7 +610,38 @@ function RobinhoodTokenSelector({ side, selected, other, sections, onSelect, onC
     return () => { cancelled = true }
   }, [filter, trending.state])
 
-  const baseList = filter === 'tokens' ? sections.tokens
+  // Wallet tokens (from /api/robinhood/wallet-tokens) are normalized to the
+  // shape the picker expects, including the native ETH entry which we
+  // substitute for ROBINHOOD_NATIVE_TOKEN so the existing key/path logic
+  // still works.
+  const normalizedWalletTokens = useMemo(() => walletTokens.map((token) => {
+    if (token.type === 'native') {
+      return { ...ROBINHOOD_NATIVE_TOKEN, walletBalance: token.amount }
+    }
+    return {
+      chainId: 4663,
+      chainKey: 'robinhood',
+      type: 'erc20',
+      address: token.address,
+      symbol: token.symbol,
+      name: token.name,
+      decimals: token.decimals || 18,
+      logoURI: token.logoURI || null,
+      isMeme: false,
+      walletBalance: token.amount,
+    }
+  }), [walletTokens])
+
+  const walletOwnedTokens = useMemo(() => normalizedWalletTokens
+    .filter((token) => robinhoodTokenKey(token) !== robinhoodTokenKey(other) && Number(token.walletBalance || 0) > 0)
+    .filter((token) => !query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)),
+    [normalizedWalletTokens, other, query])
+
+  // When the user picks the 'wallet' filter, show only tokens the wallet
+  // actually holds. Otherwise behave exactly as before — the wallet tokens
+  // also appear at the top of the picker as a quick-row, mirroring Solana.
+  const baseList = filter === 'wallet' ? normalizedWalletTokens
+    : filter === 'tokens' ? sections.tokens
     : filter === 'memes' ? sections.memes
     : filter === 'pop' ? sections.popular
     : filter === 'trending' ? trending.results.map((item) => ({ chainId: 4663, chainKey: 'robinhood', type: 'erc20', address: item.address, symbol: item.symbol, name: item.name, decimals: item.decimals, logoURI: item.logoURI, isMeme: false, activity: item.activity }))
@@ -497,14 +663,40 @@ function RobinhoodTokenSelector({ side, selected, other, sections, onSelect, onC
         </div>
         {filter === 'trending' && trending.state === 'loading' && <p className="swap-token-empty-state">Loading live trending data...</p>}
         {filter === 'trending' && trending.state === 'error' && <p className="swap-token-empty-state">Live trending data is unavailable.</p>}
+        {!query && filter !== 'wallet' && filter !== 'trending' && walletOwnedTokens.length > 0 && (
+          <div className="swap-token-picker-sections">
+            <div>
+              <span className="swap-token-section-title">YOUR WALLET</span>
+              <div className="swap-token-quick-row">
+                {walletOwnedTokens.map((token) => (
+                  <button type="button" key={robinhoodTokenKey(token)} onClick={() => choose(token)}>
+                    <TokenMark token={token} size={22} />
+                    <span>
+                      {token.symbol}
+                      <small style={{ display: 'block', color: 'var(--muted)', fontSize: '9px', fontWeight: 500 }}>
+                        {Number(token.walletBalance || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                      </small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="swap-token-results" role="listbox">
-          {results.length ? results.map((token) => (
-            <button type="button" className="swap-token-result" key={robinhoodTokenKey(token)} onClick={() => choose(token)} role="option">
-              <TokenMark token={token} size={30} />
-              <span className="swap-token-result-copy"><strong>{token.symbol}</strong><small>{token.name}</small><small>{token.type === 'native' ? 'Native ETH' : shortMint(token.address)}</small></span>
-              <span className="swap-token-trust">{token.type === 'native' ? 'NATIVE' : token.isMeme ? 'MEME' : 'CATALOG'}</span>
-            </button>
-          )) : <p className="swap-token-empty-state">No token matches that search in this filter.</p>}
+          {results.length ? results.map((token) => {
+            const balance = Number(token.walletBalance || 0)
+            return (
+              <button type="button" className="swap-token-result" key={robinhoodTokenKey(token)} onClick={() => choose(token)} role="option">
+                <TokenMark token={token} size={30} />
+                <span className="swap-token-result-copy"><strong>{token.symbol}</strong><small>{token.name}</small><small>{token.type === 'native' ? 'Native ETH' : shortMint(token.address)}</small></span>
+                <span className="swap-token-trust" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                  <span>{token.type === 'native' ? 'NATIVE' : token.isMeme ? 'MEME' : token.walletBalance != null ? 'WALLET' : 'CATALOG'}</span>
+                  {balance > 0 && <small style={{ color: '#ff8d8d', fontSize: '10px' }}>{balance.toLocaleString(undefined, { maximumFractionDigits: 6 })}</small>}
+                </span>
+              </button>
+            )
+          }) : <p className="swap-token-empty-state">No token matches that search in this filter.</p>}
         </div>
       </div>
     </div>,
@@ -525,6 +717,7 @@ function RobinhoodSwapPanel() {
   const [message, setMessage] = useState('')
   const [txHash, setTxHash] = useState('')
   const [completion, setCompletion] = useState(null)
+  const [walletTokens, setWalletTokens] = useState([])
   const executeInFlightRef = useRef(false)
 
   useEffect(() => {
@@ -552,6 +745,21 @@ function RobinhoodSwapPanel() {
     refresh(); provider.on?.('accountsChanged', changed); provider.on?.('chainChanged', chainChanged)
     return () => { provider.removeListener?.('accountsChanged', changed); provider.removeListener?.('chainChanged', chainChanged) }
   }, [])
+
+  // Discover every ERC-20 the connected wallet holds on Robinhood Chain
+  // (chainId 4663) plus native ETH. Uses eth_getLogs against the existing
+  // Robinhood RPC — no third-party API key required.
+  useEffect(() => {
+    if (!account) { setWalletTokens([]); return undefined }
+    let cancelled = false
+    const load = async () => {
+      const tokens = await getEvmWalletTokensForSelector('robinhood', account)
+      if (!cancelled) setWalletTokens(tokens)
+    }
+    load()
+    const interval = window.setInterval(load, 45_000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [account])
 
   useEffect(() => {
     setQuote(null)
@@ -698,7 +906,20 @@ function RobinhoodSwapPanel() {
         </div>
         <button type="button" className="swap-widget-gear" aria-label="Swap settings" disabled><Icon name="settings" size={18} /></button>
       </div>
-      {account && <div className="swap-wallet-strip" style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '12px', color: '#ff5c5c', background: 'rgba(255, 92, 92, 0.08)', border: '1px solid rgba(255, 92, 92, 0.32)', borderRadius: '10px', padding: '8px 10px' }}><span style={{ color: '#ff8d8d' }}>Wallet</span><strong style={{ color: '#ff5c5c', fontFamily: 'var(--mono)' }}>{account.slice(0, 6)}...{account.slice(-4)}</strong></div>}
+      {account && (
+        <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div className="swap-wallet-strip" style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '12px', color: '#ff5c5c', background: 'rgba(255, 92, 92, 0.08)', border: '1px solid rgba(255, 92, 92, 0.32)', borderRadius: '10px', padding: '8px 10px' }}>
+            <span style={{ color: '#ff8d8d' }}>Wallet</span>
+            <strong style={{ color: '#ff5c5c', fontFamily: 'var(--mono)' }}>{account.slice(0, 6)}...{account.slice(-4)}</strong>
+          </div>
+          {walletTokens.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--muted)', padding: '0 4px' }}>
+              <span>Discovered {walletTokens.length} wallet token{walletTokens.length === 1 ? '' : 's'}</span>
+              <span style={{ color: 'var(--gold, #d4a017)', fontSize: '10px' }}>YOUR WALLET shown in picker ↓</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="swap-widget-tabs" role="tablist" aria-label="Swap mode"><button type="button" role="tab" aria-selected="true" className="active">SWAP</button><button type="button" role="tab" aria-selected="false" disabled>LIMIT ORDER <span className="swap-soon-chip">SOON</span></button></div>
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
@@ -718,7 +939,7 @@ function RobinhoodSwapPanel() {
       {status !== 'confirmed' && status !== 'error' && message && <p className="swap-widget-foot">{message}</p>}
       {txHash && status !== 'confirmed' && <p className="evm-success">Transaction: {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}
       <p className="swap-widget-foot"><Icon name="shield" size={12} /> Secure. Non-Custodial. Powered by LI.FI on Robinhood Chain.</p>
-      {pickerSide && <RobinhoodTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} sections={sections} onSelect={(token) => (pickerSide === 'from' ? setFromToken(token) : setToToken(token))} onClose={() => setPickerSide(null)} />}
+      {pickerSide && <RobinhoodTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} sections={sections} walletTokens={walletTokens} onSelect={(token) => (pickerSide === 'from' ? setFromToken(token) : setToToken(token))} onClose={() => setPickerSide(null)} />}
     </div>
   )
 }

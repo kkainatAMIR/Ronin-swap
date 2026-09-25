@@ -42,6 +42,7 @@ import coingeckoSearch from '../api_routes/coingecko/search.mjs'
 
 import evmQuote from '../api_routes/evm/quote.mjs'
 import evmComplete from '../api_routes/evm/complete.mjs'
+import ethereumWalletTokens from '../api_routes/ethereum/wallet-tokens.mjs'
 
 import jupiterQuote from '../api_routes/jupiter/quote.mjs'
 import jupiterOrder from '../api_routes/jupiter/order.mjs'
@@ -58,6 +59,7 @@ import rewardsClaim from '../api_routes/rewards/claim.mjs'
 
 import robinhoodTokens from '../api_routes/robinhood/tokens.mjs'
 import robinhoodTrending from '../api_routes/robinhood/trending.mjs'
+import robinhoodWalletTokens from '../api_routes/robinhood/wallet-tokens.mjs'
 
 import roninStats from '../api_routes/ronin/stats.mjs'
 import roninBurnHistory from '../api_routes/ronin/burn-history.mjs'
@@ -132,6 +134,7 @@ export const ROUTES = {
   // ─── EVM (0x / Ethereum) ───
   'POST /api/evm/quote':    evmQuote,
   'POST /api/evm/complete': evmComplete,
+  'GET /api/ethereum/wallet-tokens': ethereumWalletTokens,
 
   // ─── Jupiter (Solana swap) ───
   'GET /api/jupiter/quote':    jupiterQuote,
@@ -150,8 +153,9 @@ export const ROUTES = {
   'POST /api/rewards/claim':  rewardsClaim,
 
   // ─── Robinhood Chain ───
-  'GET /api/robinhood/tokens':   robinhoodTokens,
-  'GET /api/robinhood/trending': robinhoodTrending,
+  'GET /api/robinhood/tokens':         robinhoodTokens,
+  'GET /api/robinhood/trending':        robinhoodTrending,
+  'GET /api/robinhood/wallet-tokens':   robinhoodWalletTokens,
 
   // ─── Ronin stats ───
   'GET /api/ronin/stats':                roninStats,
