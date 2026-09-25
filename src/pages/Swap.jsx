@@ -529,6 +529,7 @@ function EthereumSwapPanel() {
         const hasPointsRecord = hasUsablePointsRecord(completion)
         const seasonPoints = Number(points?.season_points ?? points?.walletSeasonPoints ?? 0)
         const qualifyingVolumeUsd = Number(points?.qualifying_volume_usd ?? points?.qualifyingVolumeUsd ?? 0)
+        const lifetimePoints = Number(points?.lifetime_points ?? points?.walletLifetimePoints ?? 0)
         const reason = points?.reason || points?.exclusionReason || points?.exclusion_reason || 'NOT_QUALIFIED'
 
         return (
@@ -544,11 +545,27 @@ function EthereumSwapPanel() {
               {qualified && (
                 <>
                   <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Season Points: {seasonPoints.toLocaleString()}</p>
+                  <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Lifetime Points: {lifetimePoints.toLocaleString()}</p>
                   <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${qualifyingVolumeUsd.toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>
                 </>
               )}
-              {hasPointsRecord && !qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {String(reason).replaceAll('_', ' ')}</p>}
-              {!hasPointsRecord && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: backend did not return a points record for this swap.</p>}
+              {/* ALWAYS show the reason when not qualified, even if we have no
+                  points record. This makes the failure mode debuggable for the
+                  user — they can see exactly why they got 0 points instead of
+                  the UI showing "nothing" or a cryptic message. */}
+              {!qualified && (
+                <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>
+                  Reason: {String(reason).replaceAll('_', ' ')}
+                </p>
+              )}
+              {!hasPointsRecord && (
+                <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>
+                  Backend did not return a points record. This usually means
+                  the swap was confirmed on-chain but the database call to
+                  award points failed. Your points may still appear later via
+                  admin reconciliation.
+                </p>
+              )}
             </div>
             {txHash && (
               <>
