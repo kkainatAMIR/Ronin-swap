@@ -1,4 +1,18 @@
 .profile-page{width:min(100% - 48px,1280px);margin-inline:auto;padding:32px 0 100px;position:relative}
+
+/* Wallet-connection disclaimer banner — dismissible red-bordered alert
+   at the top of the Profile page. Warns users that samurai points are
+   tied to the connected wallet address, so swaps made with a different
+   wallet (e.g. MetaMask on Ethereum) won't appear until that wallet is
+   connected. */
+.profile-wallet-disclaimer{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;width:100%;padding:14px 18px;margin-bottom:20px;border:2px solid #c0392b;border-radius:12px;background:rgba(192,57,43,.06);color:#7d1f15;font-family:var(--sans,inherit);font-size:13px;line-height:1.5}
+.profile-wallet-disclaimer-content{display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0}
+.profile-wallet-disclaimer-content > svg{flex-shrink:0;margin-top:2px;color:#c0392b}
+.profile-wallet-disclaimer-content strong{display:block;color:#a32317;font-size:13.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;margin-bottom:4px}
+.profile-wallet-disclaimer-content p{margin:0;color:#5c140d;font-size:12.5px;line-height:1.55}
+.profile-wallet-disclaimer-close{flex-shrink:0;background:none;border:none;color:#c0392b;cursor:pointer;font-size:22px;line-height:1;padding:0 4px;transition:color .15s ease,transform .15s ease}
+.profile-wallet-disclaimer-close:hover{color:#7d1f15;transform:scale(1.15)}
+
 .profile-hero-wrap{position:relative;width:100%;overflow:hidden;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:32px;background:var(--cream)}
 .profile-hero-bg{position:absolute;inset:0;z-index:0}.profile-hero-bg img{width:100%;height:100%;object-fit:cover;object-position:right center}
 .profile-hero-overlay{position:absolute;inset:0;background:linear-gradient(90deg,rgba(251,248,243,.94) 0%,rgba(251,248,243,.82) 35%,rgba(251,248,243,.55) 65%,rgba(251,248,243,.25) 100%)}

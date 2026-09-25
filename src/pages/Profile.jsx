@@ -117,6 +117,18 @@ export default function Profile() {
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
   const [error, setError] = useState('')
+  // Dismissible wallet-connection disclaimer. Persisted to localStorage
+  // so a user who has already acknowledged it doesn't see it again on
+  // every page load.
+  const [disclaimerDismissed, setDisclaimerDismissed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return window.localStorage.getItem('ronin.profileWalletDisclaimerDismissed') === '1' }
+    catch { return false }
+  })
+  const dismissDisclaimer = () => {
+    setDisclaimerDismissed(true)
+    try { window.localStorage.setItem('ronin.profileWalletDisclaimerDismissed', '1') } catch {}
+  }
 
   // Fetch aggregated profile data across ALL connected wallets (Phantom
   // + any MetaMask addresses tracked in localStorage). The list of
@@ -198,6 +210,24 @@ export default function Profile() {
 
   return (
     <main className="profile-page">
+      {!disclaimerDismissed && (
+        <div className="profile-wallet-disclaimer" role="alert">
+          <div className="profile-wallet-disclaimer-content">
+            <Icon name="info" size={18} />
+            <div>
+              <strong>Samurai Points are tied to the connected wallet.</strong>
+              <p>
+                Points earned from swaps on Solana, Ethereum, and Robinhood Chain are
+                tracked separately per wallet address. To see your full points balance,
+                make sure the wallet you swapped with is connected. If you swapped with
+                MetaMask on Ethereum or Robinhood Chain, your points will appear once
+                that MetaMask account is connected.
+              </p>
+            </div>
+          </div>
+          <button type="button" className="profile-wallet-disclaimer-close" onClick={dismissDisclaimer} aria-label="Dismiss disclaimer">×</button>
+        </div>
+      )}
       <section className="profile-hero-wrap">
         <div className="profile-hero-bg" aria-hidden="true">
           <img src="/images/profile-hero-blossoms.jpg" alt="" />
