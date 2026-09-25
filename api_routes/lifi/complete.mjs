@@ -1,7 +1,7 @@
 import { apiError, json, parseBody, rateLimit } from '../../api/_lib/roninBackend.mjs'
 import { getAdminSettings, getLifiSwapByHash, getPointsBySignature, awardSamuraiPoints, isSupabaseConfigured, persistLifiSwap } from '../../api/_lib/supabaseBackend.mjs'
 import { calculateSamuraiPoints, getEffectivePointsConfiguration } from '../../api/_lib/samuraiPoints.mjs'
-import { isApprovedLifiToken, lifiRpc, normalizeNativeTokenAddress } from '../../api/_lib/lifi.mjs'
+import { lifiRpc, normalizeNativeTokenAddress } from '../../api/_lib/lifi.mjs'
 import { getSeasonForTimestamp } from '../../api/_lib/supabaseBackend.mjs'
 import { verifyQuoteProof } from '../../api/_lib/ethereum.mjs'
 
@@ -52,8 +52,11 @@ export default async function handler(req, res) {
   }
   try {
     const proof = verifyQuoteProof(quoteProof, { provider: 'lifi', fromChain, toChain, wallet, fromToken: normalizedFromToken.toLowerCase(), toToken: normalizedToToken.toLowerCase(), fromAmount, toAmount })
-    const [fromApproved, toApproved] = await Promise.all([isApprovedLifiToken(fromChain, normalizedFromToken), isApprovedLifiToken(toChain, normalizedToToken)])
-    if (!fromApproved || !toApproved) return apiError(res, 403, 'UNSUPPORTED_TOKEN', 'The completed tokens are not approved.')
+    // Token registry is a UI curation layer, NOT a swap permission gate.
+    // The quote proof (HMAC-signed by the backend) already binds the
+    // wallet/tokens/amounts, and the on-chain receipt verification below
+    // confirms the user actually executed the quoted transaction. No
+    // registry check needed here.
     const existing = await getLifiSwapByHash(transactionHash)
     if (existing) {
       const existingPoints = await getPointsBySignature(transactionHash)

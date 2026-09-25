@@ -1,5 +1,5 @@
 import { apiError, json, parseBody, rateLimit, readUpstream } from '../../api/_lib/roninBackend.mjs'
-import { createQuoteProof, ethereumChainId, ethereumRpc, ethereumSwapFeeConfig, fetchZeroEx, isEthereumAddress, isEthereumConfigured, isSupportedEthereumToken } from '../../api/_lib/ethereum.mjs'
+import { createQuoteProof, ethereumChainId, ethereumRpc, ethereumSwapFeeConfig, fetchZeroEx, isEthereumAddress, isEthereumConfigured } from '../../api/_lib/ethereum.mjs'
 
 const STABLECOINS = new Set(['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', '0xdac17f958d2ee523a2206206994597c13d831ec7'])
 
@@ -31,7 +31,11 @@ export default async function handler(req, res) {
   if (!requestTaker || !isEthereumAddress(requestTaker)) return apiError(res, 400, 'INVALID_TAKER', 'A valid Ethereum wallet address is required.')
   const normalizedSellToken = sellToken === 'native' ? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' : sellToken
   const normalizedBuyToken = buyToken === 'native' ? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' : buyToken
-  if (!isSupportedEthereumToken(sellToken) || !isSupportedEthereumToken(buyToken) || sellToken === buyToken) return apiError(res, 400, 'UNSUPPORTED_TOKEN', 'The requested Ethereum token is not supported.')
+  // Token registry is a UI curation layer, NOT a swap permission gate.
+  // Any valid Ethereum address (or 'native') can be quoted — 0x handles
+  // routing for any ERC-20 with liquidity. Security is enforced by the
+  // HMAC-signed quote proof + on-chain receipt verification in
+  // /api/evm/complete, which binds the wallet/tokens/amounts together.
   if (!isEthereumAddress(normalizedSellToken) || !isEthereumAddress(normalizedBuyToken) || normalizedSellToken.toLowerCase() === normalizedBuyToken.toLowerCase()) return apiError(res, 400, 'INVALID_TOKENS', 'Valid, different Ethereum token addresses are required.')
   if (!/^\d+$/.test(String(sellAmount || '')) || BigInt(sellAmount) <= 0n) return apiError(res, 400, 'INVALID_AMOUNT', 'sellAmount must be a positive integer in base units.')
   if (requestTaker && !isEthereumAddress(requestTaker)) return apiError(res, 400, 'INVALID_TAKER', 'taker must be a valid Ethereum address.')

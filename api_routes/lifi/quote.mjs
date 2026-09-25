@@ -2,7 +2,6 @@ import { apiError, json, parseBody, rateLimit } from '../../api/_lib/roninBacken
 import { createQuoteProof } from '../../api/_lib/ethereum.mjs'
 import {
   getApprovedLifiToken,
-  isApprovedLifiToken,
   lifiRequest,
   LIFI_INTEGRATOR,
   LIFI_FEE_ENABLED,
@@ -87,8 +86,11 @@ export default async function handler(req, res) {
   const toChain = Number(body.toChain)
   const fields = [body.fromToken, body.toToken, body.fromAddress, body.toAddress]
   if (!validChain(fromChain) || !validChain(toChain) || !fields.every((value) => ADDRESS_PATTERN.test(String(value || ''))) || !validAmount(body.fromAmount)) return apiError(res, 400, 'INVALID_LIFI_QUOTE', 'A valid chain-aware LI.FI quote request is required.')
-  const [fromApproved, toApproved] = await Promise.all([isApprovedLifiToken(fromChain, body.fromToken), isApprovedLifiToken(toChain, body.toToken)])
-  if (!fromApproved || !toApproved) return apiError(res, 403, 'UNSUPPORTED_TOKEN', 'This token is not approved for RONIN LI.FI routing.')
+  // Token registry is a UI curation layer, NOT a swap permission gate.
+  // Any valid EVM address on a supported chain can be quoted — LI.FI
+  // handles routing for any token with liquidity on chain 4663 (Robinhood)
+  // or chain 1 (Ethereum). Security is enforced by the HMAC-signed quote
+  // proof + on-chain receipt verification in /api/lifi/complete.
   const feeCheck = lifiFeeConfigIsValid()
   const feeParams = buildLifiFeeQueryParams()
   const feeContext = {
