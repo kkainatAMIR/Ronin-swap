@@ -53,6 +53,11 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const { wallet, linkedEvmWallets, refreshLinkedWallets } = useWallet()
   const [step, setStep] = useState(STEP_IDLE)
   const [error, setError] = useState('')
+  // Track the specific backend error code (e.g.,
+  // 'EVM_ALREADY_LINKED_ELSEWHERE') so the UI can show actionable
+  // hints per code. Without this, the user only sees the friendly
+  // message and has no idea what to do next.
+  const [errorCode, setErrorCode] = useState('')
   const [evmAddress, setEvmAddress] = useState('')
   const [activeLink, setActiveLink] = useState(null)  // {solanaWallet, evmWallet, challengeId, messageEvm, messageSolana}
   const [unlinkingEvm, setUnlinkingEvm] = useState(null) // address being unlinked
@@ -61,6 +66,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   useEffect(() => {
     setStep(STEP_IDLE)
     setError('')
+    setErrorCode('')
     setActiveLink(null)
     setEvmAddress('')
   }, [wallet?.address])
@@ -162,7 +168,10 @@ export default function WalletLinkPanel({ onLinkedChange }) {
         setEvmAddress('')
       }, 3500)
     } catch (e) {
+      // Capture both the friendly message AND the specific backend
+      // error code so the UI can show actionable hints per code.
       setError(e?.message || 'The wallet link could not be verified.')
+      setErrorCode(String(e?.code || 'VERIFY_FAILED'))
       setStep(STEP_ERROR)
     }
   }, [refreshLinkedWallets, onLinkedChange])
@@ -201,6 +210,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const resetFlow = () => {
     setStep(STEP_IDLE)
     setError('')
+    setErrorCode('')
     setActiveLink(null)
     setEvmAddress('')
   }
@@ -310,6 +320,52 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             <Icon name="info" size={18} />
             <strong>Link failed</strong>
             <small>{error}</small>
+            {/* Show the specific backend error code so the user (and
+                support) can see exactly which 409 we're hitting.
+                Without this, the only signal is a vague "Conflict"
+                status in the browser console. */}
+            {errorCode && errorCode !== 'VERIFY_FAILED' && (
+              <code className="profile-wallet-link-error-code">{errorCode}</code>
+            )}
+            {/* Actionable hint per code — tells the user what to do
+                next instead of just showing the friendly message. */}
+            {errorCode === 'EVM_ALREADY_LINKED_ELSEWHERE' && (
+              <div className="profile-wallet-link-hint">
+                <small>
+                  Your EVM wallet was previously linked to a different
+                  Solana wallet during earlier testing. To fix:
+                </small>
+                <ol>
+                  <li>Either connect that previous Solana wallet in Phantom and use the <strong>Unlink</strong> button on the existing link.</li>
+                  <li>Or run this SQL on Supabase to clear all your existing ACTIVE links:<br />
+                    <code>
+                      UPDATE public.wallet_links SET status='REVOKED', revoked_at=now() WHERE evm_wallet='{evmAddress || '0xYOUR_EVM_ADDRESS'}' AND status='ACTIVE';
+                    </code>
+                  </li>
+                </ol>
+                <small>Then click <strong>Try again</strong> to start a fresh link.</small>
+              </div>
+            )}
+            {errorCode === 'CHALLENGE_NOT_PENDING' && (
+              <div className="profile-wallet-link-hint">
+                <small>This challenge was already consumed (likely by a previous attempt that you didn't see succeed). Click <strong>Try again</strong> to start a fresh link with a new challenge.</small>
+              </div>
+            )}
+            {errorCode === 'CHALLENGE_EXPIRED' && (
+              <div className="profile-wallet-link-hint">
+                <small>The signatures took longer than 5 minutes. Click <strong>Try again</strong> and approve both wallet popups faster.</small>
+              </div>
+            )}
+            {errorCode === 'EVM_SIGNER_MISMATCH' && (
+              <div className="profile-wallet-link-hint">
+                <small>You signed with a different MetaMask account than the one you connected. Make sure MetaMask is set to the same account, then click <strong>Try again</strong>.</small>
+              </div>
+            )}
+            {errorCode === 'SOLANA_SIGNER_MISMATCH' && (
+              <div className="profile-wallet-link-hint">
+                <small>You signed with a different Phantom account than the one you connected. Make sure Phantom is set to the same account, then click <strong>Try again</strong>.</small>
+              </div>
+            )}
             <Button variant="outline" icon="refresh" onClick={resetFlow}>Try again</Button>
           </div>
         )}

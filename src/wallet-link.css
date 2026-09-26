@@ -135,6 +135,60 @@
   padding: 4px 0;
 }
 
+/* Specific error code badge (e.g., 'EVM_ALREADY_LINKED_ELSEWHERE').
+   Shown when the verify handler returns 409 so the user can tell
+   exactly which conflict is happening. */
+.profile-wallet-link-error-code {
+  display: inline-block;
+  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  margin-top: 4px;
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  color: rgba(255, 180, 180, 0.95);
+  border-radius: 4px;
+}
+
+/* Actionable hint block — per-error-code guidance on what to do next. */
+.profile-wallet-link-hint {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+.profile-wallet-link-hint small {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  display: block;
+  margin-bottom: 6px;
+}
+.profile-wallet-link-hint ol {
+  margin: 6px 0 6px 18px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.profile-wallet-link-hint ol li {
+  margin-bottom: 6px;
+}
+.profile-wallet-link-hint code {
+  display: block;
+  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  word-break: break-all;
+  color: rgba(255, 220, 180, 0.95);
+  user-select: all;
+}
+
 .profile-wallet-link-note {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.45);
