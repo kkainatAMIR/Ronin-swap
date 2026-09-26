@@ -50,12 +50,33 @@ async function getJson(path) {
 }
 
 async function discoverAddresses(chainSlug) {
-  const [boosts, profiles] = await Promise.all([
-    getJson('/token-boosts/top/v1').catch(() => []),
-    getJson('/token-profiles/latest/v1').catch(() => []),
-  ])
-  const candidates = [...(Array.isArray(boosts) ? boosts : []), ...(Array.isArray(profiles) ? profiles : [])]
-    .filter((item) => String(item?.chainId || '').toLowerCase() === chainSlug)
+  const boostsResponse = await getJson('/token-boosts/top/v1').catch((error) => {
+    console.warn('[trending/discoverAddresses] /token-boosts/top/v1 failed', { chain: chainSlug, message: error?.message || String(error) })
+    return []
+  })
+  const profilesResponse = await getJson('/token-profiles/latest/v1').catch((error) => {
+    console.warn('[trending/discoverAddresses] /token-profiles/latest/v1 failed', { chain: chainSlug, message: error?.message || String(error) })
+    return []
+  })
+  const boosts = Array.isArray(boostsResponse) ? boostsResponse : []
+  const profiles = Array.isArray(profilesResponse) ? profilesResponse : []
+  // Diagnostic: how many boosted/profiled tokens does DexScreener have
+  // for THIS chain? If 0, the chain is either unsupported by DexScreener
+  // or the chainId field uses a different name.
+  const boostsForChain = boosts.filter((item) => String(item?.chainId || '').toLowerCase() === chainSlug)
+  const profilesForChain = profiles.filter((item) => String(item?.chainId || '').toLowerCase() === chainSlug)
+  console.info('[trending/discoverAddresses] boosts+profiles fetched', {
+    chain: chainSlug,
+    totalBoosts: boosts.length,
+    totalProfiles: profiles.length,
+    boostsForChain: boostsForChain.length,
+    profilesForChain: profilesForChain.length,
+    // Sample the first 5 chainId values DexScreener returned — helps
+    // debug if the chainId field uses a different name (e.g. 'eth'
+    // instead of 'ethereum').
+    sampleChainIds: [...new Set(boosts.map((item) => item?.chainId).filter(Boolean))].slice(0, 10),
+  })
+  const candidates = [...boostsForChain, ...profilesForChain]
     .map((item) => String(item?.tokenAddress || '').trim())
     .filter(Boolean)
   if (chainSlug === 'ethereum' && candidates.length < 10) {
@@ -68,14 +89,40 @@ async function discoverAddresses(chainSlug) {
       'ETH', 'USDC', 'USDT', 'WETH', 'WBTC', 'PEPE', 'UNI', 'AAVE',
       'LINK', 'SHIB', 'MKR', 'CRV',
     ]
-    const searchResults = await Promise.all(searchTerms.map((term) => getJson(`/latest/dex/search?q=${encodeURIComponent(term)}`).catch(() => ({ pairs: [] }))))
+    console.info('[trending/discoverAddresses] Ethereum fallback search starting', {
+      chain: chainSlug,
+      candidatesBeforeFallback: candidates.length,
+      searchTerms: searchTerms.length,
+    })
+    const searchResults = await Promise.all(searchTerms.map(async (term) => {
+      try {
+        return await getJson(`/latest/dex/search?q=${encodeURIComponent(term)}`)
+      } catch (error) {
+        console.warn('[trending/discoverAddresses] search failed', { chain: chainSlug, term, message: error?.message || String(error) })
+        return { pairs: [] }
+      }
+    }))
+    let searchPairsAdded = 0
     for (const result of searchResults) {
       for (const pair of Array.isArray(result?.pairs) ? result.pairs : []) {
-        if (String(pair?.chainId || '').toLowerCase() === chainSlug && pair?.baseToken?.address) candidates.push(pair.baseToken.address)
+        if (String(pair?.chainId || '').toLowerCase() === chainSlug && pair?.baseToken?.address) {
+          candidates.push(pair.baseToken.address)
+          searchPairsAdded += 1
+        }
       }
     }
+    console.info('[trending/discoverAddresses] Ethereum fallback search done', {
+      chain: chainSlug,
+      searchPairsAdded,
+      candidatesAfterFallback: candidates.length,
+    })
   }
-  return [...new Set(candidates)].slice(0, 100)
+  const uniqueCandidates = [...new Set(candidates)].slice(0, 100)
+  console.info('[trending/discoverAddresses] final', {
+    chain: chainSlug,
+    uniqueCandidates: uniqueCandidates.length,
+  })
+  return uniqueCandidates
 }
 
 // =====================================================================
@@ -97,37 +144,88 @@ async function discoverAddresses(chainSlug) {
 // single perf win for the trending UI.
 // =====================================================================
 async function fetchPairs(chainSlug, addresses) {
-  if (addresses.length === 0) return []
+  if (addresses.length === 0) {
+    console.warn('[trending/fetchPairs] no candidate addresses — DexScreener will return nothing', { chain: chainSlug })
+    return []
+  }
   const chunks = []
   for (let index = 0; index < addresses.length; index += 25) {
     chunks.push(addresses.slice(index, index + 25).join(','))
   }
   const bodies = await Promise.all(
-    chunks.map((chunk) => getJson(`/tokens/v1/${chainSlug}/${chunk}`).catch(() => []))
+    chunks.map(async (chunk) => {
+      try {
+        const body = await getJson(`/tokens/v1/${chainSlug}/${chunk}`)
+        return body
+      } catch (error) {
+        console.warn('[trending/fetchPairs] /tokens/v1 chunk failed', {
+          chain: chainSlug,
+          chunkLength: chunk.split(',').length,
+          message: error?.message || String(error),
+        })
+        return []
+      }
+    })
   )
   const pairs = []
   for (const body of bodies) {
     if (Array.isArray(body)) pairs.push(...body)
   }
+  // Diagnostic: DexScreener returns pairs with a chainId field. If
+  // none of the returned pairs match our chainSlug, something is
+  // wrong with the chain identifier.
+  const pairsForChain = pairs.filter((pair) => String(pair?.chainId || '').toLowerCase() === chainSlug)
+  console.info('[trending/fetchPairs] fetched', {
+    chain: chainSlug,
+    chunks: chunks.length,
+    totalPairs: pairs.length,
+    pairsForChain,
+    pairsForChainCount: pairsForChain.length,
+    samplePairChainIds: [...new Set(pairs.map((pair) => pair?.chainId).filter(Boolean))].slice(0, 5),
+  })
   return pairs
 }
 
 function selectBestPairs(pairs, chainSlug, timeframe, minimumLiquidity, minimumVolume) {
   const bestByToken = new Map()
+  let skippedWrongChain = 0
+  let skippedNoAddress = 0
+  let skippedNoSymbol = 0
+  let skippedNoPrice = 0
+  let skippedLowLiquidity = 0
+  let skippedLowVolume = 0
+  let skippedNoTxns = 0
+  let skippedNoPairAddress = 0
   for (const pair of pairs) {
-    if (String(pair?.chainId || '').toLowerCase() !== chainSlug) continue
+    if (String(pair?.chainId || '').toLowerCase() !== chainSlug) { skippedWrongChain += 1; continue }
     const address = String(pair?.baseToken?.address || '').trim()
     const symbol = String(pair?.baseToken?.symbol || '').trim()
     const price = number(pair?.priceUsd)
     const liquidity = number(pair?.liquidity?.usd)
     const volume = number(pair?.volume?.h24)
     const selected = timeframeValues(pair, timeframe)
-    if (!address || !symbol || price <= 0 || liquidity < minimumLiquidity || volume < minimumVolume || selected.transactions <= 0 || !pair?.pairAddress) continue
+    if (!address) { skippedNoAddress += 1; continue }
+    if (!symbol) { skippedNoSymbol += 1; continue }
+    if (price <= 0) { skippedNoPrice += 1; continue }
+    if (liquidity < minimumLiquidity) { skippedLowLiquidity += 1; continue }
+    if (volume < minimumVolume) { skippedLowVolume += 1; continue }
+    if (selected.transactions <= 0) { skippedNoTxns += 1; continue }
+    if (!pair?.pairAddress) { skippedNoPairAddress += 1; continue }
     const candidate = { pair, score: scorePair(pair, timeframe) }
     const key = address.toLowerCase()
     if (!bestByToken.has(key) || candidate.score > bestByToken.get(key).score) bestByToken.set(key, candidate)
   }
-  return [...bestByToken.values()].sort((left, right) => right.score - left.score)
+  const result = [...bestByToken.values()].sort((left, right) => right.score - left.score)
+  console.info('[trending/selectBestPairs] filtered', {
+    chain: chainSlug,
+    timeframe,
+    minimumLiquidity,
+    minimumVolume,
+    inputPairs: pairs.length,
+    outputSelected: result.length,
+    skipped: { wrongChain: skippedWrongChain, noAddress: skippedNoAddress, noSymbol: skippedNoSymbol, noPrice: skippedNoPrice, lowLiquidity: skippedLowLiquidity, lowVolume: skippedLowVolume, noTxns: skippedNoTxns, noPairAddress: skippedNoPairAddress },
+  })
+  return result
 }
 
 function normalize(candidate, chainSlug, timeframe, rank) {

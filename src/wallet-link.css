@@ -1,64 +1,96 @@
-/* Wallet Link Panel + Verified Wallets UI */
+/* =====================================================================
+   Wallet Link Panel — RoninSwap visual language
+   =====================================================================
+   Uses the existing design tokens defined in src/styles.css:
+     --paper         panel background
+     --ink           dark text
+     --ink-soft      slightly lighter dark
+     --red           Ronin red accent
+     --red-dark      darker red (hover)
+     --gold          gold/bronze highlight
+     --line          border
+     --line-strong   darker border
+     --muted         muted text
+     --shadow-sm     panel shadow
 
+   No new CSS framework. No new design tokens. Matches the existing
+   profile-panel + profile-rewards-panel + btn/btn-primary/btn-outline
+   patterns used throughout the rest of the app.
+   ===================================================================== */
+
+/* ---------- Panel wrapper ---------- */
 .profile-wallet-link-panel,
 .profile-verified-wallets-panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 30px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
 }
 
-.profile-wallet-link-empty {
+/* ---------- Empty state (no Solana wallet / no Phantom) ---------- */
+.ronin-wallet-link-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: 8px;
-  padding: 24px 16px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  padding: 32px 20px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  background: var(--cream);
+}
+.ronin-wallet-link-empty svg,
+.ronin-wallet-link-empty p {
+  margin: 0;
+}
+.ronin-wallet-link-empty p {
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.profile-wallet-link-grid {
+/* ---------- Solana + linked-wallets summary grid ---------- */
+.ronin-wallet-link-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-
-.profile-wallet-link-stat {
+.ronin-wallet-link-stat {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 6px;
+  padding: 16px 18px;
+  background: var(--cream);
+  border: 1px solid var(--line);
 }
-
-.profile-wallet-link-stat .profile-data-label {
+.ronin-wallet-link-stat .profile-data-label {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-family: var(--mono, monospace);
+  margin-bottom: 0;
+}
+.ronin-wallet-link-stat strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ronin-wallet-link-stat small {
   font-size: 11px;
-  letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--muted);
+  line-height: 1.4;
 }
-
-.profile-wallet-link-stat strong {
-  font-size: 15px;
-  font-weight: 600;
+.ronin-wallet-link-addr {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+  letter-spacing: -0.01em;
   word-break: break-all;
 }
 
-.profile-wallet-link-stat small {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.profile-wallet-link-addr {
-  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  letter-spacing: -0.01em;
-}
-
-.profile-wallet-link-list {
+/* ---------- Linked wallets list ---------- */
+.ronin-wallet-link-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -66,219 +98,430 @@
   flex-direction: column;
   gap: 8px;
 }
-
-.profile-wallet-link-list li {
+.ronin-wallet-link-list li {
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
 }
-
-.profile-wallet-link-list li small {
+.ronin-wallet-link-list li small {
   display: block;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
-  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
 }
 
-.profile-wallet-link-flow {
-  padding: 12px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.profile-wallet-link-step {
+/* ---------- STATE: IDLE — before linking ---------- */
+.ronin-wallet-link-idle {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px;
+  background: var(--ink);
+  color: #f5f1e9;
+  border: 1px solid var(--ink-soft);
+  border-left: 3px solid var(--red);
 }
-
-.profile-wallet-link-step strong {
-  font-size: 14px;
+.ronin-wallet-link-idle-copy {
+  flex: 1;
+  min-width: 0;
+}
+.ronin-wallet-link-idle-copy strong {
   display: block;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.ronin-wallet-link-idle-copy p {
+  margin: 0 0 10px;
+  color: #aaa29a;
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 520px;
+}
+.ronin-wallet-link-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted-light, #a79e94);
+  font-family: var(--mono, monospace);
+  letter-spacing: 0.04em;
 }
 
-.profile-wallet-link-step small {
+/* ---------- STATE: FLOW — 4-step progress ---------- */
+.ronin-wallet-link-flow {
+  padding: 24px;
+  background: var(--ink);
+  color: #f5f1e9;
+  border: 1px solid var(--ink-soft);
+  border-left: 3px solid var(--gold);
+}
+.ronin-wallet-link-flow-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ronin-wallet-link-flow-header strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.ronin-wallet-link-flow-header small {
+  font-size: 11px;
+  color: var(--gold);
+  font-family: var(--mono, monospace);
+  letter-spacing: 0.04em;
+}
+.ronin-wallet-link-flow-status {
+  margin: 16px 0 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
-  display: block;
-  margin-top: 2px;
+  color: var(--muted-light, #a79e94);
+  font-family: var(--mono, monospace);
 }
 
-.profile-wallet-link-success,
-.profile-wallet-link-error {
+/* Progress list — 4 steps */
+.ronin-wallet-link-progress {
+  list-style: none;
+  padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 16px;
-  border-radius: 10px;
+  gap: 14px;
 }
-
-.profile-wallet-link-success {
-  background: rgba(46, 160, 67, 0.1);
-  border: 1px solid rgba(46, 160, 67, 0.3);
+.ronin-wallet-link-progress li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: start;
+  gap: 12px;
 }
-
-.profile-wallet-link-error {
-  background: rgba(248, 81, 73, 0.08);
-  border: 1px solid rgba(248, 81, 73, 0.25);
+.ronin-wallet-link-progress-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 14px;
+  flex-shrink: 0;
 }
-
-.profile-wallet-link-error-text {
-  font-size: 13px;
-  color: rgba(248, 100, 100, 0.9);
-  padding: 4px 0;
+/* Completed step — gold check */
+.ronin-wallet-link-progress li.is-complete .ronin-wallet-link-progress-mark {
+  background: var(--gold);
+  color: var(--ink);
 }
-
-/* Specific error code badge (e.g., 'EVM_ALREADY_LINKED_ELSEWHERE').
-   Shown when the verify handler returns 409 so the user can tell
-   exactly which conflict is happening. */
-.profile-wallet-link-error-code {
-  display: inline-block;
-  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  padding: 2px 8px;
-  margin-top: 4px;
-  background: rgba(248, 81, 73, 0.15);
-  border: 1px solid rgba(248, 81, 73, 0.3);
-  color: rgba(255, 180, 180, 0.95);
-  border-radius: 4px;
+.ronin-wallet-link-progress li.is-complete .ronin-wallet-link-progress-text strong {
+  color: #f5f1e9;
+  text-decoration: line-through;
+  text-decoration-color: rgba(200, 169, 106, 0.4);
+  text-decoration-thickness: 1px;
 }
-
-/* Actionable hint block — per-error-code guidance on what to do next. */
-.profile-wallet-link-hint {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+.ronin-wallet-link-progress li.is-complete .ronin-wallet-link-progress-text small {
+  color: var(--muted-light, #a79e94);
 }
-.profile-wallet-link-hint small {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+/* Active step — red ring + spinner */
+.ronin-wallet-link-progress li.is-active .ronin-wallet-link-progress-mark {
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(185, 28, 28, 0.18);
+}
+.ronin-wallet-link-progress li.is-active .ronin-wallet-link-progress-text strong {
+  color: #fff;
+}
+.ronin-wallet-link-progress li.is-active .ronin-wallet-link-progress-text small {
+  color: var(--gold);
+}
+/* Pending step — muted dot */
+.ronin-wallet-link-progress li.is-pending .ronin-wallet-link-progress-mark {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.ronin-wallet-link-progress li.is-pending .ronin-wallet-link-progress-text strong {
+  color: rgba(255, 255, 255, 0.35);
+}
+.ronin-wallet-link-progress li.is-pending .ronin-wallet-link-progress-text small {
+  color: rgba(255, 255, 255, 0.25);
+}
+.ronin-wallet-link-progress-text strong {
   display: block;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.ronin-wallet-link-progress-text small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Spinner (inside the active step mark) */
+.ronin-wallet-link-spinner {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ronin-wallet-link-spin 0.8s linear infinite;
+}
+@keyframes ronin-wallet-link-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Pending dot (inside the pending step mark) */
+.ronin-wallet-link-progress-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+}
+
+/* ---------- STATE: SUCCESS ---------- */
+.ronin-wallet-link-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  background: var(--ink);
+  color: #f5f1e9;
+  border: 1px solid var(--ink-soft);
+  border-left: 3px solid var(--gold);
+}
+.ronin-wallet-link-success-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: var(--ink);
+  flex-shrink: 0;
+}
+.ronin-wallet-link-success strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
   margin-bottom: 6px;
 }
-.profile-wallet-link-hint ol {
+.ronin-wallet-link-success p {
+  margin: 0 0 10px;
+  color: #aaa29a;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ronin-wallet-link-points {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: var(--gold);
+}
+.ronin-wallet-link-points code {
+  background: rgba(200, 169, 106, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* ---------- STATE: ERROR ---------- */
+.ronin-wallet-link-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  background: rgba(185, 28, 28, 0.06);
+  border: 1px solid var(--red);
+  border-left: 3px solid var(--red);
+}
+.ronin-wallet-link-error-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  flex-shrink: 0;
+}
+.ronin-wallet-link-error strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--red-dark);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ronin-wallet-link-error p {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ronin-wallet-link-error-code {
+  display: inline-block;
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  padding: 2px 8px;
+  margin-top: 4px;
+  background: rgba(185, 28, 28, 0.12);
+  border: 1px solid rgba(185, 28, 28, 0.25);
+  color: var(--red-dark);
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+}
+.ronin-wallet-link-hint {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+}
+.ronin-wallet-link-hint small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.ronin-wallet-link-hint ol {
   margin: 6px 0 6px 18px;
   padding: 0;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--ink);
   font-size: 12px;
   line-height: 1.5;
 }
-.profile-wallet-link-hint ol li {
+.ronin-wallet-link-hint ol li {
   margin-bottom: 6px;
 }
-.profile-wallet-link-hint code {
+.ronin-wallet-link-hint code {
   display: block;
-  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono, monospace);
   font-size: 10px;
   padding: 6px 8px;
   margin-top: 4px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
+  background: var(--ink);
+  color: var(--gold);
+  border-radius: 3px;
   word-break: break-all;
-  color: rgba(255, 220, 180, 0.95);
   user-select: all;
 }
 
-.profile-wallet-link-note {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+/* ---------- Footer note ---------- */
+.ronin-wallet-link-footer-note {
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono, monospace);
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  margin: 0;
 }
 
-/* Verified wallets list (Profile page) */
+/* ---------- Verified wallets list (Profile page section) ---------- */
 .profile-verified-wallets-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-
 .profile-verified-wallet-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
+  padding: 12px 16px;
+  background: var(--cream);
+  border: 1px solid var(--line);
 }
-
 .profile-verified-wallet-solana {
-  background: rgba(255, 200, 0, 0.04);
-  border-color: rgba(255, 200, 0, 0.18);
+  border-left: 3px solid var(--gold);
 }
-
 .profile-verified-wallet-label {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-
-.profile-verified-wallet-label .profile-wallet-addr {
-  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
+.profile-verified-wallet-label .ronin-wallet-link-addr {
+  font-family: var(--mono, monospace);
+  font-size: 13px;
   word-break: break-all;
 }
-
 .profile-verified-wallet-row small {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  color: var(--muted);
 }
 
-/* Reward panel verified-identity notices */
-.profile-rewards-notice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+/* ---------- Loading placeholder (TokenMark) ---------- */
+.tok-loading {
+  background: linear-gradient(110deg,
+    rgba(255,255,255,0.06) 0%,
+    rgba(255,255,255,0.12) 40%,
+    rgba(255,255,255,0.06) 60%);
+  background-size: 200% 100%;
+  animation: tok-loading-pulse 1.2s ease-in-out infinite;
+  border-radius: 50%;
+  display: inline-block;
+}
+@keyframes tok-loading-pulse {
+  0% { background-position: 100% 0%; opacity: 0.7; }
+  50% { background-position: 0% 0%; opacity: 1; }
+  100% { background-position: -100% 0%; opacity: 0.7; }
 }
 
-.profile-rewards-notice-warn {
-  background: rgba(248, 81, 73, 0.06);
-  border-color: rgba(248, 81, 73, 0.2);
-}
-
-.profile-rewards-notice-verified {
-  background: rgba(46, 160, 67, 0.06);
-  border-color: rgba(46, 160, 67, 0.22);
-}
-
-.profile-rewards-notice strong {
+/* ---------- Pinned-token badge + muted hint ---------- */
+.swap-token-pinned {
   display: block;
-  font-size: 14px;
-  margin-bottom: 2px;
+  color: var(--gold);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+.swap-token-muted {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
 }
 
-.profile-rewards-notice small {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-/* Mobile adjustments */
+/* ---------- Mobile ---------- */
 @media (max-width: 720px) {
-  .profile-wallet-link-grid {
+  .profile-wallet-link-panel,
+  .profile-verified-wallets-panel {
+    padding: 22px;
+  }
+  .ronin-wallet-link-grid {
     grid-template-columns: 1fr;
   }
-  .profile-wallet-link-list li {
+  .ronin-wallet-link-idle,
+  .ronin-wallet-link-flow,
+  .ronin-wallet-link-success,
+  .ronin-wallet-link-error {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 18px;
+  }
+  .ronin-wallet-link-list li {
     grid-template-columns: 1fr auto;
     row-gap: 6px;
   }
-  .profile-wallet-link-list li button {
+  .ronin-wallet-link-list li button {
     grid-column: 1 / -1;
+  }
+  .ronin-wallet-link-idle .btn {
+    width: 100%;
   }
 }

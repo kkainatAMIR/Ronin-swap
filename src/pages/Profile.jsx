@@ -118,17 +118,22 @@ export default function Profile() {
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
   const [error, setError] = useState('')
-  // Dismissible wallet-connection disclaimer. Persisted to localStorage
+  // Dismissible wallet-link explanation banner. Persisted to localStorage
   // so a user who has already acknowledged it doesn't see it again on
-  // every page load.
+  // every page load. The previous version of this banner described the
+  // OLD multi-wallet aggregation model (localStorage-based). The
+  // current version reflects the cryptographic wallet-link flow:
+  // users sign with both wallets to prove ownership, no on-chain
+  // transactions are triggered, points are not transferred on-chain
+  // to Solana, and existing Solana points are not reset.
   const [disclaimerDismissed, setDisclaimerDismissed] = useState(() => {
     if (typeof window === 'undefined') return false
-    try { return window.localStorage.getItem('ronin.profileWalletDisclaimerDismissed') === '1' }
+    try { return window.localStorage.getItem('ronin.profileWalletLinkDisclaimerV2') === '1' }
     catch { return false }
   })
   const dismissDisclaimer = () => {
     setDisclaimerDismissed(true)
-    try { window.localStorage.setItem('ronin.profileWalletDisclaimerDismissed', '1') } catch {}
+    try { window.localStorage.setItem('ronin.profileWalletLinkDisclaimerV2', '1') } catch {}
   }
 
   // Fetch aggregated profile data across ALL connected wallets (Phantom
@@ -216,13 +221,9 @@ export default function Profile() {
           <div className="profile-wallet-disclaimer-content">
             <Icon name="info" size={18} />
             <div>
-              <strong>Samurai Points are tied to the connected wallet.</strong>
+              <strong>Swapped on Ethereum or another EVM chain?</strong>
               <p>
-                Points earned from swaps on Solana, Ethereum, and Robinhood Chain are
-                tracked separately per wallet address. To see your full points balance,
-                make sure the wallet you swapped with is connected. If you swapped with
-                MetaMask on Ethereum or Robinhood Chain, your points will appear once
-                that MetaMask account is connected.
+                Your Samurai Points are associated with the wallet you used for those swaps. Link that EVM wallet to your main Solana reward wallet to make your eligible EVM points available through your Solana reward identity. You will sign a message with both wallets to prove ownership. This signature does not authorize transactions or token transfers. Your existing Solana points are not replaced or reset.
               </p>
             </div>
           </div>

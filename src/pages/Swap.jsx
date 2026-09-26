@@ -1485,18 +1485,49 @@ export default function Swap() {
   useEffect(() => {
     let cancelled = false
     const chain = network === 'robinhood' ? 'robinhood' : network
+    // Diagnostic: log when trending is loaded for each chain so we
+    // can see if the Ethereum flow is being triggered at all.
+    console.info('[Swap.jsx trending useEffect] starting', {
+      network,
+      chain,
+      timeframe: trendingTimeframe,
+      retry: trendingRetry,
+    })
     setTrendingState((current) => ({ ...current, state: 'loading', chain, timeframe: trendingTimeframe }))
     const loadTrending = async () => {
       try {
         const body = await getLiveTrendingTokens({ chain, timeframe: trendingTimeframe })
-        if (!cancelled) setTrendingState({ state: body.dataAvailable ? 'ready' : 'empty', results: body.tokens || [], chain, timeframe: trendingTimeframe })
-      } catch {
+        if (!cancelled) {
+          const nextState = {
+            state: body.dataAvailable ? 'ready' : 'empty',
+            results: body.tokens || [],
+            chain,
+            timeframe: trendingTimeframe,
+          }
+          console.info('[Swap.jsx trending useEffect] loaded', {
+            network,
+            chain,
+            state: nextState.state,
+            tokenCount: nextState.results.length,
+          })
+          setTrendingState(nextState)
+        }
+      } catch (error) {
+        console.warn('[Swap.jsx trending useEffect] failed', {
+          network,
+          chain,
+          message: error?.message || String(error),
+        })
         if (!cancelled) setTrendingState({ state: 'error', results: [], chain, timeframe: trendingTimeframe })
       }
     }
     loadTrending()
     const interval = window.setInterval(loadTrending, 45_000)
-    return () => { cancelled = true; window.clearInterval(interval) }
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      console.info('[Swap.jsx trending useEffect] cleanup', { network, chain })
+    }
   }, [network, trendingTimeframe, trendingRetry])
 
   const dashboardTrending = trendingState.chain === network ? trendingState.results : []
