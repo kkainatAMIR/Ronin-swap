@@ -593,7 +593,14 @@ set search_path = public
 as $$
 declare
   v_solana_wallet text;
-  v_identity public.get_verified_reward_identity%ROWTYPE;
+  -- NOTE: get_verified_reward_identity returns jsonb. We use jsonb here
+  -- (NOT %ROWTYPE) because %ROWTYPE only works for tables/views, not
+  -- for functions returning scalar/composite types. Field access uses
+  -- the ->> / -> operators. (See Postgres docs: a function's return
+  -- type cannot be used as a %ROWTYPE target unless the function
+  -- returns a SETOF or has OUT parameters.)
+  v_identity jsonb;
+  v_linked_evm_wallets_arr text[];
   v_wallet_ids uuid[];
   v_wallet_addresses text[];
   v_canonical_wallet_row public.wallets;
@@ -617,11 +624,20 @@ begin
     raise exception 'INVALID_WALLET_FORMAT';
   end if;
 
-  select * into v_identity from public.get_verified_reward_identity(p_wallet_address);
+  -- Call the identity RPC and store the jsonb result. Field access via ->>.
+  v_identity := public.get_verified_reward_identity(p_wallet_address);
+  v_solana_wallet := v_identity->>'solana_wallet';
 
-  if v_identity.solana_wallet is not null then
-    v_solana_wallet := v_identity.solana_wallet;
-    v_wallet_addresses := array_append(coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[]), v_solana_wallet);
+  -- Convert the linked_evm_wallets jsonb array to a Postgres text[] so
+  -- we can use array_append / = any(...). If the jsonb value is null or
+  -- an empty array, this produces NULL/empty.
+  select array_agg(elem::text) into v_linked_evm_wallets_arr
+    from jsonb_array_elements_text(
+      coalesce(v_identity->'linked_evm_wallets', '[]'::jsonb)
+    ) AS elem;
+
+  if v_solana_wallet is not null then
+    v_wallet_addresses := array_append(coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[]), v_solana_wallet);
   else
     -- No verified link. Use only the input wallet's own row.
     v_solana_wallet := null;
@@ -675,7 +691,7 @@ begin
     'input_wallet', p_wallet_address,
     'is_verified_identity', (v_solana_wallet is not null),
     'solana_payout_wallet', v_solana_wallet,
-    'linked_evm_wallets', coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[]),
+    'linked_evm_wallets', coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[]),
     'earned_points', v_earned_points,
     'consumed_points', v_consumed_points,
     'claimed_points', v_consumed_points,  -- alias for backward compat with frontend
@@ -755,7 +771,11 @@ declare
   v_input_is_solana boolean;
   v_input_is_evm boolean;
   v_solana_wallet text;
-  v_identity public.get_verified_reward_identity%ROWTYPE;
+  -- NOTE: get_verified_reward_identity returns jsonb. We use jsonb here
+  -- (NOT %ROWTYPE) because %ROWTYPE only works for tables/views. Field
+  -- access uses the ->> / -> operators.
+  v_identity jsonb;
+  v_linked_evm_wallets_arr text[];
   v_wallet_addresses text[];
   v_wallet_ids uuid[];
   v_wallet_ids_ordered uuid[];  -- FIFO order: Solana first, then EVMs by verified_at
@@ -802,9 +822,14 @@ begin
   end if;
 
   -- Resolve the verified identity.
-  select * into v_identity from public.get_verified_reward_identity(p_wallet_address);
-  v_solana_wallet := v_identity.solana_wallet;
-  v_wallet_addresses := array_append(coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[]), v_solana_wallet);
+  v_identity := public.get_verified_reward_identity(p_wallet_address);
+  v_solana_wallet := v_identity->>'solana_wallet';
+  -- Convert the linked_evm_wallets jsonb array to a Postgres text[].
+  select array_agg(elem::text) into v_linked_evm_wallets_arr
+    from jsonb_array_elements_text(
+      coalesce(v_identity->'linked_evm_wallets', '[]'::jsonb)
+    ) AS elem;
+  v_wallet_addresses := array_append(coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[]), v_solana_wallet);
 
   -- Lock the canonical Solana wallet row FOR UPDATE. This serializes
   -- claims per identity (only the canonical Solana wallet row is
@@ -1017,7 +1042,7 @@ begin
     'claimable_points', greatest(earned_points - (consumed_points + points_to_claim), 0),
     'verified_identity', jsonb_build_object(
       'solana_wallet', v_solana_wallet,
-      'linked_evm_wallets', coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[])
+      'linked_evm_wallets', coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[])
     )
   );
 end;

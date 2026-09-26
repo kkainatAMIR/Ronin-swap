@@ -448,9 +448,9 @@ async function main() {
   })
 
   await test('migration: claim_reward aggregates earned_points across verified identity set', () => {
-    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)/,
+    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)/,
       'claim_reward does not resolve the verified identity')
-    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
+    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
       'claim_reward does not append linked EVM wallets to the aggregation set')
   })
 
@@ -463,9 +463,9 @@ async function main() {
   })
 
   await test('migration: get_wallet_reward_balance aggregates across verified identity', () => {
-    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)/,
+    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)/,
       'get_wallet_reward_balance does not resolve the verified identity')
-    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
+    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
       'get_wallet_reward_balance does not aggregate linked EVM wallets')
     // The RPC must NOT accept an arbitrary wallet list from the
     // frontend — the only parameter is p_wallet_address (a single
