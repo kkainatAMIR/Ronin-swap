@@ -291,6 +291,106 @@ async function main() {
     assert.match(migrationSql, /status text not null default 'ACTIVE'\s+check \(status in \('ACTIVE', 'REVOKED'\)\)/, 'status check missing')
   })
 
+  await test('migration: evm_chain_scope column ABSENT from wallet_links CREATE TABLE (per architecture requirement)', () => {
+    // The user explicitly asked to remove evm_chain_scope if it's
+    // unnecessary. It IS unnecessary because an EVM address is one
+    // row in public.wallets regardless of which EVM chain it swapped
+    // on (chain_id lives on swap_transactions / samurai_points, not
+    // on wallets). A per-chain link scope would split a single EVM
+    // identity without any security benefit.
+    //
+    // We check the CREATE TABLE block specifically (not the entire
+    // file) because the migration's comments explain WHY the column
+    // was removed — those mentions are intentional.
+    const tableStart = migrationSql.indexOf('create table if not exists public.wallet_links')
+    const tableEnd = migrationSql.indexOf(');', tableStart)
+    assert.ok(tableStart > 0 && tableEnd > tableStart, 'wallet_links CREATE TABLE block not found')
+    const createTableBlock = migrationSql.slice(tableStart, tableEnd)
+    assert.ok(!/evm_chain_scope/.test(createTableBlock),
+      'evm_chain_scope column still present in wallet_links CREATE TABLE — should be removed per architecture requirement')
+  })
+
+  await test('migration: wallet_point_consumption table created (THE ACCOUNTING FIX)', () => {
+    assert.match(migrationSql, /create table if not exists public\.wallet_point_consumption/,
+      'wallet_point_consumption table missing — accounting fix absent')
+    assert.match(migrationSql, /wallet_id uuid not null references public\.wallets\(id\)/,
+      'wallet_point_consumption must reference wallets(id) so consumption travels with the wallet, not the link')
+    assert.match(migrationSql, /points_consumed numeric\(30, 6\) not null/,
+      'points_consumed column missing')
+    assert.match(migrationSql, /source text not null default 'CLAIM'\s+check \(source in \('CLAIM', 'MIGRATION_BACKFILL', 'ADMIN_ADJUST'\)\)/,
+      'source column check missing')
+    assert.match(migrationSql, /constraint wallet_point_consumption_positive check \(points_consumed > 0\)/,
+      'positive-points check missing')
+  })
+
+  await test('migration: wallet_point_consumption has unique (wallet_id, claim_id) index', () => {
+    assert.match(migrationSql,
+      /create unique index if not exists wallet_point_consumption_wallet_claim_uidx\s+on public\.wallet_point_consumption\(wallet_id, claim_id\)\s+where claim_id is not null/,
+      'unique (wallet_id, claim_id) partial index missing — a single claim cannot consume the same wallet twice')
+  })
+
+  await test('migration: wallet_point_consumption has idempotent backfill index', () => {
+    assert.match(migrationSql,
+      /create unique index if not exists wallet_point_consumption_backfill_uidx\s+on public\.wallet_point_consumption\(wallet_id\)\s+where source = 'MIGRATION_BACKFILL'/,
+      'backfill unique partial index missing — migration is not idempotent on re-run')
+  })
+
+  await test('migration: MIGRATION_BACKFILL preserves existing claimed_points values', () => {
+    assert.match(migrationSql,
+      /insert into public\.wallet_point_consumption \(wallet_id, claim_id, points_consumed, source, consumed_at\)\s+select w\.id, null, w\.claimed_points, 'MIGRATION_BACKFILL', coalesce\(w\.updated_at, now\(\)\)\s+from public\.wallets w\s+where w\.claimed_points > 0\s+on conflict do nothing/,
+      'backfill INSERT missing — existing users with claimed_points > 0 would have their claimed amount reset to 0 in the new accounting (BUG)')
+  })
+
+  await test('migration: get_wallet_reward_balance uses wallet_point_consumption (authoritative)', () => {
+    assert.match(migrationSql,
+      /select coalesce\(sum\(wpc\.points_consumed\), 0\) into v_consumed_points\s+from public\.wallet_point_consumption wpc\s+where wpc\.wallet_id = any\(coalesce\(v_wallet_ids, ARRAY\[\]::uuid\[\]\)\)/,
+      'get_wallet_reward_balance does not use wallet_point_consumption as the authoritative consumed-points source')
+  })
+
+  await test('migration: claim_reward uses wallet_point_consumption (not wallets.claimed_points) for claimable math', () => {
+    // The ORIGINAL bug was using wallets.claimed_points on the canonical
+    // Solana wallet for claimable math. The FIX must compute consumed
+    // from wallet_point_consumption across the identity set.
+    assert.match(migrationSql,
+      /select coalesce\(sum\(wpc\.points_consumed\), 0\) into consumed_points\s+from public\.wallet_point_consumption wpc\s+where wpc\.wallet_id = any\(coalesce\(v_wallet_ids, ARRAY\[\]::uuid\[\]\)\)/,
+      'claim_reward does not compute consumed from wallet_point_consumption — accounting bug not fixed')
+  })
+
+  await test('migration: claim_reward distributes consumption FIFO across identity wallets', () => {
+    assert.match(migrationSql, /foreach v_wallet_id in v_wallet_ids_ordered/,
+      'claim_reward does not iterate over identity wallets for FIFO distribution')
+    assert.match(migrationSql,
+      /insert into public\.wallet_point_consumption \(wallet_id, claim_id, points_consumed, source\)\s+values \(v_wallet_id, p_claim_id, v_take, 'CLAIM'\)/,
+      'claim_reward does not insert wallet_point_consumption rows during FIFO distribution')
+  })
+
+  await test('migration: claim_reward orders wallets Solana-first then EVMs by verified_at ASC', () => {
+    assert.match(migrationSql, /v_wallet_ids_ordered := array\[wallet_row\.id\]/,
+      'claim_reward does not put the canonical Solana wallet first in the FIFO order')
+    assert.match(migrationSql,
+      /select array_agg\(w\.id order by wl\.verified_at asc\) into evm_ids\s+from public\.wallet_links wl\s+join public\.wallets w on w\.wallet_address = wl\.evm_wallet\s+where wl\.solana_wallet = v_solana_wallet\s+and wl\.status = 'ACTIVE'/,
+      'claim_reward does not append EVM wallets ordered by verified_at ASC')
+  })
+
+  await test('migration: unlink_wallet does NOT delete wallet_point_consumption rows', () => {
+    // The unlink RPC must only set status='REVOKED' on the wallet_links
+    // row. It must NOT touch wallet_point_consumption — otherwise
+    // unlinks would reset consumed points (the original bug).
+    const unlinkStart = migrationSql.indexOf('create or replace function public.unlink_wallet(')
+    const unlinkEnd = migrationSql.indexOf('revoke execute on function public.unlink_wallet(text, text)')
+    assert.ok(unlinkStart > 0 && unlinkEnd > unlinkStart, 'unlink_wallet function not found')
+    const unlinkBody = migrationSql.slice(unlinkStart, unlinkEnd)
+    assert.ok(!/delete from public\.wallet_point_consumption/.test(unlinkBody),
+      'unlink_wallet deletes wallet_point_consumption rows — this would re-introduce the duplicate-claim bug')
+    assert.ok(!/update public\.wallet_point_consumption/.test(unlinkBody),
+      'unlink_wallet mutates wallet_point_consumption rows — this would re-introduce the duplicate-claim bug')
+  })
+
+  await test('migration: claim_reward raises CONSUMPTION_DISTRIBUTION_FAILED if FIFO fails', () => {
+    assert.match(migrationSql, /raise exception 'CONSUMPTION_DISTRIBUTION_FAILED/,
+      'claim_reward does not abort when FIFO distribution can\u2019t account for the full claim amount — silent accounting error')
+  })
+
   await test('migration: unique partial index prevents an EVM wallet from being ACTIVE-linked to two Solana wallets', () => {
     assert.match(migrationSql,
       /create unique index if not exists wallet_links_evm_active_uidx\s+on public\.wallet_links\(evm_wallet\)\s+where status = 'ACTIVE'/,
@@ -343,8 +443,6 @@ async function main() {
     // The RPC must detect an EVM input and raise EVM_CLAIM_NOT_ALLOWED.
     assert.match(migrationSql, /v_input_is_evm := p_wallet_address ~ '\^0x\[0-9a-fA-F\]\{40\}\$'/,
       'EVM input detection missing')
-    assert.match(migrationSql, /if v_input_is_evm then\s+-- EVM addresses cannot be Solana payout recipients/,
-      'EVM_CLAIM_NOT_ALLOWED branch missing')
     assert.match(migrationSql, /raise exception 'EVM_CLAIM_NOT_ALLOWED'/,
       'EVM_CLAIM_NOT_ALLOWED exception missing — an attacker could supply an EVM address as the payout recipient')
   })

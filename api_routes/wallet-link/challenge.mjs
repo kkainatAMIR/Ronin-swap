@@ -44,11 +44,12 @@ export default async function handler(req, res) {
   const body = parseBody(req) || {}
   const solanaWallet = String(body.solanaWallet || body.solana_wallet || '').trim()
   const evmWallet = String(body.evmWallet || body.evm_wallet || '').trim()
-  const evmChainScopeRaw = body.evmChainScope ?? body.evm_chain_scope ?? null
-  // evmChainScope is informational: '1', '4663', or null = "all EVM chains".
-  const evmChainScope = evmChainScopeRaw == null
-    ? null
-    : String(evmChainScopeRaw).slice(0, 16)
+  // evm_chain_scope is intentionally NOT accepted. The link is between
+  // two wallet addresses — chain scope is irrelevant because an EVM
+  // address is one row in public.wallets regardless of which EVM chain
+  // it swapped on (chain_id lives on swap_transactions / samurai_points,
+  // not on wallets). See migration 20260926000000_wallet_links.sql for
+  // the rationale.
 
   if (!isValidSolanaAddress(solanaWallet)) {
     return apiError(res, 400, 'INVALID_SOLANA_WALLET',
@@ -60,7 +61,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const challenge = await createLinkChallenge({ solanaWallet, evmWallet, evmChainScope })
+    const challenge = await createLinkChallenge({ solanaWallet, evmWallet })
     return json(res, 200, {
       success: true,
       challengeId: challenge.challengeId,

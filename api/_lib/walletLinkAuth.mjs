@@ -159,7 +159,14 @@ function buildLinkMessage({ evmWallet, solanaWallet, nonce, challengeId, issuedA
 // The challenge row is inserted with status='PENDING'. The handler
 // returns the messages to the frontend so MetaMask/Phantom can sign
 // them. The signatures come back via /verify.
-export async function createLinkChallenge({ solanaWallet, evmWallet, evmChainScope = null }) {
+//
+// NOTE: evm_chain_scope is intentionally NOT a parameter. An EVM
+// address is one row in public.wallets regardless of which EVM chain
+// it swapped on (Ethereum chain_id=1, Robinhood chain_id=4663 — both
+// store samurai_points rows under the same wallet_id). A per-chain
+// scope on the link would split a single EVM identity without any
+// security benefit. The link is between two wallet addresses, period.
+export async function createLinkChallenge({ solanaWallet, evmWallet } = {}) {
   if (!isWalletLinkStoreConfigured()) {
     throw new Error('WALLET_LINK_STORE_UNAVAILABLE')
   }
@@ -194,7 +201,6 @@ export async function createLinkChallenge({ solanaWallet, evmWallet, evmChainSco
       nonce,
       solana_wallet: solanaCanonical,
       evm_wallet: evmCanonical,
-      evm_chain_scope: evmChainScope,
       message_evm: messageEvm,
       message_solana: messageSolana,
       expires_at: new Date(expiresAt).toISOString(),

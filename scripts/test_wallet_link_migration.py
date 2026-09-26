@@ -35,6 +35,90 @@ class TestWalletLinkMigration(unittest.TestCase):
             r"status text not null default 'ACTIVE'\s+check \(status in \('ACTIVE', 'REVOKED'\)\)",
         )
 
+    def test_evm_chain_scope_column_absent(self):
+        """Per architecture: an EVM address is one wallet row regardless of chain,
+        so evm_chain_scope on the link is unnecessary and misleading.
+
+        We check the CREATE TABLE block specifically (not the entire file)
+        because the migration's comments explain WHY the column was removed.
+        """
+        table_start = self.sql.find("create table if not exists public.wallet_links")
+        self.assertGreater(table_start, 0)
+        table_end = self.sql.find(");", table_start)
+        self.assertGreater(table_end, table_start)
+        create_table_block = self.sql[table_start:table_end]
+        self.assertNotIn("evm_chain_scope", create_table_block)
+
+    def test_wallet_point_consumption_table_exists(self):
+        """THE ACCOUNTING FIX: per-wallet consumption ledger that travels with
+        the wallet_id, not the link."""
+        self.assertIn("create table if not exists public.wallet_point_consumption", self.sql)
+        self.assertRegex(self.sql, r"wallet_id uuid not null references public\.wallets\(id\)")
+        self.assertRegex(self.sql, r"points_consumed numeric\(30, 6\) not null")
+        self.assertRegex(
+            self.sql,
+            r"source text not null default 'CLAIM'\s+check \(source in \('CLAIM', 'MIGRATION_BACKFILL', 'ADMIN_ADJUST'\)\)",
+        )
+
+    def test_wallet_point_consumption_unique_wallet_claim_index(self):
+        """One claim cannot consume the same wallet twice."""
+        self.assertRegex(
+            self.sql,
+            r"create unique index if not exists wallet_point_consumption_wallet_claim_uidx\s+on public\.wallet_point_consumption\(wallet_id, claim_id\)\s+where claim_id is not null",
+        )
+
+    def test_wallet_point_consumption_backfill_index_idempotent(self):
+        """Migration must be safe to re-run (idempotent backfill)."""
+        self.assertRegex(
+            self.sql,
+            r"create unique index if not exists wallet_point_consumption_backfill_uidx\s+on public\.wallet_point_consumption\(wallet_id\)\s+where source = 'MIGRATION_BACKFILL'",
+        )
+
+    def test_backfill_preserves_existing_claimed_points(self):
+        """Existing users with claimed_points > 0 must NOT have those claimed
+        points reset — they're backfilled into wallet_point_consumption."""
+        self.assertRegex(
+            self.sql,
+            r"insert into public\.wallet_point_consumption \(wallet_id, claim_id, points_consumed, source, consumed_at\)\s+select w\.id, null, w\.claimed_points, 'MIGRATION_BACKFILL', coalesce\(w\.updated_at, now\(\)\)\s+from public\.wallets w\s+where w\.claimed_points > 0\s+on conflict do nothing",
+        )
+
+    def test_get_wallet_reward_balance_uses_consumption_ledger(self):
+        """The balance RPC must use wallet_point_consumption as the authoritative
+        consumed-points source, not wallets.claimed_points."""
+        self.assertRegex(
+            self.sql,
+            r"select coalesce\(sum\(wpc\.points_consumed\), 0\) into v_consumed_points\s+from public\.wallet_point_consumption wpc",
+        )
+
+    def test_claim_reward_uses_consumption_ledger_for_claimable_math(self):
+        """The claimable-points math must use wallet_point_consumption across the
+        identity set, not wallets.claimed_points on the canonical Solana wallet."""
+        self.assertRegex(
+            self.sql,
+            r"select coalesce\(sum\(wpc\.points_consumed\), 0\) into consumed_points\s+from public\.wallet_point_consumption wpc",
+        )
+
+    def test_claim_reward_distributes_consumption_fifo(self):
+        """Claims must insert wallet_point_consumption rows in FIFO order across
+        identity wallets (Solana first, then EVMs by verified_at ASC)."""
+        self.assertRegex(self.sql, r"foreach v_wallet_id in v_wallet_ids_ordered")
+        self.assertRegex(
+            self.sql,
+            r"insert into public\.wallet_point_consumption \(wallet_id, claim_id, points_consumed, source\)\s+values \(v_wallet_id, p_claim_id, v_take, 'CLAIM'\)",
+        )
+
+    def test_unlink_does_not_touch_consumption_ledger(self):
+        """unlink_wallet must NOT delete or modify wallet_point_consumption rows —
+        otherwise unlinking would reset consumed points and re-introduce the
+        duplicate-claim bug."""
+        unlink_start = self.sql.find("create or replace function public.unlink_wallet(")
+        unlink_end = self.sql.find("revoke execute on function public.unlink_wallet(text, text)")
+        self.assertGreater(unlink_start, 0)
+        self.assertGreater(unlink_end, unlink_start)
+        unlink_body = self.sql[unlink_start:unlink_end]
+        self.assertNotIn("delete from public.wallet_point_consumption", unlink_body)
+        self.assertNotIn("update public.wallet_point_consumption", unlink_body)
+
     def test_evm_active_unique_partial_index(self):
         """An EVM wallet can only be ACTIVE-linked to one Solana wallet."""
         self.assertRegex(
