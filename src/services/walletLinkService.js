@@ -15,13 +15,18 @@
 // POST /api/wallet-link/challenge
 // Returns: { success, challengeId, nonce, solanaWallet, evmWallet,
 //           messageEvm, messageSolana, issuedAt, expiresAt, expiresIn }
-export async function createWalletLinkChallenge({ solanaWallet, evmWallet, evmChainScope = null }) {
+//
+// NOTE: evmChainScope is intentionally NOT accepted. The link is
+// between two wallet addresses, period — an EVM address is one row
+// in public.wallets regardless of which EVM chain it swapped on.
+// (See api_routes/wallet-link/challenge.mjs for the full rationale.)
+export async function createWalletLinkChallenge({ solanaWallet, evmWallet } = {}) {
   if (!solanaWallet) throw new Error('A Solana wallet address is required.')
   if (!evmWallet) throw new Error('An EVM wallet address is required.')
   const response = await fetch('/api/wallet-link/challenge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ solanaWallet, evmWallet, evmChainScope }),
+    body: JSON.stringify({ solanaWallet, evmWallet }),
     cache: 'no-store',
   })
   const body = await response.json().catch(() => ({}))

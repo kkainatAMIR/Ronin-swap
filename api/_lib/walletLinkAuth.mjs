@@ -226,8 +226,17 @@ export async function createLinkChallenge({ solanaWallet, evmWallet } = {}) {
 // NOT any message supplied by the frontend).
 export async function getPendingChallenge(challengeId) {
   if (!isWalletLinkStoreConfigured()) return null
+  // IMPORTANT: the `select=` clause must match the actual columns of
+  // wallet_link_challenges. The migration that defines this table
+  // (supabase/migrations/20260926000000_wallet_links.sql) does NOT
+  // include evm_chain_scope — that column was removed because an EVM
+  // address is one row in public.wallets regardless of which EVM chain
+  // it swapped on (chain_id lives on swap_transactions / samurai_points,
+  // not on wallets). If you add evm_chain_scope back to this select
+  // clause, Supabase will reject the request (400/PSQL error) and the
+  // verify handler will return 503 WALLET_LINK_STORE_UNAVAILABLE.
   const rows = await supabaseRequest(
-    `wallet_link_challenges?challenge_id=eq.${encodeURIComponent(challengeId)}&status=eq.PENDING&select=challenge_id,nonce,solana_wallet,evm_wallet,evm_chain_scope,message_evm,message_solana,expires_at,status&limit=1`,
+    `wallet_link_challenges?challenge_id=eq.${encodeURIComponent(challengeId)}&status=eq.PENDING&select=challenge_id,nonce,solana_wallet,evm_wallet,message_evm,message_solana,expires_at,status&limit=1`,
     { method: 'GET' }
   )
   if (!Array.isArray(rows) || rows.length === 0) return null
@@ -237,7 +246,6 @@ export async function getPendingChallenge(challengeId) {
     nonce: row.nonce,
     solanaWallet: row.solana_wallet,
     evmWallet: row.evm_wallet,
-    evmChainScope: row.evm_chain_scope,
     messageEvm: row.message_evm,
     messageSolana: row.message_solana,
     expiresAt: Date.parse(row.expires_at),
