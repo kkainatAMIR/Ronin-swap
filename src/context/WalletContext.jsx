@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { PublicKey } from '@solana/web3.js'
 import { demoProfile } from '../data'
 import { getRoninBalance, getRoninSupply, getLiveRoninStats } from '../services/roninService'
+import { getVerifiedRewardIdentity } from '../services/walletLinkService'
 
 const WalletContext = createContext(null)
 
@@ -77,6 +78,24 @@ export function WalletProvider({ children }) {
   // — a Solana address and a MetaMask address are different rows even
   // if they belong to the same user.
   const [evmWallets, setEvmWallets] = useState(readStoredEvmWallets)
+  // =====================================================================
+  // VERIFIED REWARD IDENTITY (backend-authoritative)
+  // =====================================================================
+  // The `evmWallets` state above is UI CONVENIENCE ONLY — it's pulled
+  // from localStorage and is NOT a proof of wallet ownership. The
+  // `verifiedEvmWallets` array below is loaded from the backend via
+  // /api/wallet-link/list and reflects ONLY cryptographically verified
+  // EVM wallets linked to the connected Phantom wallet. This is the
+  // list RewardClaimPanel and Profile should consult when reasoning
+  // about reward identity.
+  //
+  // `solanaPayoutWallet` is the canonical Solana payout wallet (it
+  // matches `wallet.address` for a non-demo Phantom connection, but
+  // is null if the user is on the demo profile).
+  // =====================================================================
+  const [verifiedEvmWallets, setVerifiedEvmWallets] = useState([])
+  const [solanaPayoutWallet, setSolanaPayoutWallet] = useState(null)
+  const [verifiedIdentityLoaded, setVerifiedIdentityLoaded] = useState(false)
   const [tokenSupplyState, setTokenSupplyState] = useState('loading')
   const [liveStats, setLiveStats] = useState(null)
   const [liveStatsState, setLiveStatsState] = useState('loading')
@@ -168,6 +187,45 @@ export function WalletProvider({ children }) {
       setWalletDataError(dataError?.message || 'The live $RONIN balance could not be read.')
     }
   }, [])
+
+  // =====================================================================
+  // VERIFIED REWARD IDENTITY LOADER
+  // =====================================================================
+  // Whenever the Phantom wallet connects (or switches account), call
+  // the backend to fetch the verified reward identity for this Solana
+  // wallet. The backend returns { solanaWallet, linkedEvmWallets[] }
+  // — NEVER a list the frontend supplied. localStorage is NOT consulted.
+  //
+  // `refreshLinkedWallets` is also called after a successful link/
+  // unlink so the rest of the UI immediately reflects the change.
+  // =====================================================================
+  const refreshLinkedWallets = useCallback(async () => {
+    const address = wallet?.address && !wallet?.isDemo ? wallet.address : null
+    if (!address) {
+      setVerifiedEvmWallets([])
+      setSolanaPayoutWallet(null)
+      setVerifiedIdentityLoaded(true)
+      return
+    }
+    try {
+      const identity = await getVerifiedRewardIdentity(address)
+      setVerifiedEvmWallets(Array.isArray(identity?.linkedEvmWallets) ? identity.linkedEvmWallets : [])
+      setSolanaPayoutWallet(identity?.solanaWallet || null)
+    } catch (loadError) {
+      // Don't break the wallet connection — the user can still see
+      // their own Solana balance and history. The reward UI will
+      // show a "could not load verified identity" state.
+      console.warn('Could not load verified reward identity:', loadError?.message)
+      setVerifiedEvmWallets([])
+      setSolanaPayoutWallet(address)
+    } finally {
+      setVerifiedIdentityLoaded(true)
+    }
+  }, [wallet?.address, wallet?.isDemo])
+
+  useEffect(() => {
+    refreshLinkedWallets()
+  }, [refreshLinkedWallets])
 
   useEffect(() => {
     if (!wallet || wallet.isDemo) return undefined
@@ -383,6 +441,17 @@ export function WalletProvider({ children }) {
     evmWallets,
     addEvmWallet,
     removeEvmWallet,
+    // =====================================================================
+    // VERIFIED REWARD IDENTITY (backend-authoritative)
+    // =====================================================================
+    // These come from /api/wallet-link/list and are the ONLY wallets
+    // the backend treats as part of the user's reward identity. Do
+    // NOT confuse with `evmWallets` (localStorage UI convenience).
+    // =====================================================================
+    verifiedEvmWallets,
+    solanaPayoutWallet: solanaPayoutWallet || (wallet?.address && !wallet?.isDemo ? wallet.address : null),
+    verifiedIdentityLoaded,
+    refreshLinkedWallets,
     // Convenience: returns ALL known wallet addresses (Phantom + EVM)
     // for the current user. Used by the Profile page to fetch
     // aggregated stats. The Phantom address comes first if connected.
@@ -416,7 +485,7 @@ export function WalletProvider({ children }) {
     },
     disconnect,
     notice,
-  }), [wallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, tokenSupply, tokenSupplyState, liveStats, liveStatsState, error, hasSolanaProvider, isMobileDevice, walletModalOpen, buyModalOpen, notice, refreshWalletData, evmWallets, addEvmWallet, removeEvmWallet])
+  }), [wallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, tokenSupply, tokenSupplyState, liveStats, liveStatsState, error, hasSolanaProvider, isMobileDevice, walletModalOpen, buyModalOpen, notice, refreshWalletData, evmWallets, addEvmWallet, removeEvmWallet, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded, refreshLinkedWallets])
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
 }

@@ -21,6 +21,7 @@
     "bip39": "^3.1.0",
     "dotenv": "^17.4.2",
     "ed25519-hd-key": "^2.0.0",
+    "ethers": "^6.17.0",
     "react": "latest",
     "react-dom": "latest",
     "uuid": "^9.0.1",

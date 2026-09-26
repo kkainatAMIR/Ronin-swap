@@ -72,6 +72,19 @@ export default async function handler(req, res) {
     // Numeric normalization so the frontend never has to deal with strings.
     return json(res, 200, {
       wallet_address: result.wallet_address,
+      // New verified-identity fields (added by the wallet_links migration).
+      // `input_wallet` is the wallet the caller passed in.
+      // `solana_payout_wallet` is the canonical verified Solana payout
+      //   wallet — identical to `wallet_address` when a verified
+      //   identity exists; null if the caller passed an unlinked EVM.
+      // `linked_evm_wallets` is the array of ACTIVE EVM wallets linked
+      //   to this Solana payout wallet (lowercase 0x...).
+      // `is_verified_identity` indicates whether the input wallet is
+      //   part of a verified link set.
+      input_wallet: result.input_wallet,
+      solana_payout_wallet: result.solana_payout_wallet,
+      linked_evm_wallets: Array.isArray(result.linked_evm_wallets) ? result.linked_evm_wallets : [],
+      is_verified_identity: Boolean(result.is_verified_identity),
       earned_points: Number(result.earned_points || 0),
       claimed_points: Number(result.claimed_points || 0),
       claimable_points: Number(result.claimable_points || 0),
