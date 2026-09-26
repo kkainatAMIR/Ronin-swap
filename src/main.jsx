@@ -9,6 +9,7 @@ import './burn-dashboard-overlay.css'
 import './swap-coming-soon.css'
 import './swap-page.css'
 import './shield-support.css'
+import './wallet-link.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

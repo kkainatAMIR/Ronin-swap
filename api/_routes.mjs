@@ -80,6 +80,11 @@ import swapVerify from '../api_routes/swap/verify.mjs'
 import swapRecord from '../api_routes/swap/record.mjs'
 import swapPoints from '../api_routes/swap/points.mjs'
 
+import walletLinkChallenge from '../api_routes/wallet-link/challenge.mjs'
+import walletLinkVerify from '../api_routes/wallet-link/verify.mjs'
+import walletLinkList from '../api_routes/wallet-link/list.mjs'
+import walletLinkRevoke, { revokeChallengeHandler as walletLinkRevokeChallenge } from '../api_routes/wallet-link/revoke.mjs'
+
 // ─── Route table ───
 // Keys are "METHOD /api/path". Values are the handler functions.
 //
@@ -192,6 +197,26 @@ export const ROUTES = {
   'POST /api/swap/verify':  swapVerify,
   'POST /api/swap/record':  swapRecord,
   'POST /api/swap/points':  swapPoints,
+
+  // ─── Wallet Link (cryptographic Solana↔EVM linking) ───
+  // 1. POST /api/wallet-link/challenge  – server creates a one-time-use
+  //    challenge (nonce + EVM/Solana messages)
+  // 2. POST /api/wallet-link/verify     – frontend submits both
+  //    signatures; backend verifies EIP-191 + ed25519, atomically
+  //    marks the challenge USED + inserts the wallet_links row
+  // 3. GET  /api/wallet-link/list       – read-only: returns the
+  //    verified reward identity (solana_wallet + linked_evm_wallets[])
+  //    for a given input wallet (Solana OR EVM). Never exposes
+  //    signatures or nonces.
+  // 4. GET  /api/wallet-link/revoke-challenge  – returns a fresh
+  //    revocation message for Phantom to sign
+  // 5. POST /api/wallet-link/revoke     – revokes an ACTIVE link
+  //    (requires fresh Solana signature)
+  'POST /api/wallet-link/challenge':         walletLinkChallenge,
+  'POST /api/wallet-link/verify':            walletLinkVerify,
+  'GET /api/wallet-link/list':               walletLinkList,
+  'GET /api/wallet-link/revoke-challenge':   walletLinkRevokeChallenge,
+  'POST /api/wallet-link/revoke':            walletLinkRevoke,
 }
 
 // Look up a route by method + path. Returns the handler function or null.

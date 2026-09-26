@@ -5,6 +5,7 @@ import { getAggregatedProfileData } from '../services/profileService'
 import { Button, ProgressBar, Sakura, SectionHeading, StatCard, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
 import RewardClaimPanel from '../components/RewardClaimPanel'
+import WalletLinkPanel from '../components/WalletLinkPanel'
 import './profile.css'
 
 const chainNames = { 101: 'Solana', 1: 'Ethereum', 4663: 'Robinhood Chain' }
@@ -113,7 +114,7 @@ function NotConnected({ onConnect }) {
 }
 
 export default function Profile() {
-  const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses } = useWallet()
+  const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded } = useWallet()
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
   const [error, setError] = useState('')
@@ -252,7 +253,50 @@ export default function Profile() {
         <StatCard stat={{ icon: 'swapVertical', label: 'TOTAL SWAPS', value: formatNumber(swaps), detail: 'Qualifying swaps' }} />
       </section>
 
-      <RewardClaimPanel wallet={wallet?.address || allWalletAddresses?.[0] || null} />
+      {/* RewardClaimPanel — always pass the verified Solana payout
+          wallet (not the localStorage-derived EVM list). The backend
+          resolves linked wallets from the database; the frontend never
+          supplies a list. */}
+      <RewardClaimPanel wallet={solanaPayoutWallet || wallet?.address || null} />
+
+      {/* Verified Reward Wallets section --------------------------------- */}
+      {/* Clearly separates "Connected wallets" (UI convenience from
+          localStorage + Phantom) from "Verified reward wallets"
+          (cryptographically linked via /api/wallet-link/*). The
+          difference matters: only the verified set is consulted by
+          the backend for reward aggregation. */}
+      {solanaPayoutWallet && (
+        <section className="profile-panel profile-verified-wallets-panel">
+          <SectionHeading
+            eyebrow="VERIFIED REWARD WALLETS"
+            title="Cryptographically linked wallets"
+            text="These wallets are part of your verified reward identity. Samurai Points earned by all of them are aggregated into your unified Solana reward balance."
+          />
+          <div className="profile-verified-wallets-list">
+            <div className="profile-verified-wallet-row profile-verified-wallet-solana">
+              <div className="profile-verified-wallet-label">
+                <Tag tone="green">SOLANA · PAYOUT</Tag>
+                <strong className="profile-wallet-addr">{short(solanaPayoutWallet)}</strong>
+              </div>
+              <small>SOL rewards are paid to this wallet</small>
+            </div>
+            {verifiedEvmWallets?.length > 0 ? (
+              verifiedEvmWallets.map((evm) => (
+                <div key={evm} className="profile-verified-wallet-row">
+                  <div className="profile-verified-wallet-label">
+                    <Tag tone="green">EVM · LINKED</Tag>
+                    <strong className="profile-wallet-addr">{short(evm)}</strong>
+                  </div>
+                  <small>Earns Samurai Points on Ethereum + Robinhood Chain</small>
+                </div>
+              ))
+            ) : (
+              <p className="profile-muted">No EVM wallets linked yet. Link an EVM wallet to include its points in your reward balance.</p>
+            )}
+          </div>
+          <WalletLinkPanel />
+        </section>
+      )}
 
       <section className="profile-main-grid">
         <div className="profile-panel profile-rank-panel"><SectionHeading eyebrow="THE WAY FORWARD" title="Rank progress" text={nextRank ? `${formatNumber(Math.max(0, Number(nextRank.minBalance || 0) - Number(profile?.balance || 0)))} RONIN until ${nextRank.name}.` : 'You hold the highest configured rank.'} /><div className="profile-rank-line"><strong>{currentRank?.name || 'Unranked'}</strong><span>{nextRank?.name || 'MAX RANK'}</span></div><ProgressBar value={rankProgress} rightLabel={`${rankProgress}%`} /><small className="profile-muted">Rank is calculated from the existing RONIN holding system.</small></div>

@@ -1,0 +1,230 @@
+/* Wallet Link Panel + Verified Wallets UI */
+
+.profile-wallet-link-panel,
+.profile-verified-wallets-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.profile-wallet-link-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 24px 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.profile-wallet-link-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.profile-wallet-link-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.profile-wallet-link-stat .profile-data-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.profile-wallet-link-stat strong {
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.profile-wallet-link-stat small {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.profile-wallet-link-addr {
+  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.profile-wallet-link-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-wallet-link-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+}
+
+.profile-wallet-link-list li small {
+  display: block;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.profile-wallet-link-flow {
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.profile-wallet-link-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.profile-wallet-link-step strong {
+  font-size: 14px;
+  display: block;
+}
+
+.profile-wallet-link-step small {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  display: block;
+  margin-top: 2px;
+}
+
+.profile-wallet-link-success,
+.profile-wallet-link-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  border-radius: 10px;
+}
+
+.profile-wallet-link-success {
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.3);
+}
+
+.profile-wallet-link-error {
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.25);
+}
+
+.profile-wallet-link-error-text {
+  font-size: 13px;
+  color: rgba(248, 100, 100, 0.9);
+  padding: 4px 0;
+}
+
+.profile-wallet-link-note {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Verified wallets list (Profile page) */
+.profile-verified-wallets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-verified-wallet-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+}
+
+.profile-verified-wallet-solana {
+  background: rgba(255, 200, 0, 0.04);
+  border-color: rgba(255, 200, 0, 0.18);
+}
+
+.profile-verified-wallet-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-verified-wallet-label .profile-wallet-addr {
+  font-family: 'Sarasa Mono SC', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.profile-verified-wallet-row small {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Reward panel verified-identity notices */
+.profile-rewards-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.profile-rewards-notice-warn {
+  background: rgba(248, 81, 73, 0.06);
+  border-color: rgba(248, 81, 73, 0.2);
+}
+
+.profile-rewards-notice-verified {
+  background: rgba(46, 160, 67, 0.06);
+  border-color: rgba(46, 160, 67, 0.22);
+}
+
+.profile-rewards-notice strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.profile-rewards-notice small {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Mobile adjustments */
+@media (max-width: 720px) {
+  .profile-wallet-link-grid {
+    grid-template-columns: 1fr;
+  }
+  .profile-wallet-link-list li {
+    grid-template-columns: 1fr auto;
+    row-gap: 6px;
+  }
+  .profile-wallet-link-list li button {
+    grid-column: 1 / -1;
+  }
+}
