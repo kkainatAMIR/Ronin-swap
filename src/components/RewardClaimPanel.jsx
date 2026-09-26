@@ -34,6 +34,14 @@ export default function RewardClaimPanel({ wallet }) {
   const [lastClaim, setLastClaim] = useState(null)
   const [activeClaimId, setActiveClaimId] = useState(null)
   const [showLinkPanel, setShowLinkPanel] = useState(false)
+  // Track retry/cancel operations on ENTITLED claims that got stuck
+  // (Phantom signed the tx but the confirm flow didn't complete).
+  const [retryingClaimId, setRetryingClaimId] = useState(null)
+  const [cancellingClaimId, setCancellingClaimId] = useState(null)
+  // The tx signature the user pastes for a manual retry (for when
+  // the frontend lost track of the signature after a Phantom sign).
+  const [retrySignatureInput, setRetrySignatureInput] = useState('')
+  const [retryError, setRetryError] = useState('')
 
   // The wallet passed in by Profile.jsx may be either:
   //   * the Phantom Solana address (preferred — that's the payout wallet)
@@ -123,9 +131,16 @@ export default function RewardClaimPanel({ wallet }) {
     try {
       // --- STEP 1: prepare ---
       setState('preparing')
+      console.info('[RewardClaimPanel] STEP 1: prepareRewardClaim', { wallet: effectiveWallet })
       const prepared = await prepareRewardClaim(effectiveWallet)
       claimId = prepared.claimId
       setActiveClaimId(claimId)
+      console.info('[RewardClaimPanel] STEP 1 done: prepared', {
+        claimId,
+        hasPartiallySignedTx: Boolean(prepared.partiallySignedTx),
+        pointsClaimed: prepared.pointsClaimed,
+        rewardAmountLamports: prepared.rewardAmountLamports,
+      })
 
       if (!prepared.partiallySignedTx) {
         throw new Error('The backend did not return a partially-signed transaction.')
@@ -133,13 +148,19 @@ export default function RewardClaimPanel({ wallet }) {
 
       // --- STEP 2: Phantom signs ---
       setState('signing')
+      console.info('[RewardClaimPanel] STEP 2: Phantom signTransaction')
       const partialTxBytes = Uint8Array.from(atob(prepared.partiallySignedTx), (c) => c.charCodeAt(0))
       const partialTx = Transaction.from(partialTxBytes)
       let signedTx
       try {
         signedTx = await provider.signTransaction(partialTx)
+        console.info('[RewardClaimPanel] STEP 2 done: signed', {
+          hasSignature: Boolean(signedTx?.signatures),
+          feePayer: signedTx?.feePayer?.toString?.(),
+        })
       } catch (signError) {
         // User rejected the Phantom popup — cancel the claim.
+        console.warn('[RewardClaimPanel] STEP 2 failed: user rejected', { message: signError?.message })
         if (claimId) {
           try { await cancelRewardClaim(claimId, `USER_REJECTED_SIGNATURE: ${signError?.message || ''}`) }
           catch (cancelErr) { console.warn('Failed to cancel rejected claim:', cancelErr?.message) }
@@ -152,28 +173,56 @@ export default function RewardClaimPanel({ wallet }) {
 
       // --- STEP 3: submit to Solana ---
       setState('submitting')
+      console.info('[RewardClaimPanel] STEP 3: sendSignedSolanaTransaction')
       const signedBytes = signedTx.serialize()
-      const signature = await sendSignedSolanaTransaction(signedBytes)
+      let signature
+      try {
+        signature = await sendSignedSolanaTransaction(signedBytes)
+        console.info('[RewardClaimPanel] STEP 3 done: submitted', { signature })
+      } catch (submitError) {
+        // The tx was signed but NOT submitted to Solana. The claim
+        // stays ENTITLED — the user can retry with the signature
+        // once they find it in Phantom's activity history.
+        console.error('[RewardClaimPanel] STEP 3 FAILED: tx not submitted', {
+          claimId,
+          message: submitError?.message,
+        })
+        setError(`Transaction was signed but could not be submitted to Solana: ${submitError?.message || 'unknown error'}. Your claim is ENTITLED — find the tx signature in Phantom's activity history and use "Retry confirm" below.`)
+        setActiveClaimId(null)
+        setState('idle')
+        await load()
+        return
+      }
 
       // --- STEP 4: wait for confirmation (frontend polls) ---
       setState('confirming')
+      console.info('[RewardClaimPanel] STEP 4: confirmSolanaTransaction (polling)', { signature })
       try {
         await confirmSolanaTransaction(signature, 90_000)
+        console.info('[RewardClaimPanel] STEP 4 done: confirmed on-chain')
       } catch (confirmError) {
         // The tx may still land — leave the claim ENTITLED and let the
         // user retry /claim-confirm later.
-        console.warn('Frontend confirmation timed out — backend will reconcile:', confirmError?.message)
+        console.warn('[RewardClaimPanel] STEP 4 timed out — backend will reconcile', {
+          signature,
+          message: confirmError?.message,
+        })
         setLastClaim({
           claim_tx_signature: signature,
           claim: prepared.claim,
           pending_confirmation: true,
-          message: 'Transaction submitted but confirmation timed out. The backend will verify it shortly.',
+          message: 'Transaction submitted but confirmation timed out. Click "Retry confirm" below to verify it now, or wait for the backend to reconcile.',
         })
         // Best-effort: call /claim-confirm in the background.
         try {
           await confirmRewardClaim(claimId, signature, effectiveWallet)
+          console.info('[RewardClaimPanel] background /claim-confirm succeeded')
         } catch (confirmRetryErr) {
-          console.warn('Background /claim-confirm failed (will need admin reconciliation):', confirmRetryErr?.message)
+          console.warn('[RewardClaimPanel] background /claim-confirm failed (will need manual retry)', {
+            message: confirmRetryErr?.message,
+            claimId,
+            signature,
+          })
         }
         await load()
         setActiveClaimId(null)
@@ -182,7 +231,12 @@ export default function RewardClaimPanel({ wallet }) {
       }
 
       // --- STEP 5: backend verifies + marks COMPLETED ---
+      console.info('[RewardClaimPanel] STEP 5: confirmRewardClaim (backend verify)', { claimId, signature })
       const confirmed = await confirmRewardClaim(claimId, signature, effectiveWallet)
+      console.info('[RewardClaimPanel] STEP 5 done: confirmed', {
+        success: confirmed.success,
+        payoutSucceeded: confirmed.payout_succeeded,
+      })
       setLastClaim({
         claim_tx_signature: signature,
         claim: confirmed.claim || prepared.claim,
@@ -195,8 +249,11 @@ export default function RewardClaimPanel({ wallet }) {
       setActiveClaimId(null)
       setState('idle')
     } catch (e) {
-      // On any unexpected error, try to cancel the in-flight claim so the
-      // user's points are restored. The /claim-cancel RPC is idempotent.
+      console.error('[RewardClaimPanel] claim flow FAILED', {
+        claimId,
+        message: e?.message,
+        code: e?.code,
+      })
       if (claimId) {
         try { await cancelRewardClaim(claimId, `FRONTEND_ERROR: ${e?.message || 'unknown'}`) }
         catch (cancelErr) { console.warn('Failed to cancel claim after error:', cancelErr?.message) }
@@ -204,6 +261,71 @@ export default function RewardClaimPanel({ wallet }) {
       setError(e?.message || 'The reward claim failed.')
       setState('error')
       setActiveClaimId(null)
+    }
+  }
+
+  // =====================================================================
+  // RETRY CONFIRM — for ENTITLED claims that got stuck
+  // =====================================================================
+  // When the user signs in Phantom but the frontend's submit/confirm
+  // flow doesn't complete (network glitch, RPC timeout, browser
+  // refresh), the claim stays ENTITLED in the DB. The user can:
+  //   1. Find the tx signature in Phantom's activity history
+  //   2. Paste it here
+  //   3. Click "Retry confirm" — calls /api/rewards/claim-confirm
+  //      which verifies the tx landed on Solana + marks the claim
+  //      COMPLETED
+  // =====================================================================
+  const handleRetryConfirm = async (claimId) => {
+    const signature = retrySignatureInput.trim()
+    if (!signature) {
+      setRetryError('Paste the Solana transaction signature from Phantom\'s activity history.')
+      return
+    }
+    setRetryingClaimId(claimId)
+    setRetryError('')
+    try {
+      console.info('[RewardClaimPanel] retry confirm', { claimId, signature })
+      const result = await confirmRewardClaim(claimId, signature, effectiveWallet)
+      console.info('[RewardClaimPanel] retry confirm done', { success: result.success, message: result.message })
+      setLastClaim({
+        claim_tx_signature: signature,
+        claim: result.claim,
+        message: result.message,
+        payout_succeeded: result.success,
+      })
+      setRetrySignatureInput('')
+      await load()
+    } catch (e) {
+      console.error('[RewardClaimPanel] retry confirm failed', { claimId, message: e?.message, code: e?.code })
+      setRetryError(e?.message || 'Could not verify the transaction. Make sure the signature is correct and the transaction landed on Solana.')
+    } finally {
+      setRetryingClaimId(null)
+    }
+  }
+
+  // =====================================================================
+  // CANCEL CLAIM — revert an ENTITLED claim + restore claimed_points
+  // =====================================================================
+  // If the tx never landed on Solana (user closed Phantom, network
+  // failed, etc.), the user can cancel the ENTITLED claim to restore
+  // their claimed_points so they can try again.
+  // =====================================================================
+  const handleCancelClaim = async (claimId) => {
+    if (!window.confirm('Cancel this claim? Your claimed points will be restored so you can claim again.')) return
+    setCancellingClaimId(claimId)
+    setRetryError('')
+    try {
+      console.info('[RewardClaimPanel] cancel claim', { claimId })
+      await cancelRewardClaim(claimId, 'USER_MANUAL_CANCEL_FROM_UI')
+      console.info('[RewardClaimPanel] cancel claim done')
+      setRetrySignatureInput('')
+      await load()
+    } catch (e) {
+      console.error('[RewardClaimPanel] cancel claim failed', { claimId, message: e?.message })
+      setRetryError(e?.message || 'Could not cancel the claim.')
+    } finally {
+      setCancellingClaimId(null)
     }
   }
 
@@ -390,7 +512,7 @@ export default function RewardClaimPanel({ wallet }) {
           <span className="profile-data-label">RECENT CLAIMS</span>
           <ul className="profile-reclaims-list">
             {balance.recent_claims.slice(0, 5).map((claim) => (
-              <li key={claim.claim_id}>
+              <li key={claim.claim_id} className={claim.status === 'ENTITLED' ? 'profile-reclaim-entitled' : ''}>
                 <div>
                   <strong>{Number(claim.points_claimed).toLocaleString('en-US', { maximumFractionDigits: 2 })} SP</strong>
                   <span>→ {formatRewardAmount(claim.reward_amount, claim.reward_asset)}</span>
@@ -406,9 +528,48 @@ export default function RewardClaimPanel({ wallet }) {
                   </Tag>
                   <small>{new Date(claim.claimed_at || claim.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</small>
                 </div>
+                {/* Retry/Cancel actions for ENTITLED claims that got stuck */}
+                {claim.status === 'ENTITLED' && (
+                  <div className="profile-reclaim-actions">
+                    <input
+                      type="text"
+                      className="profile-reclaim-sig-input"
+                      placeholder="Paste tx signature from Phantom activity history"
+                      value={retryingClaimId === claim.claim_id ? retrySignatureInput : ''}
+                      onChange={(e) => setRetrySignatureInput(e.target.value)}
+                      disabled={retryingClaimId === claim.claim_id || cancellingClaimId === claim.claim_id}
+                    />
+                    <Button
+                      variant="primary"
+                      icon="refresh"
+                      disabled={retryingClaimId === claim.claim_id || cancellingClaimId === claim.claim_id}
+                      onClick={() => handleRetryConfirm(claim.claim_id)}
+                    >
+                      {retryingClaimId === claim.claim_id ? 'Verifying…' : 'Retry confirm'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      icon="close"
+                      disabled={retryingClaimId === claim.claim_id || cancellingClaimId === claim.claim_id}
+                      onClick={() => handleCancelClaim(claim.claim_id)}
+                    >
+                      {cancellingClaimId === claim.claim_id ? 'Cancelling…' : 'Cancel claim'}
+                    </Button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
+          {retryError && (
+            <p className="profile-reclaim-error-text">
+              <Icon name="info" size={14} /> {retryError}
+            </p>
+          )}
+          {balance.recent_claims.some((c) => c.status === 'ENTITLED') && (
+            <p className="profile-reclaim-help-text">
+              <Icon name="info" size={12} /> ENTITLED means the claim was created but not yet completed. If you signed in Phantom but nothing happened, find the transaction in Phantom's activity history, paste the signature above, and click "Retry confirm". If the transaction never landed, click "Cancel claim" to restore your points.
+            </p>
+          )}
         </div>
       )}
 

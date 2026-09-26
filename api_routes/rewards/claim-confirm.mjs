@@ -198,11 +198,18 @@ export default async function handler(req, res) {
 
   // Poll Solana for the tx (up to 30s).
   const connection = getRewardsConnection()
+  console.info('[claim-confirm] polling Solana for tx', { claimId, signature, wallet: expectedRecipient })
   const pollResult = await pollTransaction(connection, signature)
+  console.info('[claim-confirm] poll result', {
+    claimId,
+    status: pollResult.status,
+    hasTxInfo: Boolean(pollResult.txInfo),
+  })
 
   if (pollResult.status === 'not_found') {
     // Tx not yet landed. The claim stays ENTITLED — the user can retry
     // /claim-confirm later. Don't revert: the tx might still land.
+    console.warn('[claim-confirm] tx not found on Solana (may still land)', { claimId, signature })
     return json(res, 200, {
       success: false,
       pending: true,
@@ -215,16 +222,27 @@ export default async function handler(req, res) {
   // Verify the on-chain tx actually called our claim_reward instruction
   // and that the recipient's balance increased.
   const verification = verifyTxMatchesClaim(pollResult.txInfo, expectedRecipient, RONIN_REWARDS_PROGRAM_ID)
+  console.info('[claim-confirm] tx verification', {
+    claimId,
+    ok: verification.ok,
+    reason: verification.reason,
+    recipientIdx: verification.recipientIdx,
+    preBalance: verification.preBalance,
+    postBalance: verification.postBalance,
+  })
   if (!verification.ok) {
     // The tx exists but doesn't match our claim. Revert.
+    console.warn('[claim-confirm] tx verification FAILED — reverting claim', { claimId, reason: verification.reason })
     await safeRevertFailedClaim(claimId, `TX_VERIFICATION_FAILED: ${verification.reason}`)
     return apiError(res, 422, 'TX_VERIFICATION_FAILED',
       `The on-chain transaction did not match the expected claim. Reason: ${verification.reason}. The claim has been reverted.`)
   }
 
   // Tx confirmed + verified. Transition ENTITLED → PENDING_PAYOUT → COMPLETED.
+  console.info('[claim-confirm] tx verified — marking PENDING_PAYOUT', { claimId })
   try {
     await callSupabaseRpc('mark_reward_claim_pending_payout', { p_claim_id: claimId })
+    console.info('[claim-confirm] mark_pending_payout done', { claimId })
   } catch (error) {
     // If the claim was already COMPLETED or PENDING, mark_pending_payout
     // is idempotent — it returns the existing row. Only fail on hard errors.
@@ -239,6 +257,7 @@ export default async function handler(req, res) {
       p_claim_tx_signature: signature,
       p_failure_reason: null,
     })
+    console.info('[claim-confirm] marked COMPLETED', { claimId, signature })
   } catch (error) {
     // The on-chain payout DID succeed — we have a signature. The DB
     // status update failed (transient Supabase error). The claim is
