@@ -488,6 +488,46 @@
 .tok-ronin { background: var(--red); }
 .tok-empty { background: var(--cream-deep, #e8ddd0); color: var(--muted, #6b6560); }
 
+/* Loading placeholder for TokenMark — shown while the parallel logo
+   preload race is in flight. Prevents layout reflow on the trending
+   grid when logos pop in. Has a subtle pulse animation so it doesn't
+   look like a dead pixel. */
+.tok-loading {
+  background: linear-gradient(110deg,
+    rgba(255,255,255,0.06) 0%,
+    rgba(255,255,255,0.12) 40%,
+    rgba(255,255,255,0.06) 60%);
+  background-size: 200% 100%;
+  animation: tok-loading-pulse 1.2s ease-in-out infinite;
+  border-radius: 50%;
+  display: inline-block;
+}
+@keyframes tok-loading-pulse {
+  0% { background-position: 100% 0%; opacity: 0.7; }
+  50% { background-position: 0% 0%; opacity: 1; }
+  100% { background-position: -100% 0%; opacity: 0.7; }
+}
+
+/* Pinned-token badge (★ RONIN) on trending + popular token cards.
+   Highlights the project's native token wherever it appears. */
+.swap-token-pinned {
+  display: block;
+  color: var(--gold, #d4a017);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+
+/* Muted hint shown for pinned tokens with no live price data
+   (e.g. synthesized RONIN entry on a low-activity day). */
+.swap-token-muted {
+  display: block;
+  color: rgba(255,255,255,0.45);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .swap-field-foot {
   display: flex;
   align-items: center;

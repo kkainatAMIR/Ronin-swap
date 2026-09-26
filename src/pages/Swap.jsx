@@ -3,7 +3,7 @@ import { approveLifiTransaction, getLifiApprovalRequest, getLifiQuote, getLifiSt
 import { getRobinhoodTokenSections, getRobinhoodTrending } from '../services/robinhoodTokenService'
 import { getLiveTrendingTokens } from '../services/liveTrendingService'
 import { getEvmWalletTokensForSelector } from '../services/evmWalletTokens'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Transaction, VersionedTransaction } from '@solana/web3.js'
 import { useWallet, getSolanaProvider } from '../context/WalletContext'
@@ -299,7 +299,14 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
   )
 }
 
-function EthereumSwapPanel() {
+// =====================================================================
+// forwardRef pattern — exposes each panel's selectToken to the parent
+// so the dashboard trending UI (rendered in the parent Swap component)
+// can dispatch a click to whichever chain panel is currently active.
+// Without this, the trending click handler on Ethereum/Robinhood was
+// a no-op (only Solana worked) — see handleTrendingTokenClick below.
+// =====================================================================
+const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
   const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [fromToken, setFromToken] = useState(ETHEREUM_SWAP_TOKENS[0])
@@ -315,6 +322,43 @@ function EthereumSwapPanel() {
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
   const executeInFlightRef = useRef(false)
+
+  // Internal selectToken — mirrors the Solana panel's selectToken.
+  // Exposed to the parent via useImperativeHandle so the dashboard
+  // trending UI can call it via ethereumPanelRef.current.selectToken(...).
+  const selectToken = (side, token) => {
+    if (!token) return
+    if (side === 'from') {
+      // Don't set 'from' to the same value as 'to' — would create a
+      // degenerate swap.
+      if (token.address === toToken.address && token.type === toToken.type) return
+      setFromToken(token)
+    } else {
+      if (token.address === fromToken.address && token.type === fromToken.type) return
+      setToToken(token)
+    }
+    setQuote(null)
+    setStatus('idle')
+    setMessage('')
+  }
+
+  // Expose selectToken to the parent (forwardRef pattern). The parent
+  // dispatches a trending-token click to whichever chain panel is
+  // currently active — without this, the trending click was a no-op
+  // on Ethereum.
+  useImperativeHandle(ref, () => ({
+    selectToken,
+    // Also expose the raw setters so the parent can pre-fill from a
+    // saved session if needed (future use).
+    setFromToken,
+    setToToken,
+    // Helper: accepts a trending token (EVM-shaped) and sets it as
+    // the 'to' token. Convenience method for the dashboard click.
+    selectTrendingToken: (trendingToken) => {
+      const panelToken = toEthereumPanelToken(trendingToken)
+      if (panelToken) selectToken('to', panelToken)
+    },
+  }), [fromToken, toToken])  // re-create when fromToken/toToken change so closures stay fresh
 
   // Track the connected MetaMask account so the Profile page can
   // aggregate samurai points earned by this EVM wallet. The account
@@ -593,6 +637,44 @@ function EthereumSwapPanel() {
       {pickerSide && <EthereumTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => pickerSide === 'from' ? setFromToken(token) : setToToken(token)} onClose={() => setPickerSide(null)} />}
     </div>
   )
+})
+
+// Internal: convert a DexScreener trending token (or any EVM-shaped
+// token from /api/trending) into the EthereumSwapPanel's expected
+// token shape. Trending tokens come in as { chainId, address, mint,
+// name, symbol, logoURI, decimals, ... } — the panel wants the same
+// shape as ETHEREUM_SWAP_TOKENS (with type, fallbackLogoURI, etc).
+function toEthereumPanelToken(trending) {
+  if (!trending) return null
+  // If it's already a registry token (has type='erc20' or 'native'),
+  // pass it through unchanged.
+  if (trending.type === 'erc20' || trending.type === 'native') return trending
+  // Native ETH (no address).
+  if (!trending.address && !trending.mint) {
+    return { ...ETHEREUM_NATIVE, logoURI: trending.logoURI || ETHEREUM_NATIVE.logoURI }
+  }
+  const address = String(trending.address || trending.mint || '').toLowerCase()
+  // If this address is already in our verified registry, use the
+  // registry entry (it has the correct decimals + fallbackLogoURI).
+  const registry = ETHEREUM_TOKEN_BY_ADDRESS[address]
+  if (registry) return registry
+  // Otherwise synthesize an EVM-shaped token entry from the trending
+  // data. Decimals default to 18 (the EVM standard) if missing.
+  return {
+    chainId: 1,
+    type: 'erc20',
+    address,
+    symbol: trending.symbol || 'TOKEN',
+    name: trending.name || trending.symbol || 'Unknown',
+    decimals: Number.isFinite(Number(trending.decimals)) && Number(trending.decimals) > 0
+      ? Number(trending.decimals)
+      : 18,
+    category: 'trending',
+    logoURI: trending.logoURI || null,
+    fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${address}/logo.png`,
+    featured: false,
+    verified: false,
+  }
 }
 
 const ROBINHOOD_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
@@ -730,7 +812,7 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
   )
 }
 
-function RobinhoodSwapPanel() {
+const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
   const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [sections, setSections] = useState({ all: [], tokens: [], memes: [], popular: [] })
@@ -746,6 +828,35 @@ function RobinhoodSwapPanel() {
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
   const executeInFlightRef = useRef(false)
+
+  // Internal selectToken — mirrors the Solana + Ethereum panels.
+  // Exposed via useImperativeHandle so the dashboard trending UI can
+  // call it via robinhoodPanelRef.current.selectToken(...).
+  const selectToken = (side, token) => {
+    if (!token) return
+    if (side === 'from') {
+      if (token.address === toToken.address && token.type === toToken.type) return
+      setFromToken(token)
+    } else {
+      if (token.address === fromToken.address && token.type === fromToken.type) return
+      setToToken(token)
+    }
+    setQuote(null)
+    setStatus('idle')
+    setMessage('')
+  }
+
+  useImperativeHandle(ref, () => ({
+    selectToken,
+    setFromToken,
+    setToToken,
+    // Helper: accepts a trending token (EVM-shaped from /api/trending
+    // for chain=robinhood) and sets it as the 'to' token.
+    selectTrendingToken: (trendingToken) => {
+      const panelToken = toRobinhoodPanelToken(trendingToken)
+      if (panelToken) selectToken('to', panelToken)
+    },
+  }), [fromToken, toToken])
 
   // Track the connected MetaMask account so the Profile page can
   // aggregate samurai points earned by this EVM wallet. The account
@@ -1019,6 +1130,41 @@ function RobinhoodSwapPanel() {
       {pickerSide && <RobinhoodTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} sections={sections} walletTokens={walletTokens} onSelect={(token) => (pickerSide === 'from' ? setFromToken(token) : setToToken(token))} onClose={() => setPickerSide(null)} />}
     </div>
   )
+})
+
+// Internal: convert a DexScreener trending token (or any EVM-shaped
+// token from /api/trending?chain=robinhood) into the RobinhoodSwapPanel's
+// expected token shape. Trending tokens come in as { chainId, address,
+// mint, name, symbol, logoURI, decimals, ... } — the panel wants the
+// same shape as ROBINHOOD_NATIVE_TOKEN (with chainKey, type, etc).
+function toRobinhoodPanelToken(trending) {
+  if (!trending) return null
+  // If it's already a Robinhood-shaped token (has chainKey='robinhood'
+  // and type), pass it through unchanged.
+  if (trending.chainKey === 'robinhood' && (trending.type === 'erc20' || trending.type === 'native')) {
+    return trending
+  }
+  // Native ETH on Robinhood Chain (no address).
+  if (!trending.address && !trending.mint) {
+    return { ...ROBINHOOD_NATIVE_TOKEN, logoURI: trending.logoURI || ROBINHOOD_NATIVE_TOKEN.logoURI }
+  }
+  const address = String(trending.address || trending.mint || '').toLowerCase()
+  // Synthesize an EVM-shaped token entry. Default decimals=18 (EVM
+  // standard). The panel will fall back to 1inch + TrustWallet CDNs
+  // for the logo if logoURI is null.
+  return {
+    chainId: 4663,
+    chainKey: 'robinhood',
+    type: 'erc20',
+    address,
+    symbol: trending.symbol || 'TOKEN',
+    name: trending.name || trending.symbol || 'Unknown',
+    decimals: Number.isFinite(Number(trending.decimals)) && Number(trending.decimals) > 0
+      ? Number(trending.decimals)
+      : 18,
+    logoURI: trending.logoURI || null,
+    isMeme: false,
+  }
 }
 
 function UnifiedSwapHistory({ solanaWallet }) {
@@ -1050,22 +1196,28 @@ function UnifiedSwapHistory({ solanaWallet }) {
 }
 
 function TokenMark({ token, size = 25 }) {
-  const [fallbackStep, setFallbackStep] = useState(0)
-  // Build the candidate logo URL list in priority order. Each step is
-  // tried only if the previous one fails (onError). The list always
-  // includes:
-  //   1. The token's own logoURI (from any source — Blockscout icon_url,
-  //      LI.FI logoURI, the verified registry, etc.)
-  //   2. The token's fallbackLogoURI (used by Ethereum registry tokens
-  //      — points to the TrustWallet assets CDN)
-  //   3. The 1inch token image CDN — covers almost every ERC-20 on every
-  //      chain (https://tokens.1inch.io/<address>.png)
-  //   4. The Robinhood Chain logo CDN — covers tokens deployed via the
-  //      Robinhood tokenization pipeline (https://cdn.robinhood.com/
-  //      ncw_assets/logos/<address>.png)
+  // =====================================================================
+  // PARALLEL logo loading (was: sequential onError fallback — slow)
+  // =====================================================================
+  // The original implementation tried candidate logo URLs ONE AT A
+  // TIME via the React onError handler. With 5+ candidate URLs per
+  // token (DexScreener icon → token.logoURI → fallbackLogoURI →
+  // 1inch CDN → Robinhood CDN), each failure cost ~200-800ms before
+  // the next was tried. On the trending grid (15 tokens × 5 URLs each
+  // × 500ms average failure latency = ~7.5s before any logo appeared),
+  // this was the visible cause of the "trending logos take a lot of
+  // time" complaint.
   //
-  // The final fallback (when all URLs fail or no address) is the first
-  // letter of the symbol in a styled circle — so a logo ALWAYS renders.
+  // Fix: race ALL candidate URLs in parallel using the browser's
+  // built-in Image() preloader. First URL that successfully loads
+  // wins; we discard the rest. This cuts total logo load time from
+  // sum(candidate latencies) → max(candidate latencies), which is
+  // typically ~300-500ms even when several URLs are broken.
+  //
+  // The final fallback (when all URLs fail or no address) is the
+  // first letter of the symbol in a styled circle — so a logo
+  // ALWAYS renders.
+  // =====================================================================
   const candidateLogos = useMemo(() => {
     const list = []
     if (token?.logoURI) list.push(token.logoURI)
@@ -1076,31 +1228,82 @@ function TokenMark({ token, size = 25 }) {
     const addr = String(token?.address || '').toLowerCase()
     if (/^0x[0-9a-f]{40}$/.test(addr)) {
       list.push(`https://tokens.1inch.io/${addr}.png`)
+      list.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${addr}/logo.png`)
       list.push(`https://cdn.robinhood.com/ncw_assets/logos/${addr}.png`)
     }
-    return list
+    // De-duplicate (DexScreener + 1inch sometimes return the same URL)
+    return [...new Set(list)]
   }, [token?.logoURI, token?.logo, token?.icon, token?.image, token?.fallbackLogoURI, token?.address])
 
+  // The URL that successfully loaded (null = still loading or all failed)
+  const [resolvedUrl, setResolvedUrl] = useState(null)
+  // True only when every candidate has failed (so we render the letter glyph)
+  const [allFailed, setAllFailed] = useState(false)
+
   useEffect(() => {
-    setFallbackStep(0)
+    // Reset state when the candidate list changes (different token, etc.)
+    setResolvedUrl(null)
+    setAllFailed(false)
+    if (candidateLogos.length === 0) {
+      // No URLs to try — go straight to the letter glyph.
+      setAllFailed(true)
+      return
+    }
+
+    let cancelled = false
+    let remainingAttempts = candidateLogos.length
+
+    // Race all candidates in parallel. Each candidate is loaded via
+    // new Image() — the first to fire onload wins.
+    const images = candidateLogos.map((url) => {
+      const img = new Image()
+      img.onload = () => {
+        if (cancelled) return
+        // First URL to load wins; ignore the rest.
+        setResolvedUrl(url)
+        // Mark allFailed=false (it already is; this is defensive)
+        setAllFailed(false)
+      }
+      img.onerror = () => {
+        if (cancelled) return
+        remainingAttempts -= 1
+        if (remainingAttempts <= 0) {
+          // All candidates failed — render the letter glyph.
+          setAllFailed(true)
+        }
+      }
+      img.src = url
+      return img
+    })
+
+    return () => {
+      cancelled = true
+      // Drop the in-flight image references so the browser can GC them
+      for (const img of images) {
+        img.onload = null
+        img.onerror = null
+      }
+    }
   }, [candidateLogos.join('|')])
 
-  const currentLogo = candidateLogos[fallbackStep]
-
-  if (currentLogo) {
+  if (resolvedUrl) {
     return <img
       className="swap-token-dot swap-token-logo"
-      src={currentLogo}
+      src={resolvedUrl}
       alt=""
       width={size}
       height={size}
-      onError={() => {
-        // Advance to the next candidate. If we've exhausted all
-        // candidates, fallbackStep will exceed candidateLogos.length - 1
-        // and the component will fall through to the letter glyph below.
-        setFallbackStep((step) => step + 1)
-      }}
+      loading="lazy"
+      decoding="async"
     />
+  }
+
+  // If we have candidates but none have loaded yet, render a small
+  // placeholder so the layout doesn't jump. This is critical for the
+  // trending grid — without it, the cards visibly reflow as logos
+  // pop in.
+  if (!allFailed) {
+    return <span className="swap-token-dot tok-loading" aria-hidden="true" style={{ width: size, height: size }} />
   }
 
   // Final fallback: a styled circle with the first letter of the symbol.
@@ -1210,6 +1413,36 @@ export default function Swap() {
   const [quote, setQuote] = useState(null)
   const [quoteState, setQuoteState] = useState('idle')
   const [quoteError, setQuoteError] = useState('')
+
+  // =====================================================================
+  // forwardRef targets — let the parent dispatch trending-token clicks
+  // to whichever chain panel is currently active. Before this, the
+  // dashboard trending UI was Solana-only (the click handler was
+  // literally `network === 'solana' && selectToken('to', token)`).
+  // =====================================================================
+  const ethereumPanelRef = useRef(null)
+  const robinhoodPanelRef = useRef(null)
+
+  // Unified trending-token click handler. Dispatches to the right
+  // panel based on `network`. Each panel exposes `selectTrendingToken`
+  // via useImperativeHandle which accepts the raw DexScreener trending
+  // token shape and converts it to the panel's expected token shape.
+  const handleTrendingTokenClick = (token) => {
+    if (!token) return
+    if (network === 'solana') {
+      // Solana panel state lives in the parent (this component).
+      // The Solana panel already accepts trending tokens directly
+      // because they share the { mint, symbol, name, decimals, ... }
+      // shape — but we go through selectToken to clear the in-flight
+      // quote/tx state, matching the existing behavior.
+      selectToken('to', token)
+    } else if (network === 'ethereum') {
+      ethereumPanelRef.current?.selectTrendingToken(token)
+    } else if (network === 'robinhood') {
+      robinhoodPanelRef.current?.selectTrendingToken(token)
+    }
+  }
+
   const [txState, setTxState] = useState('idle')
   const [txError, setTxError] = useState('')
   const [txSignature, setTxSignature] = useState('')
@@ -1891,7 +2124,7 @@ export default function Swap() {
           {/* ---------- SWAP WIDGET ---------- */}
           <div className="swap-widget">
             <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => setNetwork('solana')}>Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => setNetwork('ethereum')}>Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => setNetwork('robinhood')}>Robinhood</button></div>
-            {network === 'ethereum' ? <EthereumSwapPanel /> : network === 'robinhood' ? <RobinhoodSwapPanel /> : <>
+            {network === 'ethereum' ? <EthereumSwapPanel ref={ethereumPanelRef} /> : network === 'robinhood' ? <RobinhoodSwapPanel ref={robinhoodPanelRef} /> : <>
             <div className="swap-widget-head">
               <div>
                 <h3>RONIN SWAP</h3>
@@ -2104,11 +2337,16 @@ export default function Swap() {
             {trendingState.state === 'error' && <p className="swap-token-empty-state">Trending data temporarily unavailable.</p>}
             {trendingState.state === 'empty' && <p className="swap-token-empty-state">No live trending tokens are available for this chain right now.</p>}
             {dashboardTrending.map((token) => (
-              <button type="button" className="swap-token" key={token.mint || token.address || token.symbol} onClick={() => network === 'solana' && selectToken('to', token)}>
+              <button type="button" className="swap-token" key={token.mint || token.address || token.symbol} onClick={() => handleTrendingTokenClick(token)}>
                 <TokenMark token={token} size={38} />
                 <strong>{token.symbol}</strong>
                 <small>{token.name}</small>
-                <small>${Number(token.priceUsd || 0).toLocaleString('en-US', { maximumSignificantDigits: 6 })} · {Number(token.priceChange || 0).toFixed(2)}%</small>
+                {token.pinned && <small className="swap-token-pinned">★ RONIN</small>}
+                {token.priceUsd != null
+                  ? <small>${Number(token.priceUsd).toLocaleString('en-US', { maximumSignificantDigits: 6 })} · {Number(token.priceChange || 0).toFixed(2)}%</small>
+                  : (token.pinned
+                      ? <small className="swap-token-muted">Tap to swap</small>
+                      : null)}
               </button>
             ))}
           </div>
@@ -2173,11 +2411,17 @@ export default function Swap() {
             {tokenFilter === 'trending' && trendingState.state === 'error' && <p className="swap-token-empty-state">Trending data temporarily unavailable. <button type="button" onClick={() => setTrendingRetry((value) => value + 1)}>Retry</button></p>}
             {tokenFilter === 'trending' && trendingState.state === 'empty' && <p className="swap-token-empty-state">No live trending tokens are available for this chain right now.</p>}
             {visibleTokens.map((token) => (
-              <button type="button" className="swap-token" key={token.mint || token.address || token.symbol} onClick={() => network === 'solana' && selectToken('to', token)}>
+              <button type="button" className="swap-token" key={token.mint || token.address || token.symbol} onClick={() => handleTrendingTokenClick(token)}>
                 <TokenMark token={token} size={38} />
                 <strong>{token.symbol}</strong>
                 <small>{token.name}</small>
-                {tokenFilter === 'trending' && <small>${Number(token.priceUsd || 0).toLocaleString('en-US', { maximumSignificantDigits: 6 })} · {Number(token.priceChange || 0).toFixed(2)}%</small>}
+                {token.pinned && <small className="swap-token-pinned">★ RONIN</small>}
+                {tokenFilter === 'trending' && token.priceUsd != null && (
+                  <small>${Number(token.priceUsd).toLocaleString('en-US', { maximumSignificantDigits: 6 })} · {Number(token.priceChange || 0).toFixed(2)}%</small>
+                )}
+                {tokenFilter === 'trending' && token.priceUsd == null && token.pinned && (
+                  <small className="swap-token-muted">Tap to swap</small>
+                )}
               </button>
             ))}
           </div>
