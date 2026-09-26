@@ -277,9 +277,21 @@ export default function RewardClaimPanel({ wallet }) {
   //      COMPLETED
   // =====================================================================
   const handleRetryConfirm = async (claimId) => {
-    const signature = retrySignatureInput.trim()
+    // Strip whitespace + surrounding quotes from the pasted signature.
+    // When users copy a signature from the browser console, it often
+    // includes extra quotes: '"2sqFToS1...sNp"' — which the backend
+    // rejects as INVALID_SIGNATURE because " is not valid base58.
+    const rawSignature = retrySignatureInput.trim()
+    const signature = rawSignature
+      .replace(/^["'`]+/, '')   // strip leading quotes
+      .replace(/["'`]+$/, '')   // strip trailing quotes
+      .trim()
     if (!signature) {
-      setRetryError('Paste the Solana transaction signature from Phantom\'s activity history.')
+      setRetryError('Paste the Solana transaction signature from Phantom\'s activity history. Make sure there are no extra quotes around it.')
+      return
+    }
+    if (!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature)) {
+      setRetryError('The signature contains invalid characters. Make sure you copied ONLY the base58 string (no quotes, no spaces). It should be 64-88 characters of letters and numbers.')
       return
     }
     setRetryingClaimId(claimId)
