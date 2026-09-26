@@ -18,3 +18,19 @@ program/programs/*/ronin_rewards-keypair.json
 program/**/*-keypair.json
 program/.anchor/
 program/test-ledger/
+
+# Environment-internal files — never commit these to the public repo.
+# They get auto-committed by the dev container; this section ensures
+# they're ignored even if someone manually tries to add them.
+skills/
+download/
+worklog.md
+tool-results/
+.tmp-*
+__probe_*
+__audit_*
+__admin_local_test*
+__final_verify*
+__enable_platform_fee_db*
+__fix_points_minimum*
+.tmp_*
