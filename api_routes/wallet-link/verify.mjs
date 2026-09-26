@@ -137,6 +137,22 @@ export default async function handler(req, res) {
     })
   } catch (error) {
     const code = error?.code || error?.message || 'LINK_RPC_FAILED'
+    // DIAGNOSTIC LOG: log the specific RPC failure code + the
+    // challenge_id so we can see exactly which 409 path is firing.
+    // This shows up in the dev server terminal (the terminal where
+    // you ran `npm run dev`). Safe — no signature/nonce data is
+    // logged, just the challenge_id and the error code.
+    console.warn('[wallet-link/verify] RPC raised', {
+      challengeId,
+      code,
+      status: error?.status,
+      message: error?.message,
+      // PostgREST may include the underlying PG error in body.
+      // Truncate to keep the log readable.
+      bodyPreview: error?.body
+        ? JSON.stringify(error.body).slice(0, 300)
+        : null,
+    })
     const friendly = {
       CHALLENGE_NOT_FOUND: 'The challenge was not found.',
       CHALLENGE_NOT_PENDING: 'This challenge has already been used. Request a new one.',
@@ -145,6 +161,8 @@ export default async function handler(req, res) {
       SOLANA_SIGNER_MISMATCH: 'The Solana signer does not match the challenge.',
       EVM_ALREADY_LINKED_ELSEWHERE: 'This EVM wallet is already linked to a different Solana wallet. Unlink it first.',
     }[code] || 'Could not create the wallet link.'
+    // Return the response with the code so the WalletLinkPanel can
+    // show the actionable hint for THIS specific code.
     return apiError(res, 409, code, friendly)
   }
 
