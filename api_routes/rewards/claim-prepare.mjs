@@ -296,13 +296,31 @@ export default async function handler(req, res) {
   const connection = getRewardsConnection()
   const recipient = new PublicKey(recipientAddress)
 
-  const instruction = buildClaimRewardInstruction({
-    admin: admin.publicKey,
-    recipient,
-    claimId,
-    pointsClaimed: onChainPointsClaimed,
-    rewardAmountLamports,
-  })
+  // Wrap buildClaimRewardInstruction in a try/catch so that if it
+  // throws (e.g., INVALID_POINTS_CLAIMED, INVALID_REWARD_AMOUNT_LAMPORTS,
+  // INVALID_CLAIM_ID), the claim is properly reverted with the correct
+  // failure_reason instead of staying ENTITLED and the user getting a
+  // generic 500 error.
+  let instruction
+  try {
+    instruction = buildClaimRewardInstruction({
+      admin: admin.publicKey,
+      recipient,
+      claimId,
+      pointsClaimed: onChainPointsClaimed,
+      rewardAmountLamports,
+    })
+  } catch (instructionError) {
+    console.error('[claim-prepare] buildClaimRewardInstruction threw', {
+      claimId,
+      pointsClaimed: onChainPointsClaimed,
+      rewardAmountLamports,
+      error: instructionError?.message,
+    })
+    await safeRevertFailedClaim(claimId, `INSTRUCTION_BUILD_FAILED: ${instructionError?.message || 'unknown'}`)
+    return apiError(res, 500, 'INSTRUCTION_BUILD_FAILED',
+      `The claim instruction could not be built: ${instructionError?.message || 'unknown error'}. The claim has been reverted.`)
+  }
 
   const priorityIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 })
   const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 })
