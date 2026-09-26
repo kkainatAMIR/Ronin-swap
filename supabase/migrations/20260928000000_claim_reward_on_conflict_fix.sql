@@ -293,7 +293,13 @@ begin
   end;
 
   v_remaining := points_to_claim;
-  foreach v_wallet_id in v_wallet_ids_ordered
+  -- IMPORTANT: the FOREACH LOOP syntax in Postgres REQUIRES the
+  -- `ARRAY` keyword: `FOREACH target IN ARRAY expression LOOP`.
+  -- Without it, Postgres raises:
+  --   ERROR: syntax error at or near "v_wallet_ids_ordered"
+  -- (The original migration has the same keyword — this fix
+  -- migration matches it exactly. Don't drop the ARRAY keyword.)
+  foreach v_wallet_id in array v_wallet_ids_ordered
     loop
       if v_remaining <= 0 then exit; end if;
 

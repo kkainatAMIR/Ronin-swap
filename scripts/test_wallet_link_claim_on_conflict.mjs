@@ -149,8 +149,10 @@ async function main() {
   await test('fix migration preserves the FIFO distribution loop', () => {
     // The fix must not remove the per-wallet FIFO distribution
     // (Solana first, then EVMs by verified_at ASC).
-    assert.match(fixSql, /foreach v_wallet_id in v_wallet_ids_ordered/i,
-      'fix migration must preserve the foreach loop')
+    assert.match(fixSql, /foreach v_wallet_id in array v_wallet_ids_ordered/i,
+      'fix migration must preserve the `foreach v_wallet_id in ARRAY v_wallet_ids_ordered` loop. ' +
+      'NOTE: Postgres REQUIRES the `ARRAY` keyword — without it, Postgres raises: ' +
+      'syntax error at or near "v_wallet_ids_ordered"')
     assert.match(fixSql, /v_wallet_ids_ordered := array\[wallet_row\.id\]/i,
       'fix migration must preserve the Solana-first ordering')
     assert.match(fixSql, /select array_agg\(w\.id order by wl\.verified_at asc\) into evm_ids/i,
