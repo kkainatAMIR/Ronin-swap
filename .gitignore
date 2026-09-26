@@ -18,3 +18,4 @@ program/programs/*/ronin_rewards-keypair.json
 program/**/*-keypair.json
 program/.anchor/
 program/test-ledger/
+! .env.local.template
