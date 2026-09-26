@@ -1,67 +1,185 @@
-# Ronin-swap Wallet Link — Accounting Fix Package
+# Ronin-swap Wallet Link — Accounting Fix + Supabase Compilation Fix
 
-## Status (2026-09-26)
+## Status (2026-09-26, updated)
 
-PR #1 was merged to `main` but it included:
+PR #1 was merged to `main`. The current `main` has:
 
 1. ✅ The original wallet-link implementation (commit `e8a3531`)
-2. ❌ **The accounting bug** — `claim_reward()` used
-   `wallets.claimed_points` on the canonical Solana wallet as the
-   authoritative consumed-points counter for the entire verified
-   identity. This creates a duplicate-claim vulnerability under
-   link → claim → unlink → earn → relink cycles.
-3. ❌ **1,055 leaked environment-internal files** (the `skills/`
-   directory, `download/` directory, and `worklog.md` — all from
-   the dev container's auto-commit).
+2. ❌ **The accounting bug** — `claim_reward()` used `wallets.claimed_points`
+   on the canonical Solana wallet as the authoritative consumed-points
+   counter for the entire verified identity. This creates a
+   duplicate-claim vulnerability under link → claim → unlink → earn →
+   relink cycles.
+3. ❌ **A Supabase compilation error** — the original migration declared
+   `v_identity public.get_verified_reward_identity%ROWTYPE`, but
+   `%ROWTYPE` only works for tables/views, not for functions returning
+   `jsonb`. PL/pgSQL raises `42P01: relation does not exist` when
+   trying to compile the function.
+4. ❌ **1,055 leaked environment-internal files** — the `skills/`,
+   `download/`, `worklog.md` directories got swept into a container
+   auto-commit and merged into `main`.
 
-This package contains two files that fix both problems:
+Branch `fix/wallet-link-accounting` on GitHub contains the fix for
+all three problems (3 commits on top of `main`):
 
-| File | Purpose |
+| Commit | Purpose |
 |---|---|
-| `cleanup-leaked-files.sh` | Removes 1,055 leaked env-internal files + hardens `.gitignore` |
-| `0001-fix-accounting-bug.patch` | Adds the `wallet_point_consumption` ledger; fixes the duplicate-claim vulnerability |
+| `cf52940` | Remove 1,055 leaked env-internal files + harden `.gitignore` |
+| `1abc4b3` | Add `wallet_point_consumption` ledger; fix duplicate-claim bug |
+| `ed7b251` | Replace `%ROWTYPE` with `jsonb` + `->>` operators — fixes the Supabase `42P01` error |
 
-## How to apply
+## Files in this download directory
+
+| File | Size | Purpose |
+|---|---|---|
+| `cleanup-leaked-files.sh` | 5.0 KB | Shell script: removes 1,055 leaked files + hardens `.gitignore` (alternative to applying patch 0001, which would be 60 MB) |
+| `0001-accounting-fix.patch` | 92 KB | Adds `wallet_point_consumption` ledger; fixes the duplicate-claim bug |
+| `0002-supabase-compilation-fix.patch` | 16 KB | Replaces `%ROWTYPE` with `jsonb` — fixes the `42P01` compilation error |
+| `README.md` | (this file) | Walkthrough |
+
+## How to apply — TWO OPTIONS
+
+### Option A — Pull the GitHub branch (recommended)
 
 ```bash
-# 1. On your local machine, clone Ronin-swap fresh
+# On your local machine:
 git clone https://github.com/kkainatAMIR/Ronin-swap.git
 cd Ronin-swap
 
-# 2. Make sure main is up to date
+# Fetch and checkout the fix branch
+git fetch origin fix/wallet-link-accounting
+git checkout fix/wallet-link-accounting
+
+# Verify the branch is at ed7b251 (the ROWTYPE fix)
+git log --oneline -4
+# Expected:
+#   ed7b251 fix(wallet-link): replace %ROWTYPE with jsonb to fix Supabase compilation error
+#   1abc4b3 fix(wallet-link): per-wallet consumption ledger prevents unlink/relink double-claim
+#   cf52940 chore: remove leaked environment-internal files + .gitignore hardening
+#   6f62be7 Merge pull request #1 from kkainatAMIR/feat/wallet-link-v1
+
+# Merge to main (or open a PR)
+git checkout main
+git merge --ff-only fix/wallet-link-accounting  # fast-forward merge
+git push origin main
+
+# Apply the DB migration (idempotent — safe to re-run)
+supabase db push
+```
+
+### Option B — Apply the patches manually
+
+Use this if you can't pull from GitHub (e.g., the old PAT was revoked).
+
+```bash
+# On your local machine:
+git clone https://github.com/kkainatAMIR/Ronin-swap.git
+cd Ronin-swap
 git checkout main
 git pull origin main
 
-# 3. Run the cleanup script (removes leaked files + updates .gitignore)
+# 1. Run the cleanup script (removes leaked files + hardens .gitignore)
 bash /path/to/download/cleanup-leaked-files.sh
 
-# 4. Apply the accounting fix patch
-git am /path/to/download/0001-fix-accounting-bug.patch
+# 2. Apply the accounting-fix patch
+git am /path/to/download/0001-accounting-fix.patch
 
-# 5. Verify everything is correct
-npm install                                    # picks up ethers v6
-python3 scripts/test_wallet_link_migration.py  # 34 tests — should all pass
-node    scripts/test_wallet_link_security.mjs  # 58 tests — should all pass
-python3 scripts/test_wallet_link_accounting_scenarios.py  # 6 tests — S1-S5 + cross-identity hijack
+# 3. Apply the Supabase-compilation-fix patch
+git am /path/to/download/0002-supabase-compilation-fix.patch
 
-# 6. Apply the DB migration to Supabase (the migration is idempotent — safe to re-run)
+# 4. Apply the DB migration
 supabase db push
-# OR paste supabase/migrations/20260926000000_wallet_links.sql
-# into the Supabase SQL Editor → Run
 
-# 7. Run the live SQL accounting scenario tests (optional but recommended)
+# 5. Push to your repo
+git push origin chore/cleanup-leaked-files   # or whichever branch you're on
+```
+
+## How to verify before merging
+
+```bash
+# Install the new ethers dependency (already in package.json)
+npm install
+
+# Run the static tests (all should pass)
+python3 scripts/test_wallet_link_migration.py            # 35 tests
+node    scripts/test_wallet_link_security.mjs            # 58 tests
+python3 scripts/test_wallet_link_accounting_scenarios.py  # 6 tests (S1-S5 + cross-identity hijack)
+
+# Verify the SQL migration parses cleanly with a real Postgres parser
+python3 scripts/validate_migration_parses.py
+# Expected: "OK: parsed 43 top-level statement(s)."
+
+# Run the live SQL accounting scenario tests against Supabase
 psql $DATABASE_URL -f scripts/test_wallet_link_accounting_scenarios.sql
+# Walks through S1-S5 with BEGIN/ROLLBACK per scenario — no production pollution.
 
-# 8. Push the cleanup + fix to your fork and open a PR
-git push origin chore/cleanup-leaked-files
-gh pr create --title "fix(wallet-link): per-wallet consumption ledger + leaked-file cleanup"
+# Build the frontend (confirm no syntax errors)
+npm run build
+```
+
+## What the Supabase compilation fix does
+
+### The error on Supabase
+
+```text
+ERROR:  42P01: relation "public.get_verified_reward_identity"
+        does not exist
+CONTEXT: compilation of PL/pgSQL function
+         "get_wallet_reward_balance" near line 4
+```
+
+### Root cause
+
+The original migration declared PL/pgSQL variables like this:
+
+```sql
+v_identity public.get_verified_reward_identity%ROWTYPE;
+```
+
+`%ROWTYPE` is for tables/views. It does NOT work for functions returning
+scalar/composite types like `jsonb`. PL/pgSQL tried to resolve
+`public.get_verified_reward_identity` as a table/view during function
+compilation, and failed with `42P01`.
+
+### The fix
+
+```sql
+v_identity jsonb;
+```
+
+Then access fields with jsonb operators:
+
+```sql
+v_identity := public.get_verified_reward_identity(p_wallet_address);
+v_solana_wallet := v_identity->>'solana_wallet';
+
+-- linked_evm_wallets is a jsonb array; convert to text[]:
+select array_agg(elem::text) into v_linked_evm_wallets_arr
+  from jsonb_array_elements_text(
+    coalesce(v_identity->'linked_evm_wallets', '[]'::jsonb)
+  ) AS elem;
+```
+
+### Verification
+
+The migration parses cleanly with `pglast` (a real Postgres parser):
+
+```text
+$ python3 scripts/validate_migration_parses.py
+Parsing 20260926000000_wallet_links.sql (44,831 bytes)...
+OK: parsed 43 top-level statement(s).
+Statement inventory:
+  AlterTableStmt: 3
+  CreateFunctionStmt: 6
+  CreateStmt: 3
+  GrantStmt: 18
+  IndexStmt: 12
+  InsertStmt: 1
 ```
 
 ## What the accounting fix does
 
-### The bug
-
-Original `claim_reward()`:
+### The bug (original `claim_reward`)
 
 ```text
 earned_points(identity) = sum(samurai_points.final_points across linked wallets)
@@ -73,16 +191,15 @@ If the EVM is unlinked and re-linked to a DIFFERENT Solana wallet, the
 EVM's previously-claimed points become claimable again because the
 consumed counter lives on the Solana wallet row, not on the EVM's row.
 
-### The fix
+### The fix (new `wallet_point_consumption` table)
 
-New `wallet_point_consumption` table — a per-wallet consumption ledger
-that travels with the `wallet_id`, NOT with the link.
+Per-wallet consumption ledger that travels with the `wallet_id`, NOT
+with the link.
 
 ```text
-earned_points(wallet_id)    = sum(samurai_points.final_points)
-consumed_points(wallet_id)   = sum(wallet_point_consumption.points_consumed)
-claimable_points(identity)   = sum(earned across identity)
-                             - sum(consumed across identity)
+earned_points(wallet_id)   = sum(samurai_points.final_points)
+consumed_points(wallet_id)  = sum(wallet_point_consumption.points_consumed)
+claimable_points(identity)  = sum(earned across identity) - sum(consumed across identity)
 ```
 
 The consumed amount stays tied to the `wallet_id` of the wallet that
@@ -98,24 +215,17 @@ the identity wallets:
 2. Linked EVM wallets ordered by `verified_at ASC` (oldest link first)
 
 For each wallet, take `min(remaining, max(earned_for_wallet - consumed_for_wallet, 0))`
-and insert a `wallet_point_consumption` row. This guarantees:
-
-- The canonical Solana wallet is "drained" first (preserving the legacy
-  semantics where Solana-only users' claims are tracked on their own
-  wallet row).
-- EVM wallets' consumption rows persist on the EVM `wallet_id`, so
-  unlink/relink cannot reset them.
+and insert a `wallet_point_consumption` row.
 
 ### Backward compatibility
 
 - `wallets.claimed_points` column is PRESERVED (not dropped, not reset).
-- It's kept in sync on new claims (incremented on canonical Solana)
-  for legacy admin tooling, but it is NOT the authoritative source.
 - Existing users with `claimed_points > 0` are BACKFILLED via a single
   `MIGRATION_BACKFILL` row in `wallet_point_consumption` per wallet.
 - The backfill is IDEMPOTENT — a partial unique index on
   `(wallet_id) WHERE source='MIGRATION_BACKFILL'` makes the migration
   safe to re-run.
+- The migration is purely additive — no existing data is touched.
 
 ## Scenario coverage (verified by tests)
 
@@ -134,11 +244,12 @@ and insert a `wallet_point_consumption` row. This guarantees:
 | S11: Expired challenge | `test_wallet_link_security.mjs` | Marked EXPIRED; rejected with `CHALLENGE_EXPIRED` |
 | S12: Wrong signature | `test_wallet_link_security.mjs` | EVM/Solana sig mismatch raises `EVM_SIGNATURE_INVALID` / `SOLANA_SIGNATURE_INVALID` |
 
-## Total test counts
+## Total test counts (all pass)
 
-- 58 Node tests (`scripts/test_wallet_link_security.mjs`) — all pass
-- 34 Python migration static tests (`scripts/test_wallet_link_migration.py`) — all pass
-- 6 Python accounting scenario simulations (`scripts/test_wallet_link_accounting_scenarios.py`) — all pass
+- 58 Node tests (`scripts/test_wallet_link_security.mjs`)
+- 35 Python migration static tests (`scripts/test_wallet_link_migration.py`)
+- 6 Python accounting scenario simulations (`scripts/test_wallet_link_accounting_scenarios.py`)
+- 1 SQL parse validation (`scripts/validate_migration_parses.py`)
 - Live SQL scenarios (`scripts/test_wallet_link_accounting_scenarios.sql`) — apply against a Supabase instance to verify end-to-end
 
 ## Rust contract status

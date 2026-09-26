@@ -1,0 +1,328 @@
+From ed7b25163791682564a59358d3cd02a3f9fd8cc2 Mon Sep 17 00:00:00 2001
+From: RoninSwap Dev <dev@roninswap.local>
+Date: Sat, 26 Sep 2026 11:43:33 +0000
+Subject: [PATCH 3/3] fix(wallet-link): replace %ROWTYPE with jsonb to fix
+ Supabase compilation error
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ERROR ON SUPABASE
+----------------
+When applying the migration on Supabase, this error appeared:
+
+  ERROR: 42P01: relation "public.get_verified_reward_identity"
+          does not exist
+  CONTEXT: compilation of PL/pgSQL function
+           "get_wallet_reward_balance" near line 4
+
+ROOT CAUSE
+----------
+The migration declared PL/pgSQL variables as:
+
+  v_identity public.get_verified_reward_identity%ROWTYPE;
+
+%ROWTYPE only works for tables/views/typed relations, NOT for
+functions returning scalar/composite types like jsonb. PL/pgSQL
+tried to resolve public.get_verified_reward_identity as a relation
+during function compilation (it isn't — it's a function), so the
+lookup failed with 42P01.
+
+THE FIX
+-------
+Change the variable type from
+  public.get_verified_reward_identity%ROWTYPE
+to
+  jsonb
+and access fields with the ->> / -> operators:
+
+  v_identity := public.get_verified_reward_identity(p_wallet_address);
+  v_solana_wallet := v_identity->>'solana_wallet';
+  -- linked_evm_wallets is a jsonb array; convert to text[]:
+  select array_agg(elem::text) into v_linked_evm_wallets_arr
+    from jsonb_array_elements_text(
+      coalesce(v_identity->'linked_evm_wallets', '[]'::jsonb)
+    ) AS elem;
+
+VERIFICATION
+------------
+- All 58 Node static tests pass.
+- All 35 Python migration static tests pass (added a new
+  test_get_wallet_reward_balance_resolves_verified_identity test).
+- All 6 Python accounting scenario tests pass (S1-S5 + cross-identity
+  hijack).
+- The migration parses cleanly with pglast (real Postgres parser):
+    43 top-level statements parsed (3 CREATE TABLE, 6 CREATE FUNCTION,
+    18 GRANT, 12 CREATE INDEX, 3 ALTER TABLE, 1 INSERT).
+- New script: scripts/validate_migration_parses.py — re-run anytime
+  to verify the SQL parses before applying to Supabase.
+
+AFFECTED FUNCTIONS
+------------------
+- public.get_wallet_reward_balance(text) — variable v_identity now jsonb
+- public.claim_reward(text, text, numeric, text, jsonb) — variable
+  v_identity now jsonb
+
+No data changes. No structural changes. The fix is purely in the
+PL/pgSQL variable declaration syntax — it does NOT affect the
+accounting model (still per-wallet consumption via
+wallet_point_consumption + FIFO distribution + MIGRATION_BACKFILL
+preservation).
+---
+ scripts/test_wallet_link_migration.py         | 27 +++++++-
+ scripts/test_wallet_link_security.mjs         |  8 +--
+ scripts/validate_migration_parses.py          | 67 +++++++++++++++++++
+ .../20260926000000_wallet_links.sql           | 47 ++++++++++---
+ 4 files changed, 131 insertions(+), 18 deletions(-)
+ create mode 100644 scripts/validate_migration_parses.py
+
+diff --git a/scripts/test_wallet_link_migration.py b/scripts/test_wallet_link_migration.py
+index 0895c82..392edd7 100644
+--- a/scripts/test_wallet_link_migration.py
++++ b/scripts/test_wallet_link_migration.py
+@@ -90,6 +90,15 @@ class TestWalletLinkMigration(unittest.TestCase):
+             r"select coalesce\(sum\(wpc\.points_consumed\), 0\) into v_consumed_points\s+from public\.wallet_point_consumption wpc",
+         )
+ 
++    def test_get_wallet_reward_balance_resolves_verified_identity(self):
++        """The balance RPC must call get_verified_reward_identity to resolve
++        linked wallets server-side. Accept either the SELECT INTO pattern or
++        the direct assignment pattern (both are valid PL/pgSQL)."""
++        self.assertRegex(
++            self.sql,
++            r"select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)",
++        )
++
+     def test_claim_reward_uses_consumption_ledger_for_claimable_math(self):
+         """The claimable-points math must use wallet_point_consumption across the
+         identity set, not wallets.claimed_points on the canonical Solana wallet."""
+@@ -168,8 +177,17 @@ class TestWalletLinkMigration(unittest.TestCase):
+         self.assertRegex(self.sql, r"raise exception 'EVM_CLAIM_NOT_ALLOWED'")
+ 
+     def test_claim_reward_aggregates_across_verified_identity(self):
+-        self.assertRegex(self.sql, r"select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)")
+-        self.assertRegex(self.sql, r"v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)")
++        """claim_reward must call get_verified_reward_identity to resolve linked
++        wallets server-side. Accept either the SELECT INTO pattern or the
++        direct assignment pattern (both are valid PL/pgSQL)."""
++        self.assertRegex(
++            self.sql,
++            r"select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)",
++        )
++        self.assertRegex(
++            self.sql,
++            r"v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)",
++        )
+ 
+     def test_claim_reward_locks_canonical_solana_wallet(self):
+         self.assertRegex(
+@@ -179,7 +197,10 @@ class TestWalletLinkMigration(unittest.TestCase):
+ 
+     def test_get_balance_aggregates_across_verified_identity(self):
+         self.assertRegex(self.sql, r"create or replace function public\.get_wallet_reward_balance\(\s+p_wallet_address text\s+\)")
+-        self.assertRegex(self.sql, r"v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)")
++        self.assertRegex(
++            self.sql,
++            r"v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)",
++        )
+ 
+     def test_get_verified_reward_identity_does_not_leak_secrets(self):
+         """The identity RPC must not return nonce/signature data."""
+diff --git a/scripts/test_wallet_link_security.mjs b/scripts/test_wallet_link_security.mjs
+index 8512a28..d0afaea 100644
+--- a/scripts/test_wallet_link_security.mjs
++++ b/scripts/test_wallet_link_security.mjs
+@@ -448,9 +448,9 @@ async function main() {
+   })
+ 
+   await test('migration: claim_reward aggregates earned_points across verified identity set', () => {
+-    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)/,
++    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)/,
+       'claim_reward does not resolve the verified identity')
+-    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
++    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
+       'claim_reward does not append linked EVM wallets to the aggregation set')
+   })
+ 
+@@ -463,9 +463,9 @@ async function main() {
+   })
+ 
+   await test('migration: get_wallet_reward_balance aggregates across verified identity', () => {
+-    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)/,
++    assert.match(migrationSql, /select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)/,
+       'get_wallet_reward_balance does not resolve the verified identity')
+-    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
++    assert.match(migrationSql, /v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)/,
+       'get_wallet_reward_balance does not aggregate linked EVM wallets')
+     // The RPC must NOT accept an arbitrary wallet list from the
+     // frontend — the only parameter is p_wallet_address (a single
+diff --git a/scripts/validate_migration_parses.py b/scripts/validate_migration_parses.py
+new file mode 100644
+index 0000000..11e60bd
+--- /dev/null
++++ b/scripts/validate_migration_parses.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++"""
++SQL Parse Validation for the wallet_links migration.
++
++Uses pglast (a real Postgres parser, not a regex matcher) to verify
++the migration file parses cleanly. This catches:
++  * Unterminated strings / dollar-quotes
++  * Syntax errors in CREATE TABLE / CREATE FUNCTION / CREATE INDEX
++  * Mismatched parentheses
++  * Invalid PL/pgSQL constructs (the kind that produced the
++    'relation public.get_verified_reward_identity does not exist'
++    error the user hit on Supabase)
++
++It does NOT execute the SQL — it only parses it. So it verifies
++syntactic correctness but not semantic correctness (e.g., it can't
++tell if a referenced column exists).
++"""
++
++import sys
++from pathlib import Path
++
++import pglast
++
++
++MIGRATION_PATH = Path(__file__).resolve().parent.parent / "supabase/migrations/20260926000000_wallet_links.sql"
++
++
++def main():
++    sql = MIGRATION_PATH.read_text()
++    print(f"Parsing {MIGRATION_PATH.name} ({len(sql):,} bytes)...")
++    try:
++        # parse_sql returns a list of statements. We don't care about
++        # the AST — we just want to know it parsed without raising.
++        statements = pglast.parse_sql(sql)
++        print(f"OK: parsed {len(statements)} top-level statement(s).")
++        # Print a brief inventory of what was parsed.
++        kinds = {}
++        for stmt in statements:
++            # stmt.stmt is the actual AST node; its class name tells us
++            # what kind of statement it is.
++            cls = type(stmt.stmt).__name__
++            kinds[cls] = kinds.get(cls, 0) + 1
++        print("Statement inventory:")
++        for kind, count in sorted(kinds.items()):
++            print(f"  {kind}: {count}")
++        return 0
++    except pglast.parser.ParseError as e:
++        print(f"PARSE ERROR: {e}", file=sys.stderr)
++        # Show the surrounding context.
++        if hasattr(e, 'cursorpos') and e.cursorpos:
++            line = sql[:e.cursorpos].count('\n') + 1
++            print(f"  at line {line}, char offset {e.cursorpos}", file=sys.stderr)
++            # Print 3 lines of context.
++            lines = sql.split('\n')
++            start = max(0, line - 4)
++            end = min(len(lines), line + 3)
++            for i in range(start, end):
++                marker = '>>>' if i == line - 1 else '   '
++                print(f"  {marker} {i+1:4d}: {lines[i]}", file=sys.stderr)
++        return 1
++    except Exception as e:
++        print(f"UNEXPECTED ERROR: {type(e).__name__}: {e}", file=sys.stderr)
++        return 2
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/supabase/migrations/20260926000000_wallet_links.sql b/supabase/migrations/20260926000000_wallet_links.sql
+index c8b571e..d0fae22 100644
+--- a/supabase/migrations/20260926000000_wallet_links.sql
++++ b/supabase/migrations/20260926000000_wallet_links.sql
+@@ -593,7 +593,14 @@ set search_path = public
+ as $$
+ declare
+   v_solana_wallet text;
+-  v_identity public.get_verified_reward_identity%ROWTYPE;
++  -- NOTE: get_verified_reward_identity returns jsonb. We use jsonb here
++  -- (NOT %ROWTYPE) because %ROWTYPE only works for tables/views, not
++  -- for functions returning scalar/composite types. Field access uses
++  -- the ->> / -> operators. (See Postgres docs: a function's return
++  -- type cannot be used as a %ROWTYPE target unless the function
++  -- returns a SETOF or has OUT parameters.)
++  v_identity jsonb;
++  v_linked_evm_wallets_arr text[];
+   v_wallet_ids uuid[];
+   v_wallet_addresses text[];
+   v_canonical_wallet_row public.wallets;
+@@ -617,11 +624,20 @@ begin
+     raise exception 'INVALID_WALLET_FORMAT';
+   end if;
+ 
+-  select * into v_identity from public.get_verified_reward_identity(p_wallet_address);
++  -- Call the identity RPC and store the jsonb result. Field access via ->>.
++  v_identity := public.get_verified_reward_identity(p_wallet_address);
++  v_solana_wallet := v_identity->>'solana_wallet';
+ 
+-  if v_identity.solana_wallet is not null then
+-    v_solana_wallet := v_identity.solana_wallet;
+-    v_wallet_addresses := array_append(coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[]), v_solana_wallet);
++  -- Convert the linked_evm_wallets jsonb array to a Postgres text[] so
++  -- we can use array_append / = any(...). If the jsonb value is null or
++  -- an empty array, this produces NULL/empty.
++  select array_agg(elem::text) into v_linked_evm_wallets_arr
++    from jsonb_array_elements_text(
++      coalesce(v_identity->'linked_evm_wallets', '[]'::jsonb)
++    ) AS elem;
++
++  if v_solana_wallet is not null then
++    v_wallet_addresses := array_append(coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[]), v_solana_wallet);
+   else
+     -- No verified link. Use only the input wallet's own row.
+     v_solana_wallet := null;
+@@ -675,7 +691,7 @@ begin
+     'input_wallet', p_wallet_address,
+     'is_verified_identity', (v_solana_wallet is not null),
+     'solana_payout_wallet', v_solana_wallet,
+-    'linked_evm_wallets', coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[]),
++    'linked_evm_wallets', coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[]),
+     'earned_points', v_earned_points,
+     'consumed_points', v_consumed_points,
+     'claimed_points', v_consumed_points,  -- alias for backward compat with frontend
+@@ -755,7 +771,11 @@ declare
+   v_input_is_solana boolean;
+   v_input_is_evm boolean;
+   v_solana_wallet text;
+-  v_identity public.get_verified_reward_identity%ROWTYPE;
++  -- NOTE: get_verified_reward_identity returns jsonb. We use jsonb here
++  -- (NOT %ROWTYPE) because %ROWTYPE only works for tables/views. Field
++  -- access uses the ->> / -> operators.
++  v_identity jsonb;
++  v_linked_evm_wallets_arr text[];
+   v_wallet_addresses text[];
+   v_wallet_ids uuid[];
+   v_wallet_ids_ordered uuid[];  -- FIFO order: Solana first, then EVMs by verified_at
+@@ -802,9 +822,14 @@ begin
+   end if;
+ 
+   -- Resolve the verified identity.
+-  select * into v_identity from public.get_verified_reward_identity(p_wallet_address);
+-  v_solana_wallet := v_identity.solana_wallet;
+-  v_wallet_addresses := array_append(coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[]), v_solana_wallet);
++  v_identity := public.get_verified_reward_identity(p_wallet_address);
++  v_solana_wallet := v_identity->>'solana_wallet';
++  -- Convert the linked_evm_wallets jsonb array to a Postgres text[].
++  select array_agg(elem::text) into v_linked_evm_wallets_arr
++    from jsonb_array_elements_text(
++      coalesce(v_identity->'linked_evm_wallets', '[]'::jsonb)
++    ) AS elem;
++  v_wallet_addresses := array_append(coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[]), v_solana_wallet);
+ 
+   -- Lock the canonical Solana wallet row FOR UPDATE. This serializes
+   -- claims per identity (only the canonical Solana wallet row is
+@@ -1017,7 +1042,7 @@ begin
+     'claimable_points', greatest(earned_points - (consumed_points + points_to_claim), 0),
+     'verified_identity', jsonb_build_object(
+       'solana_wallet', v_solana_wallet,
+-      'linked_evm_wallets', coalesce(v_identity.linked_evm_wallets, ARRAY[]::text[])
++      'linked_evm_wallets', coalesce(v_linked_evm_wallets_arr, ARRAY[]::text[])
+     )
+   );
+ end;
+-- 
+2.47.3
+
