@@ -174,7 +174,21 @@ export default async function handler(req, res) {
       p_metadata: { flow: 'user-pays-fee' },
     })
   } catch (error) {
-    console.error('claim-prepare Supabase RPC failed:', error?.message || error)
+    // DIAGNOSTIC LOG: log the specific RPC failure code + claim_id +
+    // wallet so we can see exactly which exception path fired. Safe
+    // — no signature/nonce data is logged.
+    console.error('[claim-prepare] RPC raised', {
+      wallet,
+      claimId,
+      code: error?.code,
+      status: error?.status,
+      message: error?.message,
+      // PostgREST may include the underlying PG error in body.
+      // Truncate to keep the log readable.
+      bodyPreview: error?.body
+        ? JSON.stringify(error.body).slice(0, 500)
+        : null,
+    })
     return apiError(res, 502, 'CLAIM_RPC_FAILED', error?.code || 'The Supabase claim RPC failed.')
   }
 
