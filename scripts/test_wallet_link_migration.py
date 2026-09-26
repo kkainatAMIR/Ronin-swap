@@ -90,6 +90,15 @@ class TestWalletLinkMigration(unittest.TestCase):
             r"select coalesce\(sum\(wpc\.points_consumed\), 0\) into v_consumed_points\s+from public\.wallet_point_consumption wpc",
         )
 
+    def test_get_wallet_reward_balance_resolves_verified_identity(self):
+        """The balance RPC must call get_verified_reward_identity to resolve
+        linked wallets server-side. Accept either the SELECT INTO pattern or
+        the direct assignment pattern (both are valid PL/pgSQL)."""
+        self.assertRegex(
+            self.sql,
+            r"select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)",
+        )
+
     def test_claim_reward_uses_consumption_ledger_for_claimable_math(self):
         """The claimable-points math must use wallet_point_consumption across the
         identity set, not wallets.claimed_points on the canonical Solana wallet."""
@@ -168,8 +177,17 @@ class TestWalletLinkMigration(unittest.TestCase):
         self.assertRegex(self.sql, r"raise exception 'EVM_CLAIM_NOT_ALLOWED'")
 
     def test_claim_reward_aggregates_across_verified_identity(self):
-        self.assertRegex(self.sql, r"select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)")
-        self.assertRegex(self.sql, r"v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)")
+        """claim_reward must call get_verified_reward_identity to resolve linked
+        wallets server-side. Accept either the SELECT INTO pattern or the
+        direct assignment pattern (both are valid PL/pgSQL)."""
+        self.assertRegex(
+            self.sql,
+            r"select \* into v_identity from public\.get_verified_reward_identity\(p_wallet_address\)|v_identity := public\.get_verified_reward_identity\(p_wallet_address\)",
+        )
+        self.assertRegex(
+            self.sql,
+            r"v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)",
+        )
 
     def test_claim_reward_locks_canonical_solana_wallet(self):
         self.assertRegex(
@@ -179,7 +197,10 @@ class TestWalletLinkMigration(unittest.TestCase):
 
     def test_get_balance_aggregates_across_verified_identity(self):
         self.assertRegex(self.sql, r"create or replace function public\.get_wallet_reward_balance\(\s+p_wallet_address text\s+\)")
-        self.assertRegex(self.sql, r"v_wallet_addresses := array_append\(coalesce\(v_identity\.linked_evm_wallets, ARRAY\[\]::text\[\]\), v_solana_wallet\)")
+        self.assertRegex(
+            self.sql,
+            r"v_wallet_addresses := array_append\(coalesce\(v_linked_evm_wallets_arr, ARRAY\[\]::text\[\]\), v_solana_wallet\)",
+        )
 
     def test_get_verified_reward_identity_does_not_leak_secrets(self):
         """The identity RPC must not return nonce/signature data."""
