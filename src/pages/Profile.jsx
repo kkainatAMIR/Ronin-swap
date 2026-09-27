@@ -15,8 +15,15 @@ const explorers = {
   4663: (signature) => `https://robinhoodchain.blockscout.com/tx/${signature}`,
 }
 
-function short(value = '') {
-  return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value
+function short(value) {
+  // Null-safe: when value is null/undefined (e.g. solanaPayoutWallet
+  // is null on mobile inside MetaMask Mobile's browser where Phantom
+  // is not injected), return an empty string instead of crashing on
+  // `value.length`. The default param `= ''` only catches undefined,
+  // NOT null — so we need an explicit guard.
+  if (value == null) return ''
+  const str = String(value)
+  return str.length > 18 ? `${str.slice(0, 8)}...${str.slice(-6)}` : str
 }
 
 function tokenName(value, chainId) {
@@ -310,7 +317,7 @@ export default function Profile() {
             <div className="profile-verified-wallet-row profile-verified-wallet-solana">
               <div className="profile-verified-wallet-label">
                 <Tag tone="green">SOLANA · PAYOUT</Tag>
-                <strong className="profile-wallet-addr">{short(solanaPayoutWallet)}</strong>
+                <strong className="profile-wallet-addr">{short(solanaPayoutWallet) || '—'}</strong>
               </div>
               <small>SOL rewards are paid to this wallet</small>
             </div>
