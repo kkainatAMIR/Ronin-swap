@@ -21,8 +21,8 @@ export function isMobileBrowser() {
 
 export function openMetaMaskMobile() {
   if (typeof window === 'undefined') return false
-  const currentPath = `${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`
-  window.location.href = `https://metamask.app.link/dapp/${currentPath}`
+  const destinationUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`
+  window.location.href = `https://metamask.app.link/dapp/${encodeURI(destinationUrl)}`
   return true
 }
 
