@@ -671,6 +671,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         onDismiss={() => setShowCompletedBanner(false)}
       />
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Ethereum Mainnet</strong></div><div className="swap-quote-row"><span>Route</span><strong>0x</strong></div><div className="swap-quote-row"><span>Gas estimate</span><strong>{quote.transaction?.gas ? `${quote.transaction.gas} gas` : '—'}</strong></div><div className="swap-quote-row"><span>Treasury fee</span><strong>{quote.swapFeeBps != null ? `${Number(quote.swapFeeBps) / 100}%` : '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.buyAmount ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</strong></div></div>}
+      <div className="swap-result-slot" aria-live="polite">
       {status === 'confirmed' && (() => {
         const points = completion?.points ?? completion?.pointsRecord ?? completion?.samuraiPoints ?? null
         const pointsAwarded = Number(
@@ -732,6 +733,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         )
       })()}
       {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Ethereum swap could not be completed.'}</p><p>Review the wallet message and try again.</p></div>}
+      </div>{/* /.swap-result-slot */}
       {statusMessage && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot">{statusMessage}</p>}
       {message && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot" style={{ color: '#ba3c3c' }}>{message}</p>}
       {txHash && <p className="evm-success">Transaction: {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}
@@ -1308,8 +1310,10 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
         onDismiss={() => setShowCompletedBanner(false)}
       />
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {quoteOutputAmount || '0.00'} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Robinhood Chain</strong></div><div className="swap-quote-row"><span>Route</span><strong>{quote?.tool?.name || quote?.provider || 'LI.FI'}</strong></div><div className="swap-quote-row"><span>Quote ID</span><strong>{quote?.quoteId || '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? formatTokenAmount(quote.minimumReceived, toToken.decimals || 18, 6) : '—'}</strong></div></div>}
+      <div className="swap-result-slot" aria-live="polite">
       {status === 'confirmed' && <div className="swap-result-box swap-result-success"><h4>⚔️ SWAP COMPLETE</h4><p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p><p><strong>You Received:</strong> {quoteOutputAmount ? `${quoteOutputAmount} ${toToken.symbol}` : '—'}</p><p><strong>Status:</strong> Confirmed</p><div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}><p style={{ margin: '0 0 4px', color: completion?.points?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{completion?.points?.qualified ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || 0).toLocaleString()} Samurai Points` : completion?.points ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong></p>{completion?.points?.qualified && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}{completion?.points && !completion.points.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(completion.points.reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}</div>{txHash && <p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}</div>}
       {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Robinhood swap could not be completed.'}</p></div>}
+      </div>{/* /.swap-result-slot */}
       {status !== 'confirmed' && status !== 'error' && message && <p className="swap-widget-foot">{message}</p>}
       {txHash && status !== 'confirmed' && <p className="evm-success">Transaction: {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}
       <p className="swap-widget-foot"><Icon name="shield" size={12} /> Secure. Non-Custodial. Powered by LI.FI on Robinhood Chain.</p>
@@ -2509,8 +2513,13 @@ export default function Swap() {
               onDismiss={() => setShowCompletedBanner(false)}
             />
 
+            {/* Reserve space for the swap result so the page doesn't
+                jump when the result box mounts/unmounts on mobile.
+                The min-height matches the typical result box height
+                (success state with points + signature + links). */}
+            <div className="swap-result-slot" aria-live="polite">
             {(txState === 'success' || txState === 'failed') && (
-              <div className={`swap-result-box ${txState === 'success' ? 'swap-result-success' : 'swap-result-error'}`} style={{ marginTop: '12px' }}>
+              <div className={`swap-result-box ${txState === 'success' ? 'swap-result-success' : 'swap-result-error'}`}>
                 {txState === 'success' ? (
                   <>
                     <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem' }}>⚔️ SWAP COMPLETE</h4>
@@ -2549,6 +2558,7 @@ export default function Swap() {
                 )}
               </div>
             )}
+            </div>{/* /.swap-result-slot */}
 
             {(quoteError || txError) && txState !== 'success' && txState !== 'failed' && <p className="swap-widget-foot" style={{ color: '#ba3c3c', marginTop: '8px' }}>{quoteError || txError}</p>}
 

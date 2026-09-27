@@ -566,6 +566,68 @@
 }
 .swap-usd-value.is-muted { color: var(--muted-light, #9b948d); font-weight: 500; }
 
+/* ---------------- SWAP RESULT BOX ---------------- */
+/* The swap-result-box appears conditionally after a swap succeeds or
+   fails. Without reserving space, its mount/unmount causes the page
+   to jump vertically on mobile (the result content pushes everything
+   below it down, then back up when it unmounts).
+
+   FIX: Give the result box a stable min-height so the surrounding
+   page layout doesn't shift when it appears/disappears. The content
+   inside can still grow, but the reserved space prevents the jump.
+
+   Also define base styles so the box renders consistently (it had
+   NO CSS before — only inline styles in JSX). */
+.swap-result-box {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #e8dcc8);
+  background: var(--cream, #fbf8f3);
+  min-height: 0; /* grows with content, but container reserves space */
+  overflow: hidden;
+}
+.swap-result-success {
+  border-color: rgba(185, 28, 28, 0.25);
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.04), rgba(252, 248, 243, 1));
+}
+.swap-result-error {
+  border-color: rgba(185, 28, 28, 0.4);
+  background: rgba(185, 28, 28, 0.04);
+}
+.swap-result-box h4 {
+  margin: 0 0 8px;
+  font-size: 1.2rem;
+  font-family: var(--mono, monospace);
+  letter-spacing: .04em;
+}
+.swap-result-box p {
+  margin: 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.swap-result-box strong { color: var(--ink, #2a2017); }
+.swap-result-box a { display: inline-block; margin-top: 8px; }
+.swap-result-box button { margin-top: 6px; }
+
+/* Reserve space for the swap result so the page doesn't jump when
+   the result box mounts/unmounts on mobile. The min-height matches
+   the typical success result box height (title + paid/received/status
+   + points section + signature + copy/solscan links). When the box
+   is empty (no result yet), this reserved space prevents the content
+   below it from shifting when the result appears. */
+.swap-result-slot {
+  min-height: 0;
+  transition: min-height 200ms ease;
+}
+/* On mobile, reserve enough space for the success result to prevent
+   the page from jumping down when the result mounts. */
+@media (max-width: 768px) {
+  .swap-result-slot {
+    min-height: 220px;
+  }
+}
+
 /* ---------------- SWAP COMPLETED BANNER ---------------- */
 /* Red-line "✓ SWAP COMPLETED" banner shown for ~18 seconds after
    a successful swap. Reuses the existing Ronin red accent + gold
