@@ -10,11 +10,16 @@ export function getEthereumProvider() {
   return metaMask || null
 }
 
-function isMobileBrowser() {
+// Mobile detection + MetaMask Mobile deep-link.
+//
+// Exported so the wallet-link flow (walletLinkService.js) can reuse
+// the SAME mobile handling as the swap flow — no second deep-link
+// implementation. Behavior is unchanged for the swap path.
+export function isMobileBrowser() {
   return typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 }
 
-function openMetaMaskMobile() {
+export function openMetaMaskMobile() {
   if (typeof window === 'undefined') return false
   const currentPath = `${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`
   window.location.href = `https://metamask.app.link/dapp/${currentPath}`

@@ -124,6 +124,11 @@ export async function revokeWalletLink({ solanaWallet, evmWallet, solanaSignatur
 // Wallet-provider helpers (MetaMask + Phantom)
 // =====================================================================
 
+// Reuse the existing mobile detection + MetaMask Mobile deep-link from
+// ethereumService.js — no second deep-link implementation. The swap
+// flow already uses these; the wallet-link flow now uses them too.
+import { isMobileBrowser, openMetaMaskMobile } from './ethereumService'
+
 // Returns the MetaMask provider (or null if unavailable). The
 // WalletContext already does this; we re-implement here so the
 // WalletLinkPanel is self-contained.
@@ -138,9 +143,35 @@ function getMetaMaskProvider() {
 
 // Request the user's MetaMask account (triggers the connect popup if
 // not already connected). Returns the lowercase 0x... address.
+//
+// MOBILE HANDLING:
+//   On a normal mobile browser (Safari/Chrome), window.ethereum is
+//   undefined — MetaMask is not injected. We deep-link into MetaMask
+//   Mobile using the existing openMetaMaskMobile() helper from
+//   ethereumService.js. MetaMask Mobile then opens this same site in
+//   its in-app browser, where window.ethereum IS injected, and the
+//   user clicks "Link EVM Wallet" again to run the normal flow.
+//
+//   We return the sentinel string 'REDIRECTING_TO_METAMASK_MOBILE'
+//   (NOT null — null is also returned by the swap flow's
+//   connectEthereumWallet, but we want a distinct signal the caller
+//   can switch on without confusing the two). The caller treats this
+//   as "redirect in progress, do not throw, do not create a challenge".
+export const EVM_REDIRECTING_TO_METAMASK_MOBILE = 'REDIRECTING_TO_METAMASK_MOBILE'
+
 export async function ensureMetaMaskAccount() {
   const provider = getMetaMaskProvider()
-  if (!provider) throw new Error('MetaMask is not available in this browser.')
+  if (!provider) {
+    // No injected MetaMask provider. On mobile, deep-link into
+    // MetaMask Mobile — it will reopen this site with the provider
+    // injected. On desktop, throw (the user needs to install
+    // MetaMask as a browser extension).
+    if (isMobileBrowser()) {
+      openMetaMaskMobile()
+      return EVM_REDIRECTING_TO_METAMASK_MOBILE
+    }
+    throw new Error('MetaMask is not available in this browser.')
+  }
   const accounts = await provider.request({ method: 'eth_requestAccounts' })
   if (!Array.isArray(accounts) || !accounts[0]) {
     throw new Error('No MetaMask account was returned.')

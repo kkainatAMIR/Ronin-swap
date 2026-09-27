@@ -189,6 +189,33 @@
   font-family: var(--mono, monospace);
 }
 
+/* Mobile-only waiting state — shown after we deep-link into MetaMask
+   Mobile. Reuses the same spinner as the progress steps, but with
+   dark ink colors so it reads on the paper panel background. */
+.ronin-wallet-link-mobile-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  text-align: center;
+}
+.ronin-wallet-link-mobile-waiting > .ronin-wallet-link-spinner {
+  width: 18px;
+  height: 18px;
+  border-color: rgba(185, 28, 28, 0.18);
+  border-top-color: var(--red, #b91c1c);
+}
+.ronin-wallet-link-mobile-waiting p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink, #2a2017);
+}
+.ronin-wallet-link-mobile-waiting .btn {
+  min-width: 160px;
+}
+
 /* Progress list — 4 steps */
 .ronin-wallet-link-progress {
   list-style: none;

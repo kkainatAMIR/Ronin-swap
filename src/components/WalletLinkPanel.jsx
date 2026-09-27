@@ -14,6 +14,7 @@ import {
   signLinkMessageWithPhantom,
   signRevokeMessageWithPhantom,
   getPhantomProvider,
+  EVM_REDIRECTING_TO_METAMASK_MOBILE,
 } from '../services/walletLinkService'
 
 // =====================================================================
@@ -45,6 +46,12 @@ const STEP_SIGNING_SOLANA = 'signing-solana'
 const STEP_VERIFYING = 'verifying'
 const STEP_SUCCESS = 'success'
 const STEP_ERROR = 'error'
+// Mobile-only: MetaMask is not injected in this browser. We've
+// deep-linked into MetaMask Mobile — the user will reopen this site
+// inside MetaMask Mobile's in-app browser, where window.ethereum
+// is injected, and then they click "Link EVM Wallet" again. No
+// challenge has been created yet, so there's nothing to roll back.
+const STEP_OPENING_METAMASK_MOBILE = 'opening-metamask-mobile'
 
 // The 4 user-visible progress steps. Indexed by step number.
 const PROGRESS_STEPS = [
@@ -108,6 +115,17 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     setAggregatedPoints(null)
     try {
       const evm = await ensureMetaMaskAccount()
+
+      // Mobile: no injected MetaMask provider. ensureMetaMaskAccount()
+      // already deep-linked into MetaMask Mobile. We have NOT created
+      // a challenge yet — the user will click "Link EVM Wallet" again
+      // once the site reloads inside MetaMask Mobile's in-app browser.
+      // Show a waiting state instead of an error.
+      if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
+        setStep(STEP_OPENING_METAMASK_MOBILE)
+        return
+      }
+
       setEvmAddress(evm)
       const challenge = await createWalletLinkChallenge({
         solanaWallet,
@@ -358,6 +376,41 @@ export default function WalletLinkPanel({ onLinkedChange }) {
           <Button variant="primary" icon="link" onClick={startLink}>
             Link EVM Wallet
           </Button>
+        </div>
+      )}
+
+      {/* =================================================================
+          STATE: OPENING_METAMASK_MOBILE — mobile-only redirect
+          =================================================================
+          MetaMask was not injected in this mobile browser. We've
+          deep-linked into MetaMask Mobile — it will reopen this site
+          in its in-app browser, where window.ethereum is injected.
+
+          No challenge has been created yet. The user clicks "Link EVM
+          Wallet" again after the site reloads inside MetaMask Mobile.
+
+          This is a waiting state, not an error — the user just needs
+          to follow the redirect.
+          ================================================================= */}
+      {step === STEP_OPENING_METAMASK_MOBILE && (
+        <div className="ronin-wallet-link-flow">
+          <div className="ronin-wallet-link-flow-header">
+            <strong>Opening MetaMask…</strong>
+            <small>If MetaMask didn't open automatically, tap the button below.</small>
+          </div>
+          <div className="ronin-wallet-link-mobile-waiting">
+            <span className="ronin-wallet-link-spinner" aria-label="Loading" />
+            <p>
+              MetaMask Mobile will reopen this page in its in-app browser.
+              Once it does, tap <strong>Link EVM Wallet</strong> again to continue.
+            </p>
+            <Button variant="outline" icon="refresh" onClick={startLink}>
+              Open MetaMask
+            </Button>
+            <Button variant="outline" onClick={resetFlow}>
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
 
