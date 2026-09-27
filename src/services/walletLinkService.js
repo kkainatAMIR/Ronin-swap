@@ -571,10 +571,37 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
     evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
   })
 
-  // This is the canonical Phantom browse deeplink documented for opening a web page
-  // inside Phantom. We do not add more fallback hacks here because the browser-level
-  // webview restriction is the actual blocker once the user is already inside MetaMask.
-  window.location.href = phantomDeepLink
+  // On MetaMask Mobile, the app switch back into Phantom is not reliable with a
+  // single deep-link form. Use BOTH the documented Phantom browse universal link
+  // and the direct custom scheme, with a short fallback delay, so the browser can
+  // leave the MetaMask webview and resume the Phase-3 Solana signing flow.
+  const phantomCustomScheme = `phantom://ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
+
+  console.info('[WalletLinkMobile] Phantom handoff attempts scheduled', {
+    universal: phantomDeepLink,
+    customScheme: phantomCustomScheme,
+    phase: 2,
+    challengeId,
+  })
+
+  try {
+    window.location.href = phantomDeepLink
+  } catch (error) {
+    console.warn('[WalletLinkMobile] Phantom universal-link handoff failed', { message: error?.message })
+  }
+
+  try {
+    window.setTimeout(() => {
+      try {
+        window.location.href = phantomCustomScheme
+      } catch (error) {
+        console.warn('[WalletLinkMobile] Phantom custom-scheme handoff failed', { message: error?.message })
+      }
+    }, 350)
+  } catch (error) {
+    console.warn('[WalletLinkMobile] Phantom handoff scheduler failed', { message: error?.message })
+  }
+
   return true
 }
 
