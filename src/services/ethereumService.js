@@ -21,9 +21,10 @@ export function isMobileBrowser() {
 
 export function openMetaMaskMobile() {
   if (typeof window === 'undefined') return false
+
   const target = new URL(window.location.origin)
-  target.pathname = window.location.pathname || '/'
-  target.search = window.location.search || ''
+  target.pathname = '/'
+  target.search = ''
   target.hash = ''
   const destinationUrl = target.toString()
   const encodedDestination = encodeURIComponent(destinationUrl)
