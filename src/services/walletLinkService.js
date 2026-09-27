@@ -314,9 +314,18 @@ export function getMobileWalletLinkPhase() {
 
   if (!phase && persisted) {
     if (persisted.phase === '1' && persisted.solanaWallet) {
+      console.info('[WalletLinkMobile] persisted wl=1 state detected', {
+        solanaWalletShort: persisted.solanaWallet.slice(0, 4) + '...' + persisted.solanaWallet.slice(-4),
+      })
       return { phase: '1', solanaWallet: persisted.solanaWallet }
     }
     if (persisted.phase === '2' && persisted.challengeId && persisted.evmWallet && persisted.evmSignature && persisted.messageSolana) {
+      console.info('[WalletLinkMobile] persisted wl=2 state detected', {
+        challengeId: persisted.challengeId,
+        evmWalletShort: persisted.evmWallet.slice(0, 6) + '...' + persisted.evmWallet.slice(-4),
+        sigLen: persisted.evmSignature?.length,
+        msLen: persisted.messageSolana?.length,
+      })
       return { phase: '2', challengeId: persisted.challengeId, evmWallet: persisted.evmWallet, evmSignature: persisted.evmSignature, messageSolana: persisted.messageSolana }
     }
   }
@@ -526,16 +535,61 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   const deepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
 
   saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: 'profile' })
-
-  // Debug log (addresses + signature are public — but shorten for safety)
-  console.info('[WalletLinkMobile] Phase 2 deep-link generated', {
-    destinationUrl,
+  console.info('[WalletLinkMobile] Phase 2 state persisted', {
     phase: 2,
     challengeId,
     evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+    sigLen: evmSignature?.length,
+    msLen: messageSolana?.length,
   })
 
-  window.location.href = deepLink
+  // Debug log (addresses + signature are public — but shorten for safety)
+  console.info('[WalletLinkMobile] Phase 2 deep-link generated', {
+    destinationHostname: new URL(destinationUrl).hostname,
+    destinationPathname: new URL(destinationUrl).pathname,
+    phase: 2,
+    challengeId,
+    evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+    sigLen: evmSignature?.length,
+    msLen: messageSolana?.length,
+  })
+  console.info('[WalletLinkMobile] Phantom deep-link navigation starting', {
+    deepLinkHostname: new URL(deepLink).hostname,
+    deepLinkPathname: new URL(deepLink).pathname,
+    phase: 2,
+    challengeId,
+    evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+    sigLen: evmSignature?.length,
+    msLen: messageSolana?.length,
+  })
+
+  const currentUrl = window.location.href
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = deepLink
+    anchor.rel = 'noopener noreferrer'
+    anchor.style.position = 'fixed'
+    anchor.style.left = '-9999px'
+    anchor.style.top = '-9999px'
+    anchor.style.opacity = '0'
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+  } catch (error) {
+    console.warn('[WalletLinkMobile] Phantom deep-link anchor fallback failed', { message: error?.message })
+  }
+
+  setTimeout(() => {
+    if (window.location.href === currentUrl) {
+      console.warn('[WalletLinkMobile] Phantom handoff did not leave MetaMask browser', {
+        currentUrl: window.location.href,
+        deepLinkHostname: new URL(deepLink).hostname,
+        deepLinkPathname: new URL(deepLink).pathname,
+      })
+      window.location.href = deepLink
+    }
+  }, 1200)
+
   return true
 }
 
