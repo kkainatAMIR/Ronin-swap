@@ -214,6 +214,23 @@ export default function Profile() {
   const perWallet = Array.isArray(stats.perWallet) ? stats.perWallet : []
   const trackedWalletCount = (data?.allWalletAddresses || []).length
 
+  // Display wallet address — the FIRST known wallet, whether that's
+  // the connected Phantom Solana wallet or (on mobile, after the
+  // MetaMask Mobile deep-link brings the user back into the dapp)
+  // the first EVM wallet address tracked in localStorage.
+  //
+  // This is null-safe: when `wallet` is null (Phantom not connected
+  // yet) but `allWalletAddresses` has at least one EVM entry, we show
+  // that EVM address instead. Without this fallback, `wallet.address`
+  // throws `TypeError: null is not an object` on mobile when the user
+  // has connected MetaMask but not Phantom yet — the entire Ronin UI
+  // crashes.
+  //
+  // The existing data model is preserved: `wallet` is still the
+  // Phantom Solana wallet (or null); `allWalletAddresses` is still
+  // the aggregated list. We only introduce a derived display value.
+  const displayWalletAddress = wallet?.address || allWalletAddresses?.[0] || ''
+
   return (
     <main className="profile-page">
       {!disclaimerDismissed && (
@@ -239,7 +256,7 @@ export default function Profile() {
         <div className="profile-hero-content">
           <section className="profile-header-section">
             <div className="profile-header-mark"><div className="profile-avatar">侍</div><span className="profile-mark-line" /></div>
-            <div className="profile-header-copy"><span className="eyebrow">MY SAMURAI IDENTITY</span><h1>SAMURAI PROFILE</h1><p className="profile-wallet-address">{wallet.address}</p><button className="profile-copy-button" onClick={() => navigator.clipboard?.writeText(wallet.address)}><Icon name="copy" size={13} /> Copy wallet address</button></div>
+            <div className="profile-header-copy"><span className="eyebrow">MY SAMURAI IDENTITY</span><h1>SAMURAI PROFILE</h1><p className="profile-wallet-address">{displayWalletAddress}</p><button className="profile-copy-button" onClick={() => navigator.clipboard?.writeText(displayWalletAddress)}><Icon name="copy" size={13} /> Copy wallet address</button></div>
             <div className="profile-header-rank"><span className="profile-data-label">CURRENT RANK</span><strong>{currentRank?.name || 'UNRANKED'}</strong><small>{profile?.balance != null ? `${formatCompact(profile.balance)} RONIN` : 'RONIN balance unavailable'}</small></div>
           </section>
         </div>
