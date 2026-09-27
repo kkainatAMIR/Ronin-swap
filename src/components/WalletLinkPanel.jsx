@@ -165,29 +165,27 @@ export default function WalletLinkPanel({ onLinkedChange }) {
 
       const startPhase2 = () => {
         mobileResumeStartedRef.current = true
-        console.info('[WalletLink] MetaMask provider detected')
+        console.info('[WalletLinkMobile] MetaMask provider detected')
         setStep(STEP_REQUESTING_CHALLENGE)
         setError('')
         setErrorCode('')
         ;(async () => {
           try {
-            console.info('[WalletLink] requesting MetaMask account')
+            console.info('[WalletLinkMobile] eth_requestAccounts started')
             const evm = await ensureMetaMaskAccount()
             if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
-              // Shouldn't happen — we're inside MetaMask Mobile, so
-              // the provider should be available. If it's not, fall
-              // back to the error state.
               throw new Error('MetaMask provider became unavailable.')
             }
-            console.info('[WalletLink] MetaMask account received', {
+            console.info('[WalletLinkMobile] MetaMask account received', {
               evmShort: evm.slice(0, 6) + '...' + evm.slice(-4),
             })
             setEvmAddress(evm)
+            console.info('[WalletLinkMobile] challenge creation started')
             const challenge = await createWalletLinkChallenge({
               solanaWallet: phaseSolanaWallet,
               evmWallet: evm,
             })
-            console.info('[WalletLink] challenge created', {
+            console.info('[WalletLinkMobile] challenge created', {
               challengeId: challenge.challengeId,
             })
             setActiveLink({
@@ -199,12 +197,12 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             })
             // Sign with MetaMask (personal_sign). Same as desktop.
             setStep(STEP_SIGNING_EVM)
-            console.info('[WalletLink] requesting EVM personal_sign')
+            console.info('[WalletLinkMobile] personal_sign started')
             const evmSig = await signLinkMessageWithMetaMask({
               address: challenge.evmWallet,
               message: challenge.messageEvm,
             })
-            console.info('[WalletLink] EVM signature received', {
+            console.info('[WalletLinkMobile] personal_sign completed', {
               sigLen: evmSig?.length,
             })
             // EVM signature obtained. On desktop, we'd continue to
@@ -212,15 +210,17 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             // inside MetaMask Mobile's browser — we need to deep-link
             // BACK to Phantom so the user can sign the Solana message.
             setStep(STEP_RETURNING_TO_PHANTOM)
+            console.info('[WalletLinkMobile] Phase 2 deep-link generation started')
             openPhantomForSolanaSign({
               challengeId: challenge.challengeId,
               evmWallet: challenge.evmWallet,
               evmSignature: evmSig,
               messageSolana: challenge.messageSolana,
             })
+            console.info('[WalletLinkMobile] navigation to Phantom started')
           } catch (e) {
             const msg = e?.message || 'Mobile EVM signing failed.'
-            console.error('[WalletLink] mobile phase 2 failed', { message: msg })
+            console.error('[WalletLinkMobile] Phase 2 failed', { message: msg })
             clearMobileWalletLinkParams()
             setError(msg)
             setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
@@ -269,65 +269,142 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     }
 
     // ---- Phase 3: back in Phantom's in-app browser ----
-    // window.solana IS available (Phantom injected it). The URL
-    // contains the challengeId + EVM signature + messageSolana from
-    // Phase 2. Auto-resume: signLinkMessageWithPhantom → verifyWalletLink.
-    // This is the EXACT SAME verifyWalletLink call that desktop makes.
+    //
+    // CRITICAL: Same provider race condition as Phase 2.
+    // When Phantom opens the Ronin page via the deep-link,
+    // window.solana (Phantom provider) may NOT be injected yet on
+    // the first React render tick. The PREVIOUS implementation did
+    // a synchronous check:
+    //   const hasPhantomNow = Boolean(getPhantomProvider())
+    //   if (!hasPhantomNow) { clearMobileWalletLinkParams(); return }
+    //
+    // This was the EXACT same bug that caused Phase 2 to fail for
+    // MetaMask — the sync check returned false → clearMobileWalletLinkParams()
+    // fired → Phase 2 state destroyed → flow could NEVER resume.
+    //
+    // FIX: Same bounded retry as Phase 2 — poll every 250ms for up
+    // to 5 seconds. Do NOT clear URL params until Phantom provider
+    // is confirmed available.
     if (mobilePhase.phase === '2') {
-      const hasPhantomNow = Boolean(getPhantomProvider())
-      if (!hasPhantomNow) {
-        // Not in Phantom yet — clear params and show idle.
+      const { challengeId, evmWallet, evmSignature, messageSolana } = mobilePhase
+      console.info('[WalletLinkMobile] wl=2 detected', {
+        challengeId,
+        evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+        sigLen: evmSignature?.length,
+        msLen: messageSolana?.length,
+      })
+
+      // Detect Phantom provider at a single point in time.
+      const detectPhantomNow = () => Boolean(getPhantomProvider())
+
+      const startPhase3 = () => {
+        mobileResumeStartedRef.current = true
+        console.info('[WalletLinkMobile] Phantom provider detected')
+        console.info('[WalletLinkMobile] challengeId detected', { challengeId })
+        console.info('[WalletLinkMobile] EVM wallet detected', {
+          evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+        })
+        console.info('[WalletLinkMobile] EVM signature detected', { sigLen: evmSignature?.length })
+        console.info('[WalletLinkMobile] Solana message decoded', { msLen: messageSolana?.length })
+
+        setEvmAddress(evmWallet)
+        setActiveLink({
+          solanaWallet: solanaWallet || '',
+          evmWallet,
+          challengeId,
+          messageEvm: '',
+          messageSolana,
+        })
+        // Clear the URL params NOW — we've confirmed Phantom is available
+        // and read all values into local variables. It's safe to clear.
         clearMobileWalletLinkParams()
+        // Sign with Phantom (signMessage). Same as desktop.
+        setStep(STEP_SIGNING_SOLANA)
+        setError('')
+        setErrorCode('')
+        ;(async () => {
+          try {
+            console.info('[WalletLinkMobile] Phantom signMessage started')
+            const solanaSig = await signLinkMessageWithPhantom({ message: messageSolana })
+            console.info('[WalletLinkMobile] Phantom signMessage completed', {
+              sigLen: solanaSig?.length,
+            })
+            // Verify with backend. Same endpoint, same payload as desktop.
+            setStep(STEP_VERIFYING)
+            console.info('[WalletLinkMobile] verify request started', { challengeId })
+            const result = await verifyWalletLink({
+              challengeId,
+              evmSignature,
+              solanaSignature: solanaSig,
+            })
+            console.info('[WalletLinkMobile] verify request completed', {
+              success: result?.success,
+            })
+            console.info('[WalletLinkMobile] refreshLinkedWallets started')
+            await refreshLinkedWallets()
+            console.info('[WalletLinkMobile] refreshLinkedWallets completed')
+            try {
+              const identity = await getVerifiedRewardIdentity(solanaWallet)
+              if (identity?.linked_evm_wallets) {
+                setAggregatedPoints(identity)
+              }
+            } catch (aggErr) {
+              console.warn('[WalletLinkMobile] could not fetch aggregated balance', aggErr?.message)
+            }
+            console.info('[WalletLinkMobile] LINK SUCCESS')
+            setStep(STEP_SUCCESS)
+            onLinkedChange?.(result)
+          } catch (e) {
+            const msg = e?.message || 'Mobile Solana signing or verification failed.'
+            console.error('[WalletLinkMobile] Phase 3 failed', {
+              message: msg,
+              code: e?.code,
+              challengeId,
+            })
+            setError(msg)
+            setErrorCode(String(e?.code || 'MOBILE_SOLANA_FAILED'))
+            setStep(STEP_ERROR)
+          }
+        })()
+      }
+
+      if (detectPhantomNow()) {
+        startPhase3()
         return
       }
-      mobileResumeStartedRef.current = true
-      const { challengeId, evmWallet, evmSignature, messageSolana } = mobilePhase
-      setEvmAddress(evmWallet)
-      setActiveLink({
-        solanaWallet: solanaWallet || '',
-        evmWallet,
-        challengeId,
-        messageEvm: '', // not needed for Solana signing
-        messageSolana,
-      })
-      // Clear the URL params NOW — they contain the EVM signature
-      // which we've already read into memory. Don't leave it in the
-      // URL longer than necessary.
-      clearMobileWalletLinkParams()
-      // Sign with Phantom (signMessage). Same as desktop.
+
+      // Provider not yet injected — wait with a bounded retry.
+      // Show the signing state while we wait.
       setStep(STEP_SIGNING_SOLANA)
       setError('')
       setErrorCode('')
-      ;(async () => {
-        try {
-          const solanaSig = await signLinkMessageWithPhantom({ message: messageSolana })
-          // Verify with backend. Same endpoint, same payload as desktop.
-          setStep(STEP_VERIFYING)
-          const result = await verifyWalletLink({
-            challengeId,
-            evmSignature,
-            solanaSignature: solanaSig,
-          })
-          await refreshLinkedWallets()
-          try {
-            const identity = await getVerifiedRewardIdentity(solanaWallet)
-            if (identity?.linked_evm_wallets) {
-              setAggregatedPoints(identity)
-            }
-          } catch (aggErr) {
-            console.warn('[WalletLinkPanel] could not fetch aggregated balance', aggErr?.message)
-          }
-          setStep(STEP_SUCCESS)
-          onLinkedChange?.(result)
-        } catch (e) {
-          const msg = e?.message || 'Mobile Solana signing or verification failed.'
-          console.error('[WalletLinkPanel] mobile phase 3 failed', { message: msg })
-          setError(msg)
-          setErrorCode(String(e?.code || 'MOBILE_SOLANA_FAILED'))
-          setStep(STEP_ERROR)
+      const MAX_WAIT_ATTEMPTS = 20
+      const ATTEMPT_INTERVAL_MS = 250
+      let attempts = 0
+      let cancelled = false
+      const pollTimer = setInterval(() => {
+        if (cancelled) return
+        attempts += 1
+        if (detectPhantomNow()) {
+          clearInterval(pollTimer)
+          startPhase3()
+          return
         }
-      })()
-      return
+        if (attempts >= MAX_WAIT_ATTEMPTS) {
+          clearInterval(pollTimer)
+          if (!mobileResumeStartedRef.current) {
+            mobileResumeStartedRef.current = true
+            clearMobileWalletLinkParams()
+            console.error('[WalletLinkMobile] Phantom provider timeout after 5s')
+            setError('Phantom provider was not detected. Please open the link inside Phantom and try again.')
+            setErrorCode('PHANTOM_PROVIDER_TIMEOUT')
+            setStep(STEP_ERROR)
+          }
+        }
+      }, ATTEMPT_INTERVAL_MS)
+
+      // Cleanup on unmount
+      return () => { cancelled = true; clearInterval(pollTimer) }
     }
   }, [solanaWallet, refreshLinkedWallets, onLinkedChange])
 

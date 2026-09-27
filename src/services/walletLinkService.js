@@ -286,8 +286,7 @@ export function getMobileWalletLinkPhase() {
   if (phase === '1') {
     const solanaWallet = getParam(MOBILE_WL_SW_PARAM)
     if (!solanaWallet) return null
-    console.info('[WalletLink] mobile phase detected', {
-      phase: 1,
+    console.info('[WalletLinkMobile] wl=1 detected', {
       solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
       source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
     })
@@ -302,10 +301,11 @@ export function getMobileWalletLinkPhase() {
     if (!challengeId || !evmWallet || !evmSignature || !msB64) return null
     let messageSolana = ''
     try { messageSolana = atob(msB64) } catch { return null }
-    console.info('[WalletLink] mobile phase detected', {
-      phase: 2,
+    console.info('[WalletLinkMobile] wl=2 detected', {
       challengeId,
       evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+      sigLen: evmSignature?.length,
+      msLen: messageSolana?.length,
       source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
     })
     return { phase: '2', challengeId, evmWallet, evmSignature, messageSolana }
@@ -423,7 +423,7 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
   const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
 
   // Debug log (addresses are public keys — safe to log shortened)
-  console.info('[WalletLink] mobile deep-link destination', {
+  console.info('[WalletLinkMobile] deep-link destination generated', {
     destinationUrl: `https://${destinationUrl}`,
     phase: 1,
     solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
@@ -478,7 +478,7 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   const deepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
 
   // Debug log (addresses + signature are public — but shorten for safety)
-  console.info('[WalletLink] mobile deep-link destination', {
+  console.info('[WalletLinkMobile] Phase 2 deep-link generated', {
     destinationUrl,
     phase: 2,
     challengeId,
