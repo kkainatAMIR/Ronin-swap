@@ -530,9 +530,6 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   // Build destination WITHOUT the hash:
   const destinationUrl = `${url.origin}${url.pathname}${url.search}`
 
-  // Phantom's mobile deep links are available as both a universal link and a
-  // custom scheme. In MetaMask Mobile's in-app browser, the custom scheme is the
-  // more reliable fallback for leaving the browser and opening the Phantom app.
   const targetUrl = new URL(destinationUrl)
   console.info('[WalletLinkMobile] Phantom return URL prepared', {
     targetOrigin: targetUrl.origin,
@@ -545,8 +542,7 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
     route: targetUrl.searchParams.get('route'),
   })
 
-  const baseDeepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
-  const customSchemeDeepLink = `phantom://ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
+  const phantomDeepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
 
   saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: 'profile' })
   console.info('[WalletLinkMobile] Phase 2 state persisted', {
@@ -558,8 +554,8 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   })
 
   console.info('[WalletLinkMobile] Phantom deep-link generated', {
-    hostname: new URL(baseDeepLink).hostname,
-    pathname: new URL(baseDeepLink).pathname,
+    hostname: new URL(phantomDeepLink).hostname,
+    pathname: new URL(phantomDeepLink).pathname,
     phase: 2,
     challengeId,
     evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
@@ -568,41 +564,17 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   })
 
   console.info('[WalletLinkMobile] Phantom handoff starting', {
-    universalHostname: new URL(baseDeepLink).hostname,
-    customScheme: customSchemeDeepLink.split('?')[0],
+    hostname: new URL(phantomDeepLink).hostname,
+    pathname: new URL(phantomDeepLink).pathname,
     phase: 2,
     challengeId,
     evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
   })
 
-  try {
-    const universalLink = document.createElement('a')
-    universalLink.href = baseDeepLink
-    universalLink.rel = 'noopener noreferrer'
-    universalLink.style.position = 'fixed'
-    universalLink.style.left = '-9999px'
-    universalLink.style.top = '-9999px'
-    document.body.appendChild(universalLink)
-    universalLink.click()
-    document.body.removeChild(universalLink)
-  } catch (error) {
-    console.warn('[WalletLinkMobile] Phantom universal-link handoff failed', { message: error?.message })
-  }
-
-  try {
-    const customSchemeLink = document.createElement('a')
-    customSchemeLink.href = customSchemeDeepLink
-    customSchemeLink.rel = 'noopener noreferrer'
-    customSchemeLink.style.position = 'fixed'
-    customSchemeLink.style.left = '-9999px'
-    customSchemeLink.style.top = '-9999px'
-    document.body.appendChild(customSchemeLink)
-    customSchemeLink.click()
-    document.body.removeChild(customSchemeLink)
-  } catch (error) {
-    console.warn('[WalletLinkMobile] Phantom custom-scheme handoff failed', { message: error?.message })
-  }
-
+  // This is the canonical Phantom browse deeplink documented for opening a web page
+  // inside Phantom. We do not add more fallback hacks here because the browser-level
+  // webview restriction is the actual blocker once the user is already inside MetaMask.
+  window.location.href = phantomDeepLink
   return true
 }
 
