@@ -109,7 +109,34 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const [aggregatedPoints, setAggregatedPoints] = useState(null)
 
   // Reset state if the user switches Phantom wallet.
+  //
+  // CRITICAL MOBILE FIX: This effect fires whenever `wallet?.address`
+  // changes. On mobile Phase 3, when Phantom reconnects after the
+  // deep-link return, `wallet.address` transitions from `null` →
+  // `<real address>`. This triggers the reset → wipes STEP_SIGNING_SOLANA /
+  // activeLink / evmAddress → the async signing/verify operation is
+  // still running but the UI has been reset to STEP_IDLE.
+  //
+  // FIX: Skip the reset when a mobile wallet-link flow is active
+  // (mobileResumeStartedRef.current = true) or when mobile wallet-link
+  // URL params are present (getMobileWalletLinkPhase() returns non-null).
+  // This prevents the state from being wiped mid-flow.
+  //
+  // NOTE: mobileResumeStartedRef is declared below (line ~140) but is
+  // accessible inside this effect callback because the callback executes
+  // AFTER render, by which time the const has been initialized.
   useEffect(() => {
+    // Skip reset during mobile wallet-link flow
+    if (mobileResumeStartedRef?.current) return
+    // Also check URL params as a backup (in case the ref wasn't set yet)
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search)
+      let hp = new URLSearchParams()
+      const hash = window.location.hash || ''
+      const hqi = hash.indexOf('?')
+      if (hqi >= 0) hp = new URLSearchParams(hash.slice(hqi + 1))
+      if (sp.get('wl') || hp.get('wl')) return
+    }
     setStep(STEP_IDLE)
     setError('')
     setErrorCode('')
@@ -661,6 +688,9 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   }, [solanaWallet, refreshLinkedWallets])
 
   const resetFlow = () => {
+    // Reset the mobile resume guard so a new flow can start after
+    // a failure or manual cancel.
+    mobileResumeStartedRef.current = false
     setStep(STEP_IDLE)
     setError('')
     setErrorCode('')
