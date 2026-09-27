@@ -137,9 +137,21 @@ export default function Profile() {
   // We render the section whenever EITHER solanaPayoutWallet is
   // available (normal desktop + mobile Phantom) OR we're in a mobile
   // wallet-link phase (auto-resume in progress).
-  const mobileWalletLinkPhase = typeof window !== 'undefined'
-    ? Boolean(new URLSearchParams(window.location.search).get('wl'))
-    : false
+  //
+  // Params can be in window.location.search (?wl=1) OR in the hash
+  // (#profile?wl=1) because the app uses hash routing.
+  const mobileWalletLinkPhase = (() => {
+    if (typeof window === 'undefined') return false
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.get('wl')) return true
+    const hash = window.location.hash || ''
+    const qIdx = hash.indexOf('?')
+    if (qIdx >= 0) {
+      const hp = new URLSearchParams(hash.slice(qIdx + 1))
+      if (hp.get('wl')) return true
+    }
+    return false
+  })()
   const [error, setError] = useState('')
   // Dismissible wallet-link explanation banner. Persisted to localStorage
   // so a user who has already acknowledged it doesn't see it again on
