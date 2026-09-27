@@ -418,13 +418,17 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
   // The hash fragment would become the OUTER metamask.app.link URL's
   // fragment, which MetaMask Mobile strips. The route is carried via
   // ?route=profile in the query string instead.
-  // Build: https://metamask.app.link/dapp/<host><path>?<query>
-  const destinationUrl = `${url.host}${url.pathname}${url.search}`
-  const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
+  // Build: https://metamask.app.link/dapp/<encoded-destination-url>
+  // IMPORTANT: the destination URL must include the full origin and be
+  // URL-encoded so MetaMask Mobile preserves the wallet-link query string
+  // during the handoff. Without the full origin or encoding, the app
+  // can reopen without the wl/sw/route parameters and the link flow stalls.
+  const destinationUrl = `${url.origin}${url.pathname}${url.search}`
+  const deepLink = `https://metamask.app.link/dapp/${encodeURIComponent(destinationUrl)}`
 
   // Debug log (addresses are public keys — safe to log shortened)
   console.info('[WalletLinkMobile] deep-link destination generated', {
-    destinationUrl: `https://${destinationUrl}`,
+    destinationUrl,
     phase: 1,
     solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
   })
