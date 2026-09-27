@@ -1,6 +1,6 @@
 import { connectEthereumWallet, connectRobinhoodWallet, ensureEthereumMainnet, ensureRobinhoodChain, evmAmount, formatEvmAmount, getErc20Decimals, getEthereumProvider, getEthereumQuote, getEthereumTokenBalances, getEthereumTokenPrices } from '../services/ethereumService'
 import { approveLifiTransaction, getLifiApprovalRequest, getLifiQuote, getLifiStatus, lifiStatusIsComplete, lifiStatusIsFailed, sendLifiTransaction } from '../services/lifiService'
-import { getRobinhoodTokenSections, getRobinhoodTrending } from '../services/robinhoodTokenService'
+import { getRobinhoodTokenSections, getRobinhoodTrending, getRobinhoodTokenPrices } from '../services/robinhoodTokenService'
 import { getLiveTrendingTokens } from '../services/liveTrendingService'
 import { getEvmWalletTokensForSelector } from '../services/evmWalletTokens'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
@@ -416,7 +416,13 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         const nextAccount = accounts?.[0] || ''
         setAccount(nextAccount)
         setBalances(nextAccount ? await getEthereumTokenBalances(provider, nextAccount, ETHEREUM_SWAP_TOKENS) : new Map())
-        setPrices(nextAccount ? await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS) : new Map())
+        // Fetch token prices UNCONDITIONALLY — they're public market data
+        // that doesn't depend on a connected wallet. Previously this was
+        // gated on `nextAccount ?` which left the prices map empty on
+        // first load (no wallet connected yet), so the USD value next
+        // to the input showed '$0.00' even though ETH's price is
+        // publicly available.
+        setPrices(await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS))
       } catch { setAccount(''); setBalances(new Map()); setPrices(new Map()) }
     }
     const changed = (accounts) => { setAccount(accounts?.[0] || ''); setBalances(new Map()); setPrices(new Map()); setQuote(null); setMessage('Wallet account changed. Request a fresh quote.') }
@@ -923,6 +929,11 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
   const [txHash, setTxHash] = useState('')
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
+  // USD prices for Robinhood Chain tokens (native ETH + ERC-20s).
+  // Populated by getRobinhoodTokenPrices on mount + every 45s. The
+  // same pattern as EthereumSwapPanel's `prices` state. Null/empty
+  // Map means prices unavailable — UI shows a muted $0.00 placeholder.
+  const [prices, setPrices] = useState(new Map())
   // Red-line "SWAP COMPLETED" banner visibility. Set true on actual
   // on-chain success (status === 'confirmed'); auto-dismissed after
   // ~18s by SwapCompletedBanner. Same pattern as EthereumSwapPanel.
@@ -1007,6 +1018,39 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
     return () => { cancelled = true; window.clearInterval(interval) }
   }, [account])
 
+  // Fetch USD prices for all known Robinhood Chain tokens (the
+  // curated registry + any wallet-discovered tokens). Refreshes
+  // every 45s to keep the USD value next to the input fresh. The
+  // price fetch does NOT depend on a connected wallet — prices are
+  // public market data, same as the Ethereum panel.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      // Combine the curated registry tokens (sections.all) with any
+      // wallet-discovered tokens so we fetch prices for both.
+      const allTokens = [
+        ...(sections?.all || []),
+        ...(walletTokens || []),
+      ]
+      // Deduplicate by address (or 'native' for native ETH)
+      const seen = new Set()
+      const deduped = allTokens.filter((t) => {
+        const key = t?.type === 'native' ? 'native' : String(t?.address || '').toLowerCase()
+        if (!key || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      if (deduped.length === 0) return
+      try {
+        const nextPrices = await getRobinhoodTokenPrices(deduped)
+        if (!cancelled) setPrices(nextPrices)
+      } catch { /* leave existing prices */ }
+    }
+    load()
+    const interval = window.setInterval(load, 45_000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [sections, walletTokens])
+
   useEffect(() => {
     setQuote(null)
     setTxHash('')
@@ -1078,6 +1122,20 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
     const label = balanceLabel(fromToken)
     if (label && label !== '--') setAmount(label)
   }
+
+  // USD value of the input amount. Uses the `prices` Map populated by
+  // getRobinhoodTokenPrices (above). Falls back to null when the
+  // price is unavailable — the UI then shows the muted $0.00 USD
+  // placeholder (we do NOT invent prices). Same pattern as the
+  // EthereumSwapPanel's inputUsdValue.
+  const inputUsdValue = useMemo(() => {
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) return null
+    const key = fromToken.type === 'native' ? 'native' : String(fromToken.address || '').toLowerCase()
+    const price = prices.get(key)
+    if (!Number.isFinite(price) || price <= 0) return null
+    return amt * price
+  }, [amount, fromToken, prices])
 
   const connect = async () => {
     try { setMessage(''); setAccount(await connectRobinhoodWallet()) } catch (error) { setMessage(error.message) }
@@ -1235,7 +1293,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
         <div className="swap-field-row"><input className="swap-field-input" disabled={busy} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0" inputMode="decimal" aria-label="Amount you pay" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('from')}><TokenMark token={fromToken} /><strong>{fromToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span className="swap-usd-value is-muted">$0.00 USD</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || balanceLabel(fromToken) === '--'}>MAX</button>}</span></div>
+        <div className="swap-field-foot"><span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || balanceLabel(fromToken) === '--'}>MAX</button>}</span></div>
       </div>
       <div className="swap-flip-row"><button type="button" className="swap-flip" disabled={busy} onClick={() => { setFromToken(toToken); setToToken(fromToken); setQuote(null) }} aria-label="Reverse Robinhood swap"><Icon name="swapVertical" size={16} /></button></div>
       <div className="swap-field">
