@@ -530,9 +530,23 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   // Build destination WITHOUT the hash:
   const destinationUrl = `${url.origin}${url.pathname}${url.search}`
 
-  // Phantom's deep-link opens the URL inside Phantom's in-app browser.
-  // Format: https://phantom.app/ul/browse/<url-encoded-full-url>?ref=<origin>
-  const deepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
+  // Phantom's mobile deep links are available as both a universal link and a
+  // custom scheme. In MetaMask Mobile's in-app browser, the custom scheme is the
+  // more reliable fallback for leaving the browser and opening the Phantom app.
+  const targetUrl = new URL(destinationUrl)
+  console.info('[WalletLinkMobile] Phantom return URL prepared', {
+    targetOrigin: targetUrl.origin,
+    targetPath: targetUrl.pathname,
+    hasWl: targetUrl.searchParams.has('wl'),
+    hasCid: targetUrl.searchParams.has('cid'),
+    hasEvm: targetUrl.searchParams.has('evm'),
+    hasEs: targetUrl.searchParams.has('es'),
+    hasMs: targetUrl.searchParams.has('ms'),
+    route: targetUrl.searchParams.get('route'),
+  })
+
+  const baseDeepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
+  const customSchemeDeepLink = `phantom://ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
 
   saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: 'profile' })
   console.info('[WalletLinkMobile] Phase 2 state persisted', {
@@ -543,19 +557,9 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
     msLen: messageSolana?.length,
   })
 
-  // Debug log (addresses + signature are public — but shorten for safety)
-  console.info('[WalletLinkMobile] Phase 2 deep-link generated', {
-    destinationHostname: new URL(destinationUrl).hostname,
-    destinationPathname: new URL(destinationUrl).pathname,
-    phase: 2,
-    challengeId,
-    evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
-    sigLen: evmSignature?.length,
-    msLen: messageSolana?.length,
-  })
-  console.info('[WalletLinkMobile] Phantom deep-link navigation starting', {
-    deepLinkHostname: new URL(deepLink).hostname,
-    deepLinkPathname: new URL(deepLink).pathname,
+  console.info('[WalletLinkMobile] Phantom deep-link generated', {
+    hostname: new URL(baseDeepLink).hostname,
+    pathname: new URL(baseDeepLink).pathname,
     phase: 2,
     challengeId,
     evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
@@ -563,32 +567,41 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
     msLen: messageSolana?.length,
   })
 
-  const currentUrl = window.location.href
+  console.info('[WalletLinkMobile] Phantom handoff starting', {
+    universalHostname: new URL(baseDeepLink).hostname,
+    customScheme: customSchemeDeepLink.split('?')[0],
+    phase: 2,
+    challengeId,
+    evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+  })
+
   try {
-    const anchor = document.createElement('a')
-    anchor.href = deepLink
-    anchor.rel = 'noopener noreferrer'
-    anchor.style.position = 'fixed'
-    anchor.style.left = '-9999px'
-    anchor.style.top = '-9999px'
-    anchor.style.opacity = '0'
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
+    const universalLink = document.createElement('a')
+    universalLink.href = baseDeepLink
+    universalLink.rel = 'noopener noreferrer'
+    universalLink.style.position = 'fixed'
+    universalLink.style.left = '-9999px'
+    universalLink.style.top = '-9999px'
+    document.body.appendChild(universalLink)
+    universalLink.click()
+    document.body.removeChild(universalLink)
   } catch (error) {
-    console.warn('[WalletLinkMobile] Phantom deep-link anchor fallback failed', { message: error?.message })
+    console.warn('[WalletLinkMobile] Phantom universal-link handoff failed', { message: error?.message })
   }
 
-  setTimeout(() => {
-    if (window.location.href === currentUrl) {
-      console.warn('[WalletLinkMobile] Phantom handoff did not leave MetaMask browser', {
-        currentUrl: window.location.href,
-        deepLinkHostname: new URL(deepLink).hostname,
-        deepLinkPathname: new URL(deepLink).pathname,
-      })
-      window.location.href = deepLink
-    }
-  }, 1200)
+  try {
+    const customSchemeLink = document.createElement('a')
+    customSchemeLink.href = customSchemeDeepLink
+    customSchemeLink.rel = 'noopener noreferrer'
+    customSchemeLink.style.position = 'fixed'
+    customSchemeLink.style.left = '-9999px'
+    customSchemeLink.style.top = '-9999px'
+    document.body.appendChild(customSchemeLink)
+    customSchemeLink.click()
+    document.body.removeChild(customSchemeLink)
+  } catch (error) {
+    console.warn('[WalletLinkMobile] Phantom custom-scheme handoff failed', { message: error?.message })
+  }
 
   return true
 }
