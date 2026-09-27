@@ -26,7 +26,17 @@ export function openMetaMaskMobile() {
   target.search = window.location.search || ''
   target.hash = ''
   const destinationUrl = target.toString()
-  window.location.href = `https://metamask.app.link/dapp/${encodeURIComponent(destinationUrl)}`
+  const encodedDestination = encodeURIComponent(destinationUrl)
+  const deepLink = `metamask://dapp/${encodedDestination}`
+  const fallbackDeepLink = `https://metamask.app.link/dapp/${encodedDestination}`
+
+  window.location.href = deepLink
+  window.setTimeout(() => {
+    if (window.location.href.startsWith('metamask://') || window.location.href.startsWith('https://metamask.app.link/')) {
+      return
+    }
+    window.location.href = fallbackDeepLink
+  }, 1200)
   return true
 }
 
