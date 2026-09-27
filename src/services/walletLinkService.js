@@ -500,9 +500,9 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
 //
 // The Phantom deep-link format opens the URL inside Phantom's
 // in-app browser: https://phantom.app/ul/browse/<url-encoded-full-url>?ref=<origin>
-export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature, messageSolana }) {
-  if (typeof window === 'undefined') return false
-  if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return false
+export function buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignature, messageSolana }) {
+  if (typeof window === 'undefined') return ''
+  if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return ''
   const url = new URL(window.location.href)
 
   // Strip any stale wallet-link params + route from BOTH search and hash.
@@ -594,6 +594,31 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
     window.setTimeout(() => {
       try {
         window.location.href = phantomCustomScheme
+      } catch (error) {
+        console.warn('[WalletLinkMobile] Phantom custom-scheme handoff failed', { message: error?.message })
+      }
+    }, 350)
+  } catch (error) {
+    console.warn('[WalletLinkMobile] Phantom handoff scheduler failed', { message: error?.message })
+  }
+
+  return { ok: true, universalLink: phantomDeepLink, customSchemeLink: phantomCustomScheme }
+}
+
+export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature, messageSolana }) {
+  const target = buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignature, messageSolana })
+  if (!target || !target.ok) return false
+
+  try {
+    window.location.href = target.universalLink
+  } catch (error) {
+    console.warn('[WalletLinkMobile] Phantom universal-link handoff failed', { message: error?.message })
+  }
+
+  try {
+    window.setTimeout(() => {
+      try {
+        window.location.href = target.customSchemeLink
       } catch (error) {
         console.warn('[WalletLinkMobile] Phantom custom-scheme handoff failed', { message: error?.message })
       }

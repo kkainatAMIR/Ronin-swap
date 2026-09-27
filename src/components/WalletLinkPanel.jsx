@@ -17,6 +17,7 @@ import {
   openMetaMaskMobile,
   openMetaMaskMobileForWalletLink,
   openPhantomForSolanaSign,
+  buildPhantomForSolanaSignUrl,
   getMobileWalletLinkPhase,
   clearMobileWalletLinkParams,
   clearMobileWalletLinkState,
@@ -98,6 +99,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const [evmAddress, setEvmAddress] = useState('')
   const [activeLink, setActiveLink] = useState(null)
   const [unlinkingEvm, setUnlinkingEvm] = useState(null)
+  const [phantomFallbackUrl, setPhantomFallbackUrl] = useState('')
 
   // Diagnostic: log on every render what the URL looks like + what
   // getMobileWalletLinkPhase returns. This helps trace exactly where
@@ -264,6 +266,13 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             // BACK to Phantom so the user can sign the Solana message.
             setStep(STEP_RETURNING_TO_PHANTOM)
             console.info('[WalletLinkMobile] Phase 2 deep-link generation started')
+            const phantomUrl = buildPhantomForSolanaSignUrl({
+              challengeId: challenge.challengeId,
+              evmWallet: challenge.evmWallet,
+              evmSignature: evmSig,
+              messageSolana: challenge.messageSolana,
+            })
+            setPhantomFallbackUrl(phantomUrl?.universalLink || '')
             const phantomOk = openPhantomForSolanaSign({
               challengeId: challenge.challengeId,
               evmWallet: challenge.evmWallet,
@@ -757,6 +766,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     setErrorCode('')
     setActiveLink(null)
     setEvmAddress('')
+    setPhantomFallbackUrl('')
     setAggregatedPoints(null)
   }
 
@@ -941,6 +951,19 @@ export default function WalletLinkPanel({ onLinkedChange }) {
               reopening this page in Phantom so you can sign the Solana linking
               message to complete the wallet link.
             </p>
+            {phantomFallbackUrl && (
+              <Button
+                variant="primary"
+                icon="open"
+                onClick={() => {
+                  if (phantomFallbackUrl) {
+                    window.location.href = phantomFallbackUrl
+                  }
+                }}
+              >
+                Open Phantom to continue
+              </Button>
+            )}
           </div>
         </div>
       )}
