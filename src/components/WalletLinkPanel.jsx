@@ -489,7 +489,24 @@ export default function WalletLinkPanel({ onLinkedChange }) {
 
   // -- Render -------------------------------------------------------
 
-  if (!solanaWallet) {
+  // Detect mobile wallet-link phase from URL params. On mobile, the
+  // EVM wallet-link flow spans two browser contexts:
+  //   Phase 1: Phantom browser → deep-link to MetaMask Mobile
+  //   Phase 2: MetaMask Mobile browser → EVM connect + sign (NO Phantom here)
+  //   Phase 3: Back in Phantom browser → Solana sign + verify
+  //
+  // During Phase 2, window.solana (Phantom) is NOT available inside
+  // MetaMask Mobile's in-app browser. So both `solanaWallet` AND
+  // `hasPhantom` will be null/false. Without bypassing the guards
+  // below, the panel would render the "Connect Solana first" empty
+  // state — blocking the auto-resume useEffect from firing.
+  //
+  // When a mobile phase IS active, we skip the early-returns and
+  // render the main panel body so the auto-resume useEffect (defined
+  // above) can detect the phase and run the EVM signing flow.
+  const mobileWalletLinkPhase = getMobileWalletLinkPhase()
+
+  if (!solanaWallet && !mobileWalletLinkPhase) {
     return (
       <section className="profile-panel profile-wallet-link-panel">
         <SectionHeading
@@ -505,7 +522,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     )
   }
 
-  if (!hasPhantom) {
+  if (!hasPhantom && !mobileWalletLinkPhase) {
     return (
       <section className="profile-panel profile-wallet-link-panel">
         <SectionHeading
@@ -534,7 +551,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
       <div className="ronin-wallet-link-grid">
         <div className="ronin-wallet-link-stat">
           <span className="profile-data-label">SOLANA PAYOUT WALLET</span>
-          <strong className="ronin-wallet-link-addr">{shortAddr(solanaWallet)}</strong>
+          <strong className="ronin-wallet-link-addr">{shortAddr(solanaWallet) || '—'}</strong>
           <small>SOL rewards are paid to this wallet</small>
         </div>
         <div className="ronin-wallet-link-stat">

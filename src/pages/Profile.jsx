@@ -117,6 +117,22 @@ export default function Profile() {
   const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded } = useWallet()
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
+
+  // Detect mobile wallet-link phase from URL. On mobile, the EVM
+  // wallet-link flow spans two browser contexts (Phantom → MetaMask
+  // Mobile → back to Phantom). When the page loads inside MetaMask
+  // Mobile's in-app browser, Phantom is NOT injected, so
+  // solanaPayoutWallet is null. Without this check, the entire
+  // "VERIFIED REWARD WALLETS" section (which contains WalletLinkPanel)
+  // would be hidden on mobile during Phase 2 — the user would see no
+  // "Link EVM Wallet" button and the auto-resume couldn't fire.
+  //
+  // We render the section whenever EITHER solanaPayoutWallet is
+  // available (normal desktop + mobile Phantom) OR we're in a mobile
+  // wallet-link phase (auto-resume in progress).
+  const mobileWalletLinkPhase = typeof window !== 'undefined'
+    ? Boolean(new URLSearchParams(window.location.search).get('wl'))
+    : false
   const [error, setError] = useState('')
   // Dismissible wallet-link explanation banner. Persisted to localStorage
   // so a user who has already acknowledged it doesn't see it again on
@@ -283,7 +299,7 @@ export default function Profile() {
           (cryptographically linked via /api/wallet-link/*). The
           difference matters: only the verified set is consulted by
           the backend for reward aggregation. */}
-      {solanaPayoutWallet && (
+      {(solanaPayoutWallet || mobileWalletLinkPhase) && (
         <section className="profile-panel profile-verified-wallets-panel">
           <SectionHeading
             eyebrow="VERIFIED REWARD WALLETS"
