@@ -392,41 +392,26 @@ export function clearMobileWalletLinkParams() {
 export function openMetaMaskMobileForWalletLink(solanaWallet) {
   if (typeof window === 'undefined') return false
   if (!solanaWallet) return false
-  const url = new URL(window.location.href)
 
-  // Strip any stale wallet-link params + route from BOTH search and hash
-  // (cleanup from a previous attempt that may have used the old
-  // hash-based protocol).
-  for (const p of [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM, MOBILE_WL_ROUTE_PARAM]) {
-    url.searchParams.delete(p)
-  }
-  if (url.hash && url.hash.includes('?')) {
-    // Remove old-style hash query params (backward compat cleanup)
-    const hashPath = url.hash.split('?')[0]
-    url.hash = hashPath
-  }
+  // Force a stable destination URL rooted at the site origin and carry
+  // the wallet-link state in the query string. Do not rely on the hash
+  // route at all, because MetaMask strips hash fragments during handoff.
+  const target = new URL(window.location.origin)
+  target.pathname = '/'
+  target.searchParams.delete(MOBILE_WL_PARAM)
+  target.searchParams.delete(MOBILE_WL_SW_PARAM)
+  target.searchParams.delete(MOBILE_WL_CID_PARAM)
+  target.searchParams.delete(MOBILE_WL_EVM_PARAM)
+  target.searchParams.delete(MOBILE_WL_ES_PARAM)
+  target.searchParams.delete(MOBILE_WL_MS_PARAM)
+  target.searchParams.delete(MOBILE_WL_ROUTE_PARAM)
+  target.searchParams.set(MOBILE_WL_PARAM, '1')
+  target.searchParams.set(MOBILE_WL_SW_PARAM, solanaWallet)
+  target.searchParams.set(MOBILE_WL_ROUTE_PARAM, 'profile')
 
-  // Put Phase 1 wallet-link params + route in the SEARCH query string.
-  // These survive the MetaMask deep-link because they're part of
-  // the destination URL's path, not the outer metamask.app.link
-  // URL's fragment.
-  url.searchParams.set(MOBILE_WL_PARAM, '1')
-  url.searchParams.set(MOBILE_WL_SW_PARAM, solanaWallet)
-  url.searchParams.set(MOBILE_WL_ROUTE_PARAM, 'profile')
+  const destinationUrl = target.toString()
+  const deepLink = `https://metamask.app.link/dapp/${encodeURIComponent(destinationUrl)}`
 
-  // CRITICAL: Do NOT include url.hash in the destination URL.
-  // The hash fragment would become the OUTER metamask.app.link URL's
-  // fragment, which MetaMask Mobile strips. The route is carried via
-  // ?route=profile in the query string instead.
-  // Build: https://metamask.app.link/dapp/<destination-url>
-  // IMPORTANT: the destination must stay a real URL, not a fully
-  // component-encoded string. MetaMask parses the path after /dapp/
-  // as the destination URL; over-encoding ://, ?, & etc. can leave the
-  // app stuck on a loading page with no approval prompt.
-  const destinationUrl = `${url.origin}${url.pathname}${url.search}`
-  const deepLink = `https://metamask.app.link/dapp/${encodeURI(destinationUrl)}`
-
-  // Debug log (addresses are public keys — safe to log shortened)
   console.info('[WalletLinkMobile] deep-link destination generated', {
     destinationUrl,
     phase: 1,
