@@ -242,10 +242,20 @@ const MOBILE_WL_MS_PARAM = 'ms'        // base64-encoded messageSolana
 
 // Read the mobile wallet-link phase from the current URL.
 //
-// IMPORTANT: The Ronin app uses HASH routing (#profile, #swap, etc.).
-// URL params can end up in window.location.search (the ? query string)
-// OR in window.location.hash (e.g. #profile?wl=1&sw=...). We check
-// BOTH to be robust across different deep-link redirect behaviors.
+// PRIMARY MECHANISM: window.location.search (the ? query string)
+//   Example: https://ronin-swap6.vercel.app/?wl=1&sw=<solanaWallet>#profile
+//
+// The wallet-link params (wl, sw, cid, evm, es, ms) MUST be in the
+// search query string — NOT in the hash fragment. This is because
+// the MetaMask Mobile deep-link (metamask.app.link/dapp/<url>)
+// treats the #fragment of the destination URL as the OUTER deep-link
+// URL's fragment, which it strips/ignores. Only the search query
+// string survives the deep-link handoff.
+//
+// BACKWARD-COMPAT FALLBACK: also check the hash query string
+// (#profile?wl=1&...) for older deep-links that used the hash-based
+// protocol. This fallback can be removed once no users have stale
+// hash-based URLs in their history.
 //
 // Returns:
 //   { phase: '1', solanaWallet }     — inside MetaMask Mobile, need to EVM-sign
@@ -254,18 +264,19 @@ const MOBILE_WL_MS_PARAM = 'ms'        // base64-encoded messageSolana
 export function getMobileWalletLinkPhase() {
   if (typeof window === 'undefined') return null
 
-  // Collect params from both ?query and #hash?query
+  // PRIMARY: read from window.location.search
   const searchParams = new URLSearchParams(window.location.search)
+
+  // BACKWARD-COMPAT FALLBACK: also read from the hash query string
+  // (#profile?wl=1&...) — for old deep-links that used the hash protocol.
   let hashParams = new URLSearchParams()
   const hash = window.location.hash || ''
-  // Hash looks like '#profile' or '#profile?wl=1&sw=...' — extract the
-  // query portion after the first '?' if present.
   const hashQueryIndex = hash.indexOf('?')
   if (hashQueryIndex >= 0) {
     hashParams = new URLSearchParams(hash.slice(hashQueryIndex + 1))
   }
 
-  // Prefer search params; fall back to hash params
+  // Prefer search params (primary); fall back to hash params (legacy)
   const getParam = (key) => searchParams.get(key) ?? hashParams.get(key)
 
   const phase = getParam(MOBILE_WL_PARAM)
@@ -274,6 +285,11 @@ export function getMobileWalletLinkPhase() {
   if (phase === '1') {
     const solanaWallet = getParam(MOBILE_WL_SW_PARAM)
     if (!solanaWallet) return null
+    console.info('[WalletLink] mobile phase detected', {
+      phase: 1,
+      solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
+      source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
+    })
     return { phase: '1', solanaWallet }
   }
 
@@ -285,6 +301,12 @@ export function getMobileWalletLinkPhase() {
     if (!challengeId || !evmWallet || !evmSignature || !msB64) return null
     let messageSolana = ''
     try { messageSolana = atob(msB64) } catch { return null }
+    console.info('[WalletLink] mobile phase detected', {
+      phase: 2,
+      challengeId,
+      evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+      source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
+    })
     return { phase: '2', challengeId, evmWallet, evmSignature, messageSolana }
   }
 
@@ -295,20 +317,26 @@ export function getMobileWalletLinkPhase() {
 // a page reload. Uses window.history.replaceState so the params don't
 // linger in the browser's address bar or history.
 //
-// Clears params from BOTH window.location.search AND window.location.hash
-// (the app uses hash routing, so params may be in either place).
+// SECURITY: The EVM signature (es) and messageSolana (ms) are sensitive
+// flow data. They are removed from the URL IMMEDIATELY after being
+// consumed by getMobileWalletLinkPhase() — they should never linger in
+// browser history or the address bar longer than necessary.
+//
+// Clears params from BOTH window.location.search (primary) AND
+// window.location.hash (backward-compat with old deep-links).
 export function clearMobileWalletLinkParams() {
   if (typeof window === 'undefined') return
 
-  // Clear from the search query string
   const url = new URL(window.location.href)
   let changed = false
   const paramsToRemove = [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM]
+
+  // PRIMARY: clear from the search query string
   for (const p of paramsToRemove) {
     if (url.searchParams.has(p)) { url.searchParams.delete(p); changed = true }
   }
 
-  // Clear from the hash query string (e.g. #profile?wl=1&sw=...)
+  // BACKWARD-COMPAT: also clear from the hash query string (#profile?wl=1&...)
   if (url.hash && url.hash.includes('?')) {
     const hashQueryIndex = url.hash.indexOf('?')
     const hashPath = url.hash.slice(0, hashQueryIndex) // e.g. '#profile'
@@ -330,113 +358,137 @@ export function clearMobileWalletLinkParams() {
 }
 
 // Construct the MetaMask Mobile deep-link URL for Phase 1.
-// Appends wl=1&sw=<solanaWallet> to the current Ronin URL so that
-// when MetaMask Mobile opens the page, the app auto-resumes the
-// EVM signing step.
 //
-// IMPORTANT: The Ronin app uses hash routing (#profile, #swap, etc.).
-// We must preserve the hash so the user lands on the Profile page
-// inside MetaMask Mobile's browser, not on the Home page.
-// We put the wallet-link params in the hash query string
-// (e.g. #profile?wl=1&sw=...) so they survive the deep-link redirect
-// and are readable by getMobileWalletLinkPhase().
+// DESTINATION URL STRUCTURE (after fix):
+//   https://ronin-swap6.vercel.app/?wl=1&sw=<solanaWallet>#profile
+//
+// CRITICAL: wallet-link params (wl, sw) MUST be in the destination
+// URL's QUERY STRING (?wl=1&sw=...), NOT in the hash fragment.
+//
+// WHY: The MetaMask deep-link format is:
+//   https://metamask.app.link/dapp/<destination-url>
+//
+// If the wallet-link params are in the #fragment of the destination
+// (e.g. https://ronin-swap6.vercel.app/#profile?wl=1&sw=...), the
+// '#' is treated as the OUTER metamask.app.link URL's fragment —
+// which MetaMask Mobile's deep-link parser STRIPS/IGNORES. The dapp
+// opens with NO wallet-link params, so getMobileWalletLinkPhase()
+// returns null and the flow never resumes.
+//
+// FIX: Put wl/sw in url.searchParams (the ? query string, which is
+// part of the destination URL's path and survives the deep-link),
+// and keep #profile as the hash route ONLY (controls which Ronin
+// page renders). The app's hash router reads #profile to render the
+// Profile page; getMobileWalletLinkPhase() reads ?wl=1&sw=... from
+// window.location.search to resume the flow.
+//
+// The destination URL after the deep-link resolves is:
+//   https://ronin-swap6.vercel.app/?wl=1&sw=<solanaWallet>#profile
+//
+// This is the correct separation:
+//   ?query  → wallet-link protocol state (survives deep-link)
+//   #hash   → Ronin page routing (controls which page renders)
 export function openMetaMaskMobileForWalletLink(solanaWallet) {
   if (typeof window === 'undefined') return false
   if (!solanaWallet) return false
   const url = new URL(window.location.href)
 
-  // Build the wallet-link params
-  const wlParams = new URLSearchParams()
-  wlParams.set(MOBILE_WL_PARAM, '1')
-  wlParams.set(MOBILE_WL_SW_PARAM, solanaWallet)
-
-  // Ensure we're on the #profile page inside MetaMask Mobile — the
-  // auto-resume useEffect lives in WalletLinkPanel which is only
-  // rendered on the Profile page.
-  const hashPath = url.hash ? url.hash.split('?')[0] : '#profile'
-  if (!hashPath.startsWith('#profile')) {
-    // If not on profile, navigate to profile with the wl params
-    url.hash = `#profile?${wlParams.toString()}`
-  } else {
-    // Already on profile (or a sub-route) — append wl params to the
-    // existing hash query string
-    const existingHashQuery = url.hash.includes('?')
-      ? new URLSearchParams(url.hash.slice(url.hash.indexOf('?') + 1))
-      : new URLSearchParams()
-    // Strip any existing wl params from a previous attempt
-    for (const p of [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM]) {
-      existingHashQuery.delete(p)
-    }
-    // Set the Phase 1 params
-    existingHashQuery.set(MOBILE_WL_PARAM, '1')
-    existingHashQuery.set(MOBILE_WL_SW_PARAM, solanaWallet)
-    url.hash = `${hashPath}?${existingHashQuery.toString()}`
+  // Strip any stale wallet-link params from BOTH search and hash
+  // (cleanup from a previous attempt that may have used the old
+  // hash-based protocol).
+  for (const p of [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM]) {
+    url.searchParams.delete(p)
+  }
+  if (url.hash && url.hash.includes('?')) {
+    // Remove old-style hash query params (backward compat cleanup)
+    const hashPath = url.hash.split('?')[0]
+    url.hash = hashPath
   }
 
-  // Also strip any wl params from the search query (cleanup)
-  url.searchParams.delete(MOBILE_WL_PARAM)
-  url.searchParams.delete(MOBILE_WL_SW_PARAM)
-  url.searchParams.delete(MOBILE_WL_CID_PARAM)
-  url.searchParams.delete(MOBILE_WL_EVM_PARAM)
-  url.searchParams.delete(MOBILE_WL_ES_PARAM)
-  url.searchParams.delete(MOBILE_WL_MS_PARAM)
+  // Put Phase 1 wallet-link params in the SEARCH query string.
+  // These survive the MetaMask deep-link because they're part of
+  // the destination URL's path, not the outer metamask.app.link
+  // URL's fragment.
+  url.searchParams.set(MOBILE_WL_PARAM, '1')
+  url.searchParams.set(MOBILE_WL_SW_PARAM, solanaWallet)
 
-  // MetaMask Mobile deep-link format: metamask.app.link/dapp/<full-url>
-  // The full URL includes the hash, so MetaMask Mobile opens the right
-  // page with the right params.
-  window.location.href = `https://metamask.app.link/dapp/${url.host}${url.pathname}${url.search}${url.hash}`
+  // Ensure the hash route is #profile so the user lands on the
+  // Profile page inside MetaMask Mobile's browser (where
+  // WalletLinkPanel + the auto-resume useEffect live).
+  if (!url.hash || !url.hash.startsWith('#profile')) {
+    url.hash = '#profile'
+  }
+
+  // Build the MetaMask deep-link URL.
+  // Format: https://metamask.app.link/dapp/<host><path>?<query>#<hash>
+  // The destination URL is constructed from url.toString() which
+  // correctly encodes the query params and appends the hash.
+  const destinationUrl = `${url.host}${url.pathname}${url.search}${url.hash}`
+  const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
+
+  // Debug log (addresses are public keys — safe to log shortened)
+  console.info('[WalletLink] mobile deep-link destination', {
+    destinationUrl: `https://${destinationUrl}`,
+    phase: 1,
+    solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
+  })
+
+  window.location.href = deepLink
   return true
 }
 
 // Construct the Phantom deep-link URL for Phase 2→3 transition.
-// Appends wl=2&cid=<challengeId>&evm=<evmAddr>&es=<evmSig>&ms=<base64(messageSolana)>
-// to the current Ronin URL so that when Phantom opens the page, the app
-// auto-resumes the Solana signing step.
 //
-// IMPORTANT: Same hash-routing logic as openMetaMaskMobileForWalletLink.
-// We put the wallet-link params in the hash query string
-// (e.g. #profile?wl=2&cid=...) so they survive the deep-link redirect
-// and land the user on the Profile page inside Phantom's browser.
+// DESTINATION URL STRUCTURE (after fix):
+//   https://ronin-swap6.vercel.app/?wl=2&cid=<challengeId>&evm=<evmAddr>&es=<evmSig>&ms=<base64>#profile
+//
+// Same separation as openMetaMaskMobileForWalletLink:
+//   ?query  → wallet-link protocol state (survives Phantom deep-link)
+//   #hash   → Ronin page routing (#profile)
+//
+// The Phantom deep-link format opens the URL inside Phantom's
+// in-app browser: https://phantom.app/ul/browse/<url-encoded-full-url>?ref=<origin>
 export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature, messageSolana }) {
   if (typeof window === 'undefined') return false
   if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return false
   const url = new URL(window.location.href)
 
-  // Build the Phase 2 wallet-link params
-  const wlParams = new URLSearchParams()
-  wlParams.set(MOBILE_WL_PARAM, '2')
-  wlParams.set(MOBILE_WL_CID_PARAM, challengeId)
-  wlParams.set(MOBILE_WL_EVM_PARAM, evmWallet)
-  wlParams.set(MOBILE_WL_ES_PARAM, evmSignature)
-  wlParams.set(MOBILE_WL_MS_PARAM, btoa(messageSolana))
-
-  // Ensure we land on #profile inside Phantom's browser
-  const hashPath = url.hash ? url.hash.split('?')[0] : '#profile'
-  if (!hashPath.startsWith('#profile')) {
-    url.hash = `#profile?${wlParams.toString()}`
-  } else {
-    // Already on profile — merge with existing hash query, stripping old wl params
-    const existingHashQuery = url.hash.includes('?')
-      ? new URLSearchParams(url.hash.slice(url.hash.indexOf('?') + 1))
-      : new URLSearchParams()
-    for (const p of [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM]) {
-      existingHashQuery.delete(p)
-    }
-    for (const [k, v] of wlParams) { existingHashQuery.set(k, v) }
-    url.hash = `${hashPath}?${existingHashQuery.toString()}`
+  // Strip any stale wallet-link params from BOTH search and hash
+  for (const p of [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM]) {
+    url.searchParams.delete(p)
+  }
+  if (url.hash && url.hash.includes('?')) {
+    const hashPath = url.hash.split('?')[0]
+    url.hash = hashPath
   }
 
-  // Strip wl params from the search query (cleanup)
-  url.searchParams.delete(MOBILE_WL_PARAM)
-  url.searchParams.delete(MOBILE_WL_SW_PARAM)
-  url.searchParams.delete(MOBILE_WL_CID_PARAM)
-  url.searchParams.delete(MOBILE_WL_EVM_PARAM)
-  url.searchParams.delete(MOBILE_WL_ES_PARAM)
-  url.searchParams.delete(MOBILE_WL_MS_PARAM)
+  // Put Phase 2 wallet-link params in the SEARCH query string.
+  url.searchParams.set(MOBILE_WL_PARAM, '2')
+  url.searchParams.set(MOBILE_WL_CID_PARAM, challengeId)
+  url.searchParams.set(MOBILE_WL_EVM_PARAM, evmWallet)
+  url.searchParams.set(MOBILE_WL_ES_PARAM, evmSignature)
+  url.searchParams.set(MOBILE_WL_MS_PARAM, btoa(messageSolana))
+
+  // Ensure the hash route is #profile
+  if (!url.hash || !url.hash.startsWith('#profile')) {
+    url.hash = '#profile'
+  }
 
   // Phantom's deep-link opens the URL inside Phantom's in-app browser.
   // Format: https://phantom.app/ul/browse/<url-encoded-full-url>?ref=<origin>
-  window.location.href = `https://phantom.app/ul/browse/${encodeURIComponent(url.toString())}?ref=${encodeURIComponent(window.location.origin)}`
+  // We URL-encode the full destination URL so Phantom opens it exactly.
+  const destinationUrl = url.toString()
+  const deepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
+
+  // Debug log (addresses + signature are public — but shorten for safety)
+  console.info('[WalletLink] mobile deep-link destination', {
+    destinationUrl,
+    phase: 2,
+    challengeId,
+    evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
+  })
+
+  window.location.href = deepLink
   return true
 }
 

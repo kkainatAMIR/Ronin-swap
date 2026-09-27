@@ -165,11 +165,13 @@ export default function WalletLinkPanel({ onLinkedChange }) {
 
       const startPhase2 = () => {
         mobileResumeStartedRef.current = true
+        console.info('[WalletLink] MetaMask provider detected')
         setStep(STEP_REQUESTING_CHALLENGE)
         setError('')
         setErrorCode('')
         ;(async () => {
           try {
+            console.info('[WalletLink] requesting MetaMask account')
             const evm = await ensureMetaMaskAccount()
             if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
               // Shouldn't happen — we're inside MetaMask Mobile, so
@@ -177,10 +179,16 @@ export default function WalletLinkPanel({ onLinkedChange }) {
               // back to the error state.
               throw new Error('MetaMask provider became unavailable.')
             }
+            console.info('[WalletLink] MetaMask account received', {
+              evmShort: evm.slice(0, 6) + '...' + evm.slice(-4),
+            })
             setEvmAddress(evm)
             const challenge = await createWalletLinkChallenge({
               solanaWallet: phaseSolanaWallet,
               evmWallet: evm,
+            })
+            console.info('[WalletLink] challenge created', {
+              challengeId: challenge.challengeId,
             })
             setActiveLink({
               solanaWallet: challenge.solanaWallet,
@@ -191,9 +199,13 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             })
             // Sign with MetaMask (personal_sign). Same as desktop.
             setStep(STEP_SIGNING_EVM)
+            console.info('[WalletLink] requesting EVM personal_sign')
             const evmSig = await signLinkMessageWithMetaMask({
               address: challenge.evmWallet,
               message: challenge.messageEvm,
+            })
+            console.info('[WalletLink] EVM signature received', {
+              sigLen: evmSig?.length,
             })
             // EVM signature obtained. On desktop, we'd continue to
             // signSolana. On mobile, window.solana is NOT available
@@ -208,7 +220,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             })
           } catch (e) {
             const msg = e?.message || 'Mobile EVM signing failed.'
-            console.error('[WalletLinkPanel] mobile phase 2 failed', { message: msg })
+            console.error('[WalletLink] mobile phase 2 failed', { message: msg })
             clearMobileWalletLinkParams()
             setError(msg)
             setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
