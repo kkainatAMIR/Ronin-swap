@@ -97,6 +97,15 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const [evmAddress, setEvmAddress] = useState('')
   const [activeLink, setActiveLink] = useState(null)
   const [unlinkingEvm, setUnlinkingEvm] = useState(null)
+
+  // Ref to always hold the LATEST refreshLinkedWallets. The auto-resume
+  // useEffect captures `refreshLinkedWallets` at mount time, but on mobile
+  // the wallet state changes asynchronously (Phantom connects after page
+  // load). Without this ref, the Phase 3 code would call a STALE
+  // refreshLinkedWallets that has wallet.address=null → returns early →
+  // verifiedEvmWallets never updates → the linked EVM wallet doesn't appear.
+  const refreshLinkedWalletsRef = useRef(refreshLinkedWallets)
+  useEffect(() => { refreshLinkedWalletsRef.current = refreshLinkedWallets }, [refreshLinkedWallets])
   const [aggregatedPoints, setAggregatedPoints] = useState(null)
 
   // Reset state if the user switches Phantom wallet.
@@ -211,12 +220,20 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             // BACK to Phantom so the user can sign the Solana message.
             setStep(STEP_RETURNING_TO_PHANTOM)
             console.info('[WalletLinkMobile] Phase 2 deep-link generation started')
-            openPhantomForSolanaSign({
+            const phantomOk = openPhantomForSolanaSign({
               challengeId: challenge.challengeId,
               evmWallet: challenge.evmWallet,
               evmSignature: evmSig,
               messageSolana: challenge.messageSolana,
             })
+            if (!phantomOk) {
+              console.error('[WalletLinkMobile] Phantom handoff failed — openPhantomForSolanaSign returned false')
+              clearMobileWalletLinkParams()
+              setError('Phantom handoff could not be started. Please try again.')
+              setErrorCode('PHANTOM_HANDOFF_FAILED')
+              setStep(STEP_ERROR)
+              return
+            }
             console.info('[WalletLinkMobile] navigation to Phantom started')
           } catch (e) {
             const msg = e?.message || 'Mobile EVM signing failed.'
@@ -339,17 +356,48 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             })
             console.info('[WalletLinkMobile] verify request completed', {
               success: result?.success,
+              solanaWalletShort: result?.solanaWallet ? result.solanaWallet.slice(0, 4) + '...' + result.solanaWallet.slice(-4) : null,
+              evmWalletShort: result?.evmWallet ? result.evmWallet.slice(0, 6) + '...' + result.evmWallet.slice(-4) : null,
             })
+
+            // CRITICAL: refreshLinkedWallets() uses wallet?.address from
+            // React state, but after the mobile deep-link return, the
+            // closure captured wallet?.address=null (Phantom hadn't
+            // connected yet). This causes refreshLinkedWallets to return
+            // early with setVerifiedEvmWallets([]), so the linked EVM
+            // wallet never appears in the UI.
+            //
+            // FIX: After verify succeeds, use result.solanaWallet (from
+            // the backend verify response) to fetch the verified identity
+            // directly. This bypasses the stale wallet.address closure.
+            // Also call refreshLinkedWallets() for good measure — it
+            // will work once wallet.address is set (after Phantom auto-
+            // connects), but we don't depend on it.
             console.info('[WalletLinkMobile] refreshLinkedWallets started')
-            await refreshLinkedWallets()
+            // Use the ref to call the LATEST refreshLinkedWallets, not the
+            // stale one captured at useEffect mount time. On mobile, wallet.address
+            // changes from null to the real Phantom address AFTER the useEffect
+            // runs — the ref ensures we call the version with the latest address.
+            await refreshLinkedWalletsRef.current()
             console.info('[WalletLinkMobile] refreshLinkedWallets completed')
-            try {
-              const identity = await getVerifiedRewardIdentity(solanaWallet)
-              if (identity?.linked_evm_wallets) {
-                setAggregatedPoints(identity)
+
+            // ALSO fetch verified identity using the solana wallet from
+            // the verify response — this is the authoritative address.
+            // If refreshLinkedWallets returned early (stale wallet.address),
+            // this fetch ensures the UI still shows the linked EVM wallet.
+            if (result?.solanaWallet) {
+              try {
+                console.info('[WalletLinkMobile] fetching verified identity using result.solanaWallet')
+                const identity = await getVerifiedRewardIdentity(result.solanaWallet)
+                console.info('[WalletLinkMobile] verified identity fetched', {
+                  linkedEvmCount: identity?.linked_evm_wallets?.length || 0,
+                })
+                if (identity?.linked_evm_wallets) {
+                  setAggregatedPoints(identity)
+                }
+              } catch (aggErr) {
+                console.warn('[WalletLinkMobile] could not fetch aggregated balance', aggErr?.message)
               }
-            } catch (aggErr) {
-              console.warn('[WalletLinkMobile] could not fetch aggregated balance', aggErr?.message)
             }
             console.info('[WalletLinkMobile] LINK SUCCESS')
             setStep(STEP_SUCCESS)
