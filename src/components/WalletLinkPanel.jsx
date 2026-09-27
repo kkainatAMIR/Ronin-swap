@@ -90,7 +90,7 @@ function shortAddr(addr) {
 }
 
 export default function WalletLinkPanel({ onLinkedChange }) {
-  const { wallet, linkedEvmWallets, refreshLinkedWallets, solanaPayoutWallet } = useWallet()
+  const { wallet, verifiedEvmWallets, refreshLinkedWallets, solanaPayoutWallet } = useWallet()
   const [step, setStep] = useState(STEP_IDLE)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
@@ -111,7 +111,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
 
   const solanaWallet = solanaPayoutWallet || (wallet?.address && !wallet?.isDemo ? wallet.address : null)
   const hasPhantom = Boolean(getPhantomProvider())
-  const linkedList = linkedEvmWallets || []
+  const linkedList = verifiedEvmWallets || []
 
   // =====================================================================
   // MOBILE AUTO-RESUME — detect wallet-link phase from URL params
@@ -136,79 +136,124 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     if (!mobilePhase) return
 
     // ---- Phase 2: inside MetaMask Mobile's in-app browser ----
-    // window.ethereum IS available (MetaMask Mobile injected it).
-    // Auto-start: ensureMetaMaskAccount → createChallenge → personal_sign.
-    // This is the EXACT SAME code path as desktop startLink(), just
-    // triggered automatically instead of by a button click.
+    //
+    // CRITICAL: MetaMask Mobile's injected provider (`window.ethereum`)
+    // may NOT be available on the very first React render/effect. The
+    // deep-link opens the page, but the provider injection happens
+    // asynchronously. If we check `window.ethereum?.isMetaMask`
+    // synchronously on first render, it will be false → we'd clear
+    // the mobile params and abort the flow.
+    //
+    // FIX: Wait for the provider with a BOUNDED retry (up to ~5s).
+    // We poll every 250ms for the MetaMask provider. If it appears,
+    // we proceed with the EXACT SAME desktop flow. If it genuinely
+    // doesn't appear after the timeout, we show an error instead of
+    // silently clearing state.
     if (mobilePhase.phase === '1') {
       const phaseSolanaWallet = mobilePhase.solanaWallet
-      // Verify window.ethereum is actually available (we're inside
-      // MetaMask Mobile). If not, the user opened the URL in a
-      // non-MetaMask browser — clear the params and show the normal
-      // IDLE state.
-      const hasMetaMask = Boolean(
-        (typeof window !== 'undefined' && window.ethereum?.isMetaMask) ||
-        (Array.isArray(window.ethereum?.providers) && window.ethereum.providers.some((p) => p?.isMetaMask))
+
+      // Detect MetaMask provider at a single point in time.
+      const detectMetaMaskNow = () => Boolean(
+        (typeof window !== 'undefined' && window.ethereum?.isMetaMask && !window.ethereum?.isPhantom) ||
+        (Array.isArray(window.ethereum?.providers) && window.ethereum.providers.some((p) => p?.isMetaMask && !p?.isPhantom))
       )
-      if (!hasMetaMask) {
-        clearMobileWalletLinkParams()
+
+      // If already available, proceed immediately.
+      // Otherwise poll every 250ms for up to 5 seconds (20 attempts).
+      const MAX_WAIT_ATTEMPTS = 20
+      const ATTEMPT_INTERVAL_MS = 250
+
+      const startPhase2 = () => {
+        mobileResumeStartedRef.current = true
+        setStep(STEP_REQUESTING_CHALLENGE)
+        setError('')
+        setErrorCode('')
+        ;(async () => {
+          try {
+            const evm = await ensureMetaMaskAccount()
+            if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
+              // Shouldn't happen — we're inside MetaMask Mobile, so
+              // the provider should be available. If it's not, fall
+              // back to the error state.
+              throw new Error('MetaMask provider became unavailable.')
+            }
+            setEvmAddress(evm)
+            const challenge = await createWalletLinkChallenge({
+              solanaWallet: phaseSolanaWallet,
+              evmWallet: evm,
+            })
+            setActiveLink({
+              solanaWallet: challenge.solanaWallet,
+              evmWallet: challenge.evmWallet,
+              challengeId: challenge.challengeId,
+              messageEvm: challenge.messageEvm,
+              messageSolana: challenge.messageSolana,
+            })
+            // Sign with MetaMask (personal_sign). Same as desktop.
+            setStep(STEP_SIGNING_EVM)
+            const evmSig = await signLinkMessageWithMetaMask({
+              address: challenge.evmWallet,
+              message: challenge.messageEvm,
+            })
+            // EVM signature obtained. On desktop, we'd continue to
+            // signSolana. On mobile, window.solana is NOT available
+            // inside MetaMask Mobile's browser — we need to deep-link
+            // BACK to Phantom so the user can sign the Solana message.
+            setStep(STEP_RETURNING_TO_PHANTOM)
+            openPhantomForSolanaSign({
+              challengeId: challenge.challengeId,
+              evmWallet: challenge.evmWallet,
+              evmSignature: evmSig,
+              messageSolana: challenge.messageSolana,
+            })
+          } catch (e) {
+            const msg = e?.message || 'Mobile EVM signing failed.'
+            console.error('[WalletLinkPanel] mobile phase 2 failed', { message: msg })
+            clearMobileWalletLinkParams()
+            setError(msg)
+            setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
+            setStep(STEP_ERROR)
+          }
+        })()
+      }
+
+      if (detectMetaMaskNow()) {
+        startPhase2()
         return
       }
-      mobileResumeStartedRef.current = true
-      // Auto-start the EVM link flow. This calls the EXACT same
-      // createWalletLinkChallenge + signLinkMessageWithMetaMask that
-      // desktop uses — no separate mobile signing protocol.
+
+      // Provider not yet injected — wait with a bounded retry.
+      // Show a "Connecting to MetaMask…" state while we wait.
       setStep(STEP_REQUESTING_CHALLENGE)
       setError('')
       setErrorCode('')
-      ;(async () => {
-        try {
-          const evm = await ensureMetaMaskAccount()
-          if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
-            // Shouldn't happen — we're inside MetaMask Mobile, so
-            // the provider should be available. If it's not, fall
-            // back to the error state.
-            throw new Error('MetaMask provider became unavailable.')
-          }
-          setEvmAddress(evm)
-          const challenge = await createWalletLinkChallenge({
-            solanaWallet: phaseSolanaWallet,
-            evmWallet: evm,
-          })
-          setActiveLink({
-            solanaWallet: challenge.solanaWallet,
-            evmWallet: challenge.evmWallet,
-            challengeId: challenge.challengeId,
-            messageEvm: challenge.messageEvm,
-            messageSolana: challenge.messageSolana,
-          })
-          // Sign with MetaMask (personal_sign). Same as desktop.
-          setStep(STEP_SIGNING_EVM)
-          const evmSig = await signLinkMessageWithMetaMask({
-            address: challenge.evmWallet,
-            message: challenge.messageEvm,
-          })
-          // EVM signature obtained. On desktop, we'd continue to
-          // signSolana. On mobile, window.solana is NOT available
-          // inside MetaMask Mobile's browser — we need to deep-link
-          // BACK to Phantom so the user can sign the Solana message.
-          setStep(STEP_RETURNING_TO_PHANTOM)
-          openPhantomForSolanaSign({
-            challengeId: challenge.challengeId,
-            evmWallet: challenge.evmWallet,
-            evmSignature: evmSig,
-            messageSolana: challenge.messageSolana,
-          })
-        } catch (e) {
-          const msg = e?.message || 'Mobile EVM signing failed.'
-          console.error('[WalletLinkPanel] mobile phase 2 failed', { message: msg })
-          clearMobileWalletLinkParams()
-          setError(msg)
-          setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
-          setStep(STEP_ERROR)
+      let attempts = 0
+      let cancelled = false
+      const pollTimer = setInterval(() => {
+        if (cancelled) return
+        attempts += 1
+        if (detectMetaMaskNow()) {
+          clearInterval(pollTimer)
+          startPhase2()
+          return
         }
-      })()
-      return
+        if (attempts >= MAX_WAIT_ATTEMPTS) {
+          clearInterval(pollTimer)
+          // MetaMask genuinely didn't appear after ~5s. Show an error
+          // instead of silently clearing state — the user should know
+          // the flow failed and why.
+          if (!mobileResumeStartedRef.current) {
+            mobileResumeStartedRef.current = true
+            clearMobileWalletLinkParams()
+            setError('MetaMask Mobile provider was not detected. Please open the link inside MetaMask Mobile and try again.')
+            setErrorCode('METAMASK_PROVIDER_TIMEOUT')
+            setStep(STEP_ERROR)
+          }
+        }
+      }, ATTEMPT_INTERVAL_MS)
+
+      // Cleanup on unmount (e.g. user navigates away while waiting)
+      return () => { cancelled = true; clearInterval(pollTimer) }
     }
 
     // ---- Phase 3: back in Phantom's in-app browser ----
