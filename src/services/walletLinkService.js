@@ -405,11 +405,13 @@ export function clearMobileWalletLinkParams() {
     changed = true
   }
 
-  saveMobileWalletLinkState(null)
-
   if (changed) {
     window.history.replaceState({}, '', url.toString())
   }
+}
+
+export function clearMobileWalletLinkState() {
+  saveMobileWalletLinkState(null)
 }
 
 // Construct the MetaMask Mobile deep-link URL for Phase 1.

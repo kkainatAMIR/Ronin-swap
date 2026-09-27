@@ -19,6 +19,7 @@ import {
   openPhantomForSolanaSign,
   getMobileWalletLinkPhase,
   clearMobileWalletLinkParams,
+  clearMobileWalletLinkState,
   EVM_REDIRECTING_TO_METAMASK_MOBILE,
 } from '../services/walletLinkService'
 
@@ -485,6 +486,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
               console.info('[WalletLinkMobile] refreshLinkedWallets re-call completed')
             }
             console.info('[WalletLinkMobile] LINK SUCCESS')
+            clearMobileWalletLinkState()
             setStep(STEP_SUCCESS)
             onLinkedChange?.(result)
           } catch (e) {
@@ -749,6 +751,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     // Reset the mobile resume guard so a new flow can start after
     // a failure or manual cancel.
     mobileResumeStartedRef.current = false
+    clearMobileWalletLinkState()
     setStep(STEP_IDLE)
     setError('')
     setErrorCode('')
