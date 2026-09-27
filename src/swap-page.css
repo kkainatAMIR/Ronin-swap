@@ -554,6 +554,81 @@
 
 .swap-max:disabled { cursor: not-allowed; opacity: .7; }
 
+/* USD value text — small monospace next to the input amount.
+   Reuses existing --gold / --ink variables to match the Ronin
+   aesthetic. No new color system. */
+.swap-usd-value {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gold, #c39d63);
+  letter-spacing: .02em;
+}
+.swap-usd-value.is-muted { color: var(--muted-light, #9b948d); font-weight: 500; }
+
+/* ---------------- SWAP COMPLETED BANNER ---------------- */
+/* Red-line "✓ SWAP COMPLETED" banner shown for ~18 seconds after
+   a successful swap. Reuses the existing Ronin red accent + gold
+   typography. Auto-dismissed via setTimeout; does NOT replace the
+   existing swap details (swap-result-box). Sits above the result
+   box as a confirmation layer. */
+.swap-completed-banner {
+  position: relative;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--red, #b91c1c);
+  border-left-width: 3px;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.12), rgba(185, 28, 28, 0.02));
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: swap-completed-banner-in 280ms ease-out;
+}
+.swap-completed-banner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(185, 28, 28, 0.25), 0 8px 24px -8px rgba(185, 28, 28, 0.35);
+  pointer-events: none;
+}
+.swap-completed-banner-mark {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--red, #b91c1c);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+.swap-completed-banner-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.swap-completed-banner-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  color: var(--red, #b91c1c);
+  text-transform: uppercase;
+}
+.swap-completed-banner-sub {
+  font-size: 11px;
+  color: var(--ink, #2a2017);
+  letter-spacing: .01em;
+}
+@keyframes swap-completed-banner-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* --- flip button --- */
 .swap-flip-row {
   display: flex;

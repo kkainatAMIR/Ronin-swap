@@ -300,6 +300,41 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
 }
 
 // =====================================================================
+// SwapCompletedBanner — red-line "✓ SWAP COMPLETED" confirmation
+// banner. Shown for ~18 seconds after a successful swap, then
+// auto-dismissed via a setTimeout that is cleaned up on unmount.
+//
+// This is a UI confirmation layer ONLY. It does NOT replace the
+// existing swap-result-box (which still renders the full swap
+// details, points, signature, etc.). It sits ABOVE that box as a
+// clear visual signal that the swap has actually completed.
+//
+// Reuses the existing Ronin red accent + mono typography. No new
+// visual system. Defined here (not in /components) because it's
+// only used inside Swap.jsx's three chain panels.
+// =====================================================================
+function SwapCompletedBanner({ visible, subLabel, onDismiss }) {
+  useEffect(() => {
+    if (!visible) return undefined
+    // Show the banner for ~18 seconds (within the 15-20s requirement),
+    // then auto-dismiss. The parent clears `visible` via onDismiss.
+    const timer = setTimeout(() => onDismiss?.(), 18_000)
+    return () => clearTimeout(timer)
+  }, [visible, onDismiss])
+
+  if (!visible) return null
+  return (
+    <div className="swap-completed-banner" role="status" aria-live="polite">
+      <span className="swap-completed-banner-mark" aria-hidden="true">✓</span>
+      <span className="swap-completed-banner-text">
+        <span className="swap-completed-banner-title">SWAP COMPLETED</span>
+        {subLabel ? <span className="swap-completed-banner-sub">{subLabel}</span> : null}
+      </span>
+    </div>
+  )
+}
+
+// =====================================================================
 // forwardRef pattern — exposes each panel's selectToken to the parent
 // so the dashboard trending UI (rendered in the parent Swap component)
 // can dispatch a click to whichever chain panel is currently active.
@@ -321,6 +356,10 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
   const [prices, setPrices] = useState(new Map())
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
+  // Red-line "SWAP COMPLETED" banner visibility. Set to true when
+  // status transitions to 'confirmed' (actual on-chain success);
+  // auto-cleared after ~18s by SwapCompletedBanner's setTimeout.
+  const [showCompletedBanner, setShowCompletedBanner] = useState(false)
   const executeInFlightRef = useRef(false)
 
   // Internal selectToken — mirrors the Solana panel's selectToken.
@@ -424,6 +463,58 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
   const balanceLabel = (token) => {
     const entry = balances.get(token.address || 'native')
     return entry ? formatEvmAmount(entry.raw.toString(), entry.decimals) : '--'
+  }
+
+  // Trigger the SWAP COMPLETED banner when status transitions to
+  // 'confirmed' (actual on-chain success — NOT on quote/sign/submit).
+  // The SwapCompletedBanner component handles the 18s auto-dismiss
+  // and cleans up its own timer on unmount.
+  useEffect(() => {
+    if (status === 'confirmed') setShowCompletedBanner(true)
+    // If the user starts a new flow (status moves away from confirmed),
+    // hide any stale banner immediately so it doesn't linger.
+    if (status !== 'confirmed') setShowCompletedBanner(false)
+  }, [status])
+
+  // USD value of the input amount. Uses the existing `prices` map
+  // (already fetched via getEthereumTokenPrices). When the price or
+  // amount is unavailable, returns null — the UI falls back to the
+  // existing `$0.00` placeholder. We do NOT invent prices.
+  const inputUsdValue = useMemo(() => {
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) return null
+    const key = fromToken.type === 'native' ? 'native' : fromToken.address
+    const price = prices.get(key)
+    if (!Number.isFinite(price) || price <= 0) return null
+    return amt * price
+  }, [amount, fromToken, prices])
+
+  // Gas-safe MAX amount for the input token. For native ETH, leaves
+  // a 0.001 ETH (10^15 wei) reserve so the user can pay for the
+  // swap's gas. For ERC-20 tokens, uses the full token balance
+  // (gas is paid in ETH separately).
+  //
+  // The reserve is intentionally conservative — actual gas cost is
+  // typically much lower (~50k gas * ~20 gwei = ~0.001 ETH on busy
+  // moments). We avoid live eth_gasPrice calls here because the MAX
+  // button should feel instant; if the resulting amount still fails
+  // the gas check at submit time, the existing submit handler's
+  // 'Insufficient ETH for network gas' error fires.
+  const ETH_GAS_RESERVE_WEI = 10n ** 15n  // 0.001 ETH
+  const fillMaxAmount = () => {
+    const entry = balances.get(fromToken.address || 'native')
+    if (!entry) return
+    let rawMax = entry.raw
+    if (fromToken.type === 'native') {
+      // Leave gas reserve for native ETH.
+      const safe = rawMax - ETH_GAS_RESERVE_WEI
+      rawMax = safe > 0n ? safe : 0n
+    }
+    if (rawMax <= 0n) {
+      setAmount('0')
+      return
+    }
+    setAmount(formatEvmAmount(rawMax.toString(), entry.decimals))
   }
 
   const loadQuote = async () => {
@@ -559,7 +650,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
         <div className="swap-field-row"><input className="swap-field-input" disabled={busy} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0" inputMode="decimal" aria-label="Amount you pay" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('from')}><TokenMark token={fromToken} /><strong>{fromToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span>$0.00</span><span>Balance: {account ? `${balanceLabel(fromToken)} ${fromToken.symbol}` : '--'}{fromToken.type === 'native' && account && <button type="button" className="swap-max" onClick={() => setAmount(balanceLabel(fromToken))} disabled={busy}>MAX</button>}</span></div>
+        <div className="swap-field-foot"><span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span><span>Balance: {account ? `${balanceLabel(fromToken)} ${fromToken.symbol}` : '--'}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || balanceLabel(fromToken) === '--'}>MAX</button>}</span></div>
       </div>
       <div className="swap-flip-row"><button type="button" className="swap-flip" disabled={busy} onClick={() => { setFromToken(toToken); setToToken(fromToken); setQuote(null) }} aria-label="Reverse Ethereum swap"><Icon name="swapVertical" size={16} /></button></div>
       <div className="swap-field">
@@ -568,6 +659,11 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {account ? `${balanceLabel(toToken)} ${toToken.symbol}` : '--'}</span></div>
       </div>
       <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'signing' ? 'CONFIRM IN METAMASK...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
+      <SwapCompletedBanner
+        visible={showCompletedBanner}
+        subLabel={txHash ? `Tx ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : 'Transaction confirmed on Ethereum.'}
+        onDismiss={() => setShowCompletedBanner(false)}
+      />
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Ethereum Mainnet</strong></div><div className="swap-quote-row"><span>Route</span><strong>0x</strong></div><div className="swap-quote-row"><span>Gas estimate</span><strong>{quote.transaction?.gas ? `${quote.transaction.gas} gas` : '—'}</strong></div><div className="swap-quote-row"><span>Treasury fee</span><strong>{quote.swapFeeBps != null ? `${Number(quote.swapFeeBps) / 100}%` : '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.buyAmount ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</strong></div></div>}
       {status === 'confirmed' && (() => {
         const points = completion?.points ?? completion?.pointsRecord ?? completion?.samuraiPoints ?? null
@@ -827,6 +923,10 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
   const [txHash, setTxHash] = useState('')
   const [completion, setCompletion] = useState(null)
   const [walletTokens, setWalletTokens] = useState([])
+  // Red-line "SWAP COMPLETED" banner visibility. Set true on actual
+  // on-chain success (status === 'confirmed'); auto-dismissed after
+  // ~18s by SwapCompletedBanner. Same pattern as EthereumSwapPanel.
+  const [showCompletedBanner, setShowCompletedBanner] = useState(false)
   const executeInFlightRef = useRef(false)
 
   // Internal selectToken — mirrors the Solana + Ethereum panels.
@@ -948,10 +1048,33 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
     return formatEvmAmount(raw.toString(), decimals)
   }
 
+  // Trigger the SWAP COMPLETED banner when status transitions to
+  // 'confirmed' (actual on-chain success). Same pattern as Ethereum.
+  useEffect(() => {
+    if (status === 'confirmed') setShowCompletedBanner(true)
+    if (status !== 'confirmed') setShowCompletedBanner(false)
+  }, [status])
+
   // Click MAX to fill the input with the wallet's full balance of the
-  // currently-selected fromToken. Disabled for native ETH to leave
-  // room for gas (matches Ethereum panel's behavior).
+  // currently-selected fromToken. For native ETH on Robinhood Chain,
+  // leaves a 0.001 ETH gas reserve (matches the Ethereum panel's
+  // behavior). For ERC-20 tokens, uses the full balance since gas
+  // is paid in native ETH separately.
+  const ROBINHOOD_GAS_RESERVE_WEI = 10n ** 15n  // 0.001 ETH
   const fillMaxAmount = () => {
+    if (fromToken.type === 'native') {
+      // Native ETH: lookup the wallet's native balance entry (the
+      // walletTokens list includes a native entry with .type==='native').
+      const nativeEntry = walletTokens.find((t) => t.type === 'native')
+      const rawStr = nativeEntry?.balance || nativeEntry?.rawBalance || '0'
+      let raw = BigInt(rawStr)
+      const safe = raw - ROBINHOOD_GAS_RESERVE_WEI
+      raw = safe > 0n ? safe : 0n
+      if (raw <= 0n) { setAmount('0'); return }
+      setAmount(formatEvmAmount(raw.toString(), 18))
+      return
+    }
+    // ERC-20: full token balance.
     const label = balanceLabel(fromToken)
     if (label && label !== '--') setAmount(label)
   }
@@ -1112,7 +1235,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
         <div className="swap-field-row"><input className="swap-field-input" disabled={busy} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0" inputMode="decimal" aria-label="Amount you pay" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('from')}><TokenMark token={fromToken} /><strong>{fromToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{fromToken.type === 'native' && account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy}>MAX</button>}</span></div>
+        <div className="swap-field-foot"><span className="swap-usd-value is-muted">$0.00 USD</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || balanceLabel(fromToken) === '--'}>MAX</button>}</span></div>
       </div>
       <div className="swap-flip-row"><button type="button" className="swap-flip" disabled={busy} onClick={() => { setFromToken(toToken); setToToken(fromToken); setQuote(null) }} aria-label="Reverse Robinhood swap"><Icon name="swapVertical" size={16} /></button></div>
       <div className="swap-field">
@@ -1121,6 +1244,11 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(toToken)} {toToken.symbol}</span></div>
       </div>
       <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
+      <SwapCompletedBanner
+        visible={showCompletedBanner}
+        subLabel={txHash ? `Tx ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : 'Transaction confirmed on Robinhood Chain.'}
+        onDismiss={() => setShowCompletedBanner(false)}
+      />
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {quoteOutputAmount || '0.00'} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Robinhood Chain</strong></div><div className="swap-quote-row"><span>Route</span><strong>{quote?.tool?.name || quote?.provider || 'LI.FI'}</strong></div><div className="swap-quote-row"><span>Quote ID</span><strong>{quote?.quoteId || '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? formatTokenAmount(quote.minimumReceived, toToken.decimals || 18, 6) : '—'}</strong></div></div>}
       {status === 'confirmed' && <div className="swap-result-box swap-result-success"><h4>⚔️ SWAP COMPLETE</h4><p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p><p><strong>You Received:</strong> {quoteOutputAmount ? `${quoteOutputAmount} ${toToken.symbol}` : '—'}</p><p><strong>Status:</strong> Confirmed</p><div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}><p style={{ margin: '0 0 4px', color: completion?.points?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{completion?.points?.qualified ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || 0).toLocaleString()} Samurai Points` : completion?.points ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong></p>{completion?.points?.qualified && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}{completion?.points && !completion.points.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(completion.points.reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}</div>{txHash && <p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}</div>}
       {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Robinhood swap could not be completed.'}</p></div>}
@@ -1446,6 +1574,10 @@ export default function Swap() {
   const [txState, setTxState] = useState('idle')
   const [txError, setTxError] = useState('')
   const [txSignature, setTxSignature] = useState('')
+  // Red-line "SWAP COMPLETED" banner visibility. Set true when
+  // txState transitions to 'success' (actual on-chain confirmation);
+  // auto-dismissed after ~18s by SwapCompletedBanner.
+  const [showCompletedBanner, setShowCompletedBanner] = useState(false)
   const [verificationStatus, setVerificationStatus] = useState('idle')
   const [verificationResult, setVerificationResult] = useState(null)
   const [persistenceStatus, setPersistenceStatus] = useState('idle')
@@ -1747,9 +1879,51 @@ export default function Swap() {
     return walletTokenMap.get(String(toToken?.mint)) ?? null
   }, [toToken?.mint, wallet?.address, walletTokenMap])
 
-  const maxFromBalance = fromTokenBalance != null ? Number(fromTokenBalance) : null
-
   const dex = liveStats?.dex
+
+  // Gas-safe MAX for Solana. For native SOL, leaves ~0.001 SOL
+  // (1_000_000 lamports) for the swap transaction fee + priority
+  // fee. For SPL tokens, uses the full balance (gas is paid in SOL
+  // separately). The reserve is intentionally conservative; if the
+  // resulting amount still fails the gas check at submit time, the
+  // existing error path fires. We use a constant instead of fetching
+  // the live priority fee so the MAX button feels instant.
+  const SOL_GAS_RESERVE_LAMPORTS = 1_000_000
+  const maxFromBalance = useMemo(() => {
+    if (fromTokenBalance == null) return null
+    const balance = Number(fromTokenBalance)
+    if (fromToken?.mint === SOL_MINT) {
+      const reserveSol = SOL_GAS_RESERVE_LAMPORTS / 1e9  // lamports → SOL
+      const safe = balance - reserveSol
+      return safe > 0 ? safe : 0
+    }
+    return balance
+  }, [fromTokenBalance, fromToken?.mint])
+
+  // Trigger the SWAP COMPLETED banner when txState transitions to
+  // 'success' (the existing success state — only set AFTER the
+  // Solana transaction is confirmed on-chain, NOT on sign/submit).
+  // Auto-dismissed after ~18s by SwapCompletedBanner.
+  useEffect(() => {
+    if (txState === 'success') setShowCompletedBanner(true)
+    if (txState !== 'success') setShowCompletedBanner(false)
+  }, [txState])
+
+  // USD value of the input amount. Uses the existing `liveStats.dex`
+  // data (DexScreener) — if the input token IS RONIN, we use
+  // dex?.priceUsd directly. Otherwise, no per-SPL-token USD price is
+  // readily available without an extra fetch, so we fall back to the
+  // existing `$0.00` placeholder (we do NOT invent prices).
+  // Reuses existing liveStats — no new API call.
+  const inputUsdValue = useMemo(() => {
+    const amt = Number(amountInput)
+    if (!Number.isFinite(amt) || amt <= 0) return null
+    if (fromToken?.mint === RONIN_MINT && Number.isFinite(dex?.priceUsd)) {
+      return amt * Number(dex.priceUsd)
+    }
+    return null
+  }, [amountInput, fromToken?.mint, dex?.priceUsd])
+
   const pending = liveStatsState === 'loading' ? '…' : '—'
   const ecosystemStats = [
     { icon: 'chart', label: '24H VOLUME', value: formatUsd(dex?.volume24h) || pending, note: dex?.dexId ? `${dex.dexId} live` : 'DexScreener pending' },
@@ -2208,7 +2382,7 @@ export default function Swap() {
                 </button>
               </div>
               <div className="swap-field-foot">
-                <span>$0.00</span>
+                <span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span>
                 <span>
                   Balance: {fromTokenBalance != null ? `${Number(fromTokenBalance).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${fromToken.symbol}` : '--'}
                   <button
@@ -2270,6 +2444,12 @@ export default function Swap() {
             >
               {txState === 'preparing' ? 'PREPARING SWAP...' : txState === 'signing' ? 'READY FOR WALLET APPROVAL...' : txState === 'submitted' ? 'SUBMITTED...' : txState === 'confirming' ? 'CONFIRMING...' : txState === 'success' ? 'SWAP COMPLETE' : txState === 'failed' ? 'TRY AGAIN' : txState === 'ready_to_sign' ? 'READY FOR WALLET APPROVAL' : !wallet?.address ? 'CONNECT WALLET TO SWAP' : 'SWAP'}
             </button>
+
+            <SwapCompletedBanner
+              visible={showCompletedBanner}
+              subLabel={txSignature ? `Tx ${txSignature.slice(0, 8)}…${txSignature.slice(-6)}` : 'Transaction confirmed on Solana.'}
+              onDismiss={() => setShowCompletedBanner(false)}
+            />
 
             {(txState === 'success' || txState === 'failed') && (
               <div className={`swap-result-box ${txState === 'success' ? 'swap-result-success' : 'swap-result-error'}`} style={{ marginTop: '12px' }}>
