@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { PublicKey } from '@solana/web3.js'
 import { demoProfile } from '../data'
 import { getRoninBalance, getRoninSupply, getLiveRoninStats } from '../services/roninService'
-import { getVerifiedRewardIdentity } from '../services/walletLinkService'
+import { getVerifiedRewardIdentity, getMobileWalletLinkPhase } from '../services/walletLinkService'
 
 const WalletContext = createContext(null)
 
@@ -200,8 +200,21 @@ export function WalletProvider({ children }) {
   // unlink so the rest of the UI immediately reflects the change.
   // =====================================================================
   const refreshLinkedWallets = useCallback(async () => {
-    const address = wallet?.address && !wallet?.isDemo ? wallet.address : null
+    const provider = getSolanaProvider()
+    const providerAddress = provider?.publicKey?.toString?.() || provider?.publicKey || null
+    const address = (wallet?.address && !wallet?.isDemo ? wallet.address : null)
+      || (providerAddress && typeof providerAddress === 'string' ? providerAddress : null)
+    const mobileResumePhase = typeof window !== 'undefined' ? getMobileWalletLinkPhase() : null
+
     if (!address) {
+      // During the mobile MetaMask → Phantom handoff, the wallet provider may not be
+      // connected yet even though the app is resuming a valid wl=2 flow. In that case
+      // we must not wipe verified EVM state or show the user as unlinked.
+      if (mobileResumePhase?.phase === '2') {
+        setVerifiedIdentityLoaded(true)
+        return
+      }
+
       setVerifiedEvmWallets([])
       setSolanaPayoutWallet(null)
       setVerifiedIdentityLoaded(true)
