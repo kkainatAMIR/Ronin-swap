@@ -98,6 +98,22 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const [activeLink, setActiveLink] = useState(null)
   const [unlinkingEvm, setUnlinkingEvm] = useState(null)
 
+  // Diagnostic: log on every render what the URL looks like + what
+  // getMobileWalletLinkPhase returns. This helps trace exactly where
+  // the flow stops on mobile.
+  if (typeof window !== 'undefined') {
+    const urlSearch = window.location.search || '(empty)'
+    const phase = getMobileWalletLinkPhase()
+    if (phase) {
+      console.info('[WalletLinkMobile] WalletLinkPanel render — mobile phase active', {
+        phase: phase.phase,
+        urlSearch: urlSearch.slice(0, 80),
+        step,
+        walletAddress: wallet?.address ? 'set' : 'null',
+      })
+    }
+  }
+
   // Ref to always hold the LATEST refreshLinkedWallets. The auto-resume
   // useEffect captures `refreshLinkedWallets` at mount time, but on mobile
   // the wallet state changes asynchronously (Phantom connects after page
