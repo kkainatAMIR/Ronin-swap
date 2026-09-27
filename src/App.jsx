@@ -31,8 +31,22 @@ class ErrorBoundary extends Component {
 function useHashRoute() {
   const getRoute = () => {
     if (window.location.pathname === '/admin') return 'admin'
-    const route = window.location.hash.replace(/^#\/?/, '').split('/')[0]
-    return pageMap[route] ? route : 'home'
+    // EXISTING BEHAVIOR (first priority): check the hash route.
+    // If a valid hash route exists (#profile, #swap, etc.), use it.
+    const hashRoute = window.location.hash.replace(/^#\/?/, '').split('/')[0]
+    if (pageMap[hashRoute]) return hashRoute
+
+    // NEW FALLBACK (mobile wallet-link only): If no valid hash route
+    // exists (e.g. MetaMask Mobile stripped the #hash during the
+    // deep-link handoff), check for ?route=<page> in the query string.
+    // This is ONLY a fallback — it does NOT replace hash routing.
+    // Desktop always has a #hash, so this fallback is a no-op there.
+    // Mobile wallet-link deep-links carry ?route=profile in the query
+    // string specifically because #hash doesn't survive the handoff.
+    const routeParam = new URLSearchParams(window.location.search).get('route')
+    if (routeParam && pageMap[routeParam]) return routeParam
+
+    return 'home'
   }
   const [route, setRoute] = useState(() => getRoute())
 
@@ -41,7 +55,14 @@ function useHashRoute() {
       setRoute(getRoute())
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
-    if (!window.location.hash) window.history.replaceState(null, '', '#home')
+    if (!window.location.hash) {
+      // Don't force #home if we have a ?route= param (mobile wallet-link).
+      // The ?route= param will be used as the fallback. Once the
+      // wallet-link flow completes, clearMobileWalletLinkParams()
+      // removes ?route= and the normal #home default takes over.
+      const hasRouteParam = new URLSearchParams(window.location.search).get('route')
+      if (!hasRouteParam) window.history.replaceState(null, '', '#home')
+    }
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
