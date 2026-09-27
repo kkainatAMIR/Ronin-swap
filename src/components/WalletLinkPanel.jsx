@@ -14,6 +14,7 @@ import {
   signLinkMessageWithPhantom,
   signRevokeMessageWithPhantom,
   getPhantomProvider,
+  openMetaMaskMobile,
   EVM_REDIRECTING_TO_METAMASK_MOBILE,
 } from '../services/walletLinkService'
 
@@ -102,6 +103,32 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const linkedList = linkedEvmWallets || []
 
   // --- Step 1: Connect MetaMask + create challenge ---
+  //
+  // On mobile without an injected MetaMask provider, ensureMetaMaskAccount()
+  // returns the EVM_REDIRECTING_TO_METAMASK_MOBILE sentinel WITHOUT
+  // triggering the navigation itself. We:
+  //   1. setStep(STEP_OPENING_METAMASK_MOBILE) FIRST, so React renders
+  //      the "Opening MetaMask…" waiting state
+  //   2. setShouldOpenMetaMaskMobile(true) to schedule the navigation
+  //      for the next useEffect tick — AFTER React has committed the
+  //      state update.
+  //
+  // Calling openMetaMaskMobile() synchronously inside startLink()
+  // (the previous implementation) set window.location.href BEFORE
+  // React had a chance to render the waiting state, which caused a
+  // "Can't perform a React state update on an unmounted component"
+  // crash on mobile Safari/Chrome as the page tore down mid-render.
+  const [shouldOpenMetaMaskMobile, setShouldOpenMetaMaskMobile] = useState(false)
+
+  useEffect(() => {
+    if (!shouldOpenMetaMaskMobile) return
+    // The waiting state has now been committed to the DOM. Safe to
+    // trigger the deep-link navigation — the page will tear down,
+    // but React has already finished rendering.
+    setShouldOpenMetaMaskMobile(false)
+    openMetaMaskMobile()
+  }, [shouldOpenMetaMaskMobile])
+
   const startLink = useCallback(async () => {
     if (!solanaWallet) {
       setError('Connect your Solana wallet first.')
@@ -117,12 +144,15 @@ export default function WalletLinkPanel({ onLinkedChange }) {
       const evm = await ensureMetaMaskAccount()
 
       // Mobile: no injected MetaMask provider. ensureMetaMaskAccount()
-      // already deep-linked into MetaMask Mobile. We have NOT created
-      // a challenge yet — the user will click "Link EVM Wallet" again
-      // once the site reloads inside MetaMask Mobile's in-app browser.
-      // Show a waiting state instead of an error.
+      // returned the sentinel WITHOUT navigating. We set the waiting
+      // state FIRST, then schedule the navigation for the next tick
+      // so React commits the state update before the page tears down.
+      // No challenge has been created yet — the user will click "Link
+      // EVM Wallet" again once the site reloads inside MetaMask
+      // Mobile's in-app browser.
       if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
         setStep(STEP_OPENING_METAMASK_MOBILE)
+        setShouldOpenMetaMaskMobile(true)
         return
       }
 
@@ -404,7 +434,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
               MetaMask Mobile will reopen this page in its in-app browser.
               Once it does, tap <strong>Link EVM Wallet</strong> again to continue.
             </p>
-            <Button variant="outline" icon="refresh" onClick={startLink}>
+            <Button variant="outline" icon="refresh" onClick={() => openMetaMaskMobile()}>
               Open MetaMask
             </Button>
             <Button variant="outline" onClick={resetFlow}>

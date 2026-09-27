@@ -127,7 +127,10 @@ export async function revokeWalletLink({ solanaWallet, evmWallet, solanaSignatur
 // Reuse the existing mobile detection + MetaMask Mobile deep-link from
 // ethereumService.js — no second deep-link implementation. The swap
 // flow already uses these; the wallet-link flow now uses them too.
-import { isMobileBrowser, openMetaMaskMobile } from './ethereumService'
+//
+// `openMetaMaskMobile` is re-exported below (after ensureMetaMaskAccount)
+// so the WalletLinkPanel can call it AFTER updating its UI state.
+import { isMobileBrowser } from './ethereumService'
 
 // Returns the MetaMask provider (or null if unavailable). The
 // WalletContext already does this; we re-implement here so the
@@ -146,28 +149,33 @@ function getMetaMaskProvider() {
 //
 // MOBILE HANDLING:
 //   On a normal mobile browser (Safari/Chrome), window.ethereum is
-//   undefined — MetaMask is not injected. We deep-link into MetaMask
-//   Mobile using the existing openMetaMaskMobile() helper from
-//   ethereumService.js. MetaMask Mobile then opens this same site in
-//   its in-app browser, where window.ethereum IS injected, and the
-//   user clicks "Link EVM Wallet" again to run the normal flow.
+//   undefined — MetaMask is not injected. We signal this case to the
+//   caller by returning the EVM_REDIRECTING_TO_METAMASK_MOBILE
+//   sentinel; the caller is responsible for (a) updating its UI to
+//   show a waiting state and THEN (b) calling openMetaMaskMobile() to
+//   trigger the deep-link navigation.
 //
-//   We return the sentinel string 'REDIRECTING_TO_METAMASK_MOBILE'
-//   (NOT null — null is also returned by the swap flow's
-//   connectEthereumWallet, but we want a distinct signal the caller
-//   can switch on without confusing the two). The caller treats this
-//   as "redirect in progress, do not throw, do not create a challenge".
+//   IMPORTANT: We intentionally do NOT call openMetaMaskMobile() from
+//   inside this function. Doing so would set window.location.href
+//   BEFORE the caller had a chance to update its React state, which
+//   caused a "Can't perform a React state update on an unmounted
+//   component" crash on mobile Safari/Chrome (the navigation starts
+//   tearing down the component before setStep() runs). By returning
+//   the sentinel and letting the caller decide WHEN to navigate, we
+//   give React a chance to render the waiting state first.
+//
+//   On desktop, behavior is unchanged — throws
+//   'MetaMask is not available in this browser.' if no provider.
 export const EVM_REDIRECTING_TO_METAMASK_MOBILE = 'REDIRECTING_TO_METAMASK_MOBILE'
 
 export async function ensureMetaMaskAccount() {
   const provider = getMetaMaskProvider()
   if (!provider) {
-    // No injected MetaMask provider. On mobile, deep-link into
-    // MetaMask Mobile — it will reopen this site with the provider
-    // injected. On desktop, throw (the user needs to install
-    // MetaMask as a browser extension).
+    // No injected MetaMask provider. On mobile, signal to the caller
+    // that they should redirect into MetaMask Mobile. On desktop,
+    // throw (the user needs to install MetaMask as a browser
+    // extension).
     if (isMobileBrowser()) {
-      openMetaMaskMobile()
       return EVM_REDIRECTING_TO_METAMASK_MOBILE
     }
     throw new Error('MetaMask is not available in this browser.')
@@ -178,6 +186,14 @@ export async function ensureMetaMaskAccount() {
   }
   return accounts[0]
 }
+
+// Trigger the MetaMask Mobile deep-link. Should be called AFTER the
+// caller has updated its UI state to show a waiting message — the
+// navigation will tear down the current page.
+//
+// Re-exported from ethereumService.js so the swap flow and the
+// wallet-link flow use the SAME deep-link implementation.
+export { openMetaMaskMobile } from './ethereumService'
 
 // Ask MetaMask to sign the EVM linking message via personal_sign.
 // Returns the 0x-prefixed hex signature.
