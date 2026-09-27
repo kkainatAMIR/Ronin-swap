@@ -240,6 +240,35 @@ const MOBILE_WL_EVM_PARAM = 'evm'      // EVM wallet address (0x...)
 const MOBILE_WL_ES_PARAM = 'es'        // EVM signature (0x... hex)
 const MOBILE_WL_MS_PARAM = 'ms'        // base64-encoded messageSolana
 const MOBILE_WL_ROUTE_PARAM = 'route'  // Ronin page route (e.g. 'profile') — query-param transport for mobile deep-links
+const MOBILE_WL_STORAGE_KEY = 'ronin.mobileWalletLinkState'
+
+function saveMobileWalletLinkState(state) {
+  if (typeof window === 'undefined') return
+  try {
+    if (!state) {
+      window.sessionStorage.removeItem(MOBILE_WL_STORAGE_KEY)
+      return
+    }
+    const payload = { ...state, savedAt: Date.now() }
+    window.sessionStorage.setItem(MOBILE_WL_STORAGE_KEY, JSON.stringify(payload))
+  } catch {
+    // sessionStorage may be unavailable in some privacy-restricted browsers;
+    // failing silently is safer than breaking the wallet-link flow.
+  }
+}
+
+function readMobileWalletLinkState() {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(MOBILE_WL_STORAGE_KEY)
+    if (!raw) return null
+    const state = JSON.parse(raw)
+    if (!state || !state.phase) return null
+    return state
+  } catch {
+    return null
+  }
+}
 
 // Read the mobile wallet-link phase from the current URL.
 //
@@ -281,11 +310,23 @@ export function getMobileWalletLinkPhase() {
   const getParam = (key) => searchParams.get(key) ?? hashParams.get(key)
 
   const phase = getParam(MOBILE_WL_PARAM)
+  const persisted = readMobileWalletLinkState()
+
+  if (!phase && persisted) {
+    if (persisted.phase === '1' && persisted.solanaWallet) {
+      return { phase: '1', solanaWallet: persisted.solanaWallet }
+    }
+    if (persisted.phase === '2' && persisted.challengeId && persisted.evmWallet && persisted.evmSignature && persisted.messageSolana) {
+      return { phase: '2', challengeId: persisted.challengeId, evmWallet: persisted.evmWallet, evmSignature: persisted.evmSignature, messageSolana: persisted.messageSolana }
+    }
+  }
+
   if (!phase) return null
 
   if (phase === '1') {
     const solanaWallet = getParam(MOBILE_WL_SW_PARAM)
     if (!solanaWallet) return null
+    saveMobileWalletLinkState({ phase: '1', solanaWallet, route: getParam(MOBILE_WL_ROUTE_PARAM) || 'profile' })
     console.info('[WalletLinkMobile] wl=1 detected', {
       solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
       source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
@@ -301,6 +342,7 @@ export function getMobileWalletLinkPhase() {
     if (!challengeId || !evmWallet || !evmSignature || !msB64) return null
     let messageSolana = ''
     try { messageSolana = atob(msB64) } catch { return null }
+    saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: getParam(MOBILE_WL_ROUTE_PARAM) || 'profile' })
     console.info('[WalletLinkMobile] wl=2 detected', {
       challengeId,
       evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
@@ -352,6 +394,18 @@ export function clearMobileWalletLinkParams() {
       changed = true
     }
   }
+
+  // IMPORTANT: when the mobile wallet-link flow is being consumed, any
+  // plain hash route (for example '#profile') must also be cleared.
+  // Keeping the hash would cause the browser to reopen at a bare
+  // '#profile' URL with no wallet-link state, which is exactly the
+  // failure mode seen in MetaMask → Phantom handoff.
+  if (url.hash) {
+    url.hash = ''
+    changed = true
+  }
+
+  saveMobileWalletLinkState(null)
 
   if (changed) {
     window.history.replaceState({}, '', url.toString())
@@ -412,6 +466,8 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
   const destinationUrl = `${window.location.origin}/?${MOBILE_WL_PARAM}=1&${MOBILE_WL_SW_PARAM}=${encodeURIComponent(solanaWallet)}&${MOBILE_WL_ROUTE_PARAM}=profile`
   const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
 
+  saveMobileWalletLinkState({ phase: '1', solanaWallet, route: 'profile' })
+
   console.info('[WalletLinkMobile] deep-link destination generated', {
     destinationUrl,
     phase: 1,
@@ -438,14 +494,15 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return false
   const url = new URL(window.location.href)
 
-  // Strip any stale wallet-link params + route from BOTH search and hash
+  // Strip any stale wallet-link params + route from BOTH search and hash.
+  // The critical fix is to remove the hash entirely before building the
+  // Phantom redirect target. Hash fragments are not reliable across wallet
+  // deep-link handoffs and are the reason the browser returns to a bare
+  // '#profile' URL instead of resuming the Phase 3 flow.
   for (const p of [MOBILE_WL_PARAM, MOBILE_WL_SW_PARAM, MOBILE_WL_CID_PARAM, MOBILE_WL_EVM_PARAM, MOBILE_WL_ES_PARAM, MOBILE_WL_MS_PARAM, MOBILE_WL_ROUTE_PARAM]) {
     url.searchParams.delete(p)
   }
-  if (url.hash && url.hash.includes('?')) {
-    const hashPath = url.hash.split('?')[0]
-    url.hash = hashPath
-  }
+  url.hash = ''
 
   // Put Phase 2 wallet-link params + route in the SEARCH query string.
   url.searchParams.set(MOBILE_WL_PARAM, '2')
@@ -465,6 +522,8 @@ export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature,
   // Phantom's deep-link opens the URL inside Phantom's in-app browser.
   // Format: https://phantom.app/ul/browse/<url-encoded-full-url>?ref=<origin>
   const deepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
+
+  saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: 'profile' })
 
   // Debug log (addresses + signature are public — but shorten for safety)
   console.info('[WalletLinkMobile] Phase 2 deep-link generated', {
