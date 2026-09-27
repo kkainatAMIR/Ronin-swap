@@ -523,6 +523,33 @@ export async function signLinkMessageWithPhantom({ message }) {
   if (!provider) throw new Error('Phantom is not available in this browser.')
   // Phantom's signMessage expects UTF-8 encoded bytes.
   const encoded = new TextEncoder().encode(message)
+
+  // CRITICAL (mobile): On mobile, when Phantom opens the dapp via a
+  // deep-link, the Phantom provider IS injected, but the wallet is NOT
+  // connected. The WalletContext tries provider.connect({ onlyIfTrusted:
+  // true }) which silently fails if the dapp isn't trusted yet.
+  //
+  // Calling signMessage() on an unconnected wallet can:
+  //   a. Fail silently
+  //   b. Show a connection popup that doesn't auto-proceed to signMessage
+  //   c. Sign with a different account than the one that created the
+  //      challenge → backend rejects with WALLET_MISMATCH
+  //
+  // FIX: Explicitly call provider.connect() (without onlyIfTrusted) before
+  // signMessage. This ensures the wallet is connected and the user's
+  // Phantom account is active before we request a signature. On desktop,
+  // this is a no-op if already connected (Phantom returns immediately).
+  if (provider.connect && !provider.isConnected) {
+    console.info('[WalletLinkMobile] Phantom not connected — calling connect()')
+    try {
+      await provider.connect()
+      console.info('[WalletLinkMobile] Phantom connected successfully')
+    } catch (connectErr) {
+      console.error('[WalletLinkMobile] Phantom connect() failed', { message: connectErr?.message })
+      throw new Error('Phantom connection was rejected. Please approve the connection to sign the linking message.')
+    }
+  }
+
   const result = await provider.signMessage(encoded, 'utf8')
   // Phantom returns { signature, publicKey } — signature is a Uint8Array.
   let sigBytes
