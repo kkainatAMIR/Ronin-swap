@@ -16,7 +16,7 @@ import { RONIN_MINT } from '../data'
 import { executeJupiterOrder, getJupiterOrder, getJupiterOrderV1Fallback, JupiterApiError, processSamuraiPoints, recordVerifiedSwap, verifySwapTransaction } from '../services/jupiterService'
 import { confirmSolanaTransaction, getRoninBalance, getSolBalance, sendSignedSolanaTransaction } from '../services/roninService'
 import { getAllTokenAccounts } from '../services/shieldService'
-import { ETHEREUM_CHAIN_ID, ETHEREUM_FEATURED_SECTIONS, ETHEREUM_FEATURED_TOKENS, ETHEREUM_SWAP_TOKENS } from '../config/ethereumRegistry'
+import { ETHEREUM_CHAIN_ID, ETHEREUM_FEATURED_SECTIONS, ETHEREUM_FEATURED_TOKENS, ETHEREUM_SWAP_TOKENS, ETHEREUM_NATIVE, ETHEREUM_TOKEN_BY_ADDRESS } from '../config/ethereumRegistry'
 
 function toSafeDecimalString(value) {
   if (value === null || value === undefined || value === '') return ''
