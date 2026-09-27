@@ -409,16 +409,8 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
   target.searchParams.set(MOBILE_WL_SW_PARAM, solanaWallet)
   target.searchParams.set(MOBILE_WL_ROUTE_PARAM, 'profile')
 
-  const destinationUrl = target.toString()
-  const requiredParams = [`${MOBILE_WL_PARAM}=1`, `${MOBILE_WL_SW_PARAM}=${encodeURIComponent(solanaWallet)}`, `${MOBILE_WL_ROUTE_PARAM}=profile`]
-  if (!requiredParams.every((part) => destinationUrl.includes(part))) {
-    console.error('[WalletLinkMobile] deep-link target missing required params', { destinationUrl, solanaWallet })
-    return false
-  }
-
-  const encodedDestination = encodeURIComponent(destinationUrl)
-  const deepLink = `metamask://dapp/${encodedDestination}`
-  const fallbackDeepLink = `https://metamask.app.link/dapp/${encodedDestination}`
+  const destinationUrl = `${window.location.origin}/?${MOBILE_WL_PARAM}=1&${MOBILE_WL_SW_PARAM}=${encodeURIComponent(solanaWallet)}&${MOBILE_WL_ROUTE_PARAM}=profile`
+  const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
 
   console.info('[WalletLinkMobile] deep-link destination generated', {
     destinationUrl,
@@ -427,12 +419,6 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
   })
 
   window.location.href = deepLink
-  window.setTimeout(() => {
-    if (window.location.href.startsWith('metamask://') || window.location.href.startsWith('https://metamask.app.link/')) {
-      return
-    }
-    window.location.href = fallbackDeepLink
-  }, 1200)
   return true
 }
 

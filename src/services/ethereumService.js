@@ -22,27 +22,9 @@ export function isMobileBrowser() {
 export function openMetaMaskMobile() {
   if (typeof window === 'undefined') return false
 
-  const target = new URL(window.location.origin)
-  target.pathname = '/'
-  target.search = ''
-  target.hash = ''
-  const destinationUrl = target.toString()
-  const requiredParams = ['wl=1', 'route=profile']
-  if (!requiredParams.every((part) => destinationUrl.includes(part))) {
-    console.error('[MetaMaskMobile] bare destination detected; refusing to launch without wallet-link params', { destinationUrl })
-    return false
-  }
-  const encodedDestination = encodeURIComponent(destinationUrl)
-  const deepLink = `metamask://dapp/${encodedDestination}`
-  const fallbackDeepLink = `https://metamask.app.link/dapp/${encodedDestination}`
-
+  const destinationUrl = `${window.location.origin}/?wl=1&route=profile`
+  const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
   window.location.href = deepLink
-  window.setTimeout(() => {
-    if (window.location.href.startsWith('metamask://') || window.location.href.startsWith('https://metamask.app.link/')) {
-      return
-    }
-    window.location.href = fallbackDeepLink
-  }, 1200)
   return true
 }
 
