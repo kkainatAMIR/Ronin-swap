@@ -27,6 +27,11 @@ export function openMetaMaskMobile() {
   target.search = ''
   target.hash = ''
   const destinationUrl = target.toString()
+  const requiredParams = ['wl=1', 'route=profile']
+  if (!requiredParams.every((part) => destinationUrl.includes(part))) {
+    console.error('[MetaMaskMobile] bare destination detected; refusing to launch without wallet-link params', { destinationUrl })
+    return false
+  }
   const encodedDestination = encodeURIComponent(destinationUrl)
   const deepLink = `metamask://dapp/${encodedDestination}`
   const fallbackDeepLink = `https://metamask.app.link/dapp/${encodedDestination}`

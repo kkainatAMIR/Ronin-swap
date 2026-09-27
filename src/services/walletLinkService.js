@@ -410,6 +410,12 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
   target.searchParams.set(MOBILE_WL_ROUTE_PARAM, 'profile')
 
   const destinationUrl = target.toString()
+  const requiredParams = [`${MOBILE_WL_PARAM}=1`, `${MOBILE_WL_SW_PARAM}=${encodeURIComponent(solanaWallet)}`, `${MOBILE_WL_ROUTE_PARAM}=profile`]
+  if (!requiredParams.every((part) => destinationUrl.includes(part))) {
+    console.error('[WalletLinkMobile] deep-link target missing required params', { destinationUrl, solanaWallet })
+    return false
+  }
+
   const encodedDestination = encodeURIComponent(destinationUrl)
   const deepLink = `metamask://dapp/${encodedDestination}`
   const fallbackDeepLink = `https://metamask.app.link/dapp/${encodedDestination}`
@@ -422,10 +428,6 @@ export function openMetaMaskMobileForWalletLink(solanaWallet) {
 
   window.location.href = deepLink
   window.setTimeout(() => {
-    // Some mobile browsers or redirect chains do not resolve the custom
-    // scheme immediately. Fall back to the universal link after a short
-    // delay so the user still lands in MetaMask instead of seeing an
-    // endless loading state.
     if (window.location.href.startsWith('metamask://') || window.location.href.startsWith('https://metamask.app.link/')) {
       return
     }
