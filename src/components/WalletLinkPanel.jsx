@@ -394,17 +394,15 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             // early with setVerifiedEvmWallets([]), so the linked EVM
             // wallet never appears in the UI.
             //
-            // FIX: After verify succeeds, use result.solanaWallet (from
-            // the backend verify response) to fetch the verified identity
-            // directly. This bypasses the stale wallet.address closure.
-            // Also call refreshLinkedWallets() for good measure — it
-            // will work once wallet.address is set (after Phantom auto-
-            // connects), but we don't depend on it.
+            // FIX: After verify succeeds:
+            // 1. Call refreshLinkedWalletsRef.current() immediately (might
+            //    return early if wallet.address is null)
+            // 2. ALSO fetch verified identity using result.solanaWallet
+            //    directly (bypasses wallet.address dependency entirely)
+            // 3. If wallet.address was null, poll for it to become available
+            //    (bounded, ~5s) then call refreshLinkedWalletsRef.current()
+            //    again — this time it will succeed and update verifiedEvmWallets
             console.info('[WalletLinkMobile] refreshLinkedWallets started')
-            // Use the ref to call the LATEST refreshLinkedWallets, not the
-            // stale one captured at useEffect mount time. On mobile, wallet.address
-            // changes from null to the real Phantom address AFTER the useEffect
-            // runs — the ref ensures we call the version with the latest address.
             await refreshLinkedWalletsRef.current()
             console.info('[WalletLinkMobile] refreshLinkedWallets completed')
 
@@ -425,6 +423,50 @@ export default function WalletLinkPanel({ onLinkedChange }) {
               } catch (aggErr) {
                 console.warn('[WalletLinkMobile] could not fetch aggregated balance', aggErr?.message)
               }
+            }
+
+            // If wallet.address was null when we called refreshLinkedWallets,
+            // poll for Phantom to connect, then call again. This ensures
+            // verifiedEvmWallets in WalletContext is updated even if Phantom
+            // reconnects after our first call.
+            //
+            // We check the Phantom provider's publicKey directly (not React
+            // state) because the closure captured wallet=null at the time
+            // startPhase3 was created. React state won't update inside this
+            // async closure.
+            if (!wallet?.address) {
+              console.info('[WalletLinkMobile] wallet.address still null — polling for Phantom reconnect')
+              let reconnectAttempts = 0
+              const MAX_RECONNECT_ATTEMPTS = 20  // 5 seconds at 250ms
+              await new Promise((resolve) => {
+                const reconnectTimer = setInterval(() => {
+                  reconnectAttempts += 1
+                  // Check the Phantom provider's publicKey directly —
+                  // this reflects the actual connection state, not React state
+                  const phantomProvider = getPhantomProvider()
+                  const phantomConnected = Boolean(
+                    phantomProvider?.isConnected ||
+                    phantomProvider?.publicKey
+                  )
+                  if (phantomConnected) {
+                    clearInterval(reconnectTimer)
+                    console.info('[WalletLinkMobile] Phantom reconnected (provider publicKey detected)')
+                    resolve()
+                    return
+                  }
+                  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                    clearInterval(reconnectTimer)
+                    console.warn('[WalletLinkMobile] Phantom reconnect wait timed out after 5s')
+                    resolve()
+                  }
+                }, 250)
+              })
+              // Give React a tick to process the wallet state update from
+              // Phantom's connect event, then call refreshLinkedWallets again
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              console.info('[WalletLinkMobile] re-calling refreshLinkedWallets after reconnect wait')
+              await refreshLinkedWalletsRef.current()
+              console.info('[WalletLinkMobile] refreshLinkedWallets re-call completed')
             }
             console.info('[WalletLinkMobile] LINK SUCCESS')
             setStep(STEP_SUCCESS)
