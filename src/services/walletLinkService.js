@@ -195,6 +195,138 @@ export async function ensureMetaMaskAccount() {
 // wallet-link flow use the SAME deep-link implementation.
 export { openMetaMaskMobile } from './ethereumService'
 
+// =====================================================================
+// MOBILE WALLET-LINK FLOW — URL-based phase passing
+// =====================================================================
+//
+// On mobile, the wallet-link flow spans TWO browser contexts:
+//
+//   Phase 1 — Phantom browser (no window.ethereum):
+//     User clicks "Link EVM Wallet" → we deep-link to MetaMask Mobile
+//     with ?wl=1&sw=<solanaWallet> appended to the Ronin URL.
+//
+//   Phase 2 — MetaMask Mobile in-app browser (window.ethereum available):
+//     Page loads with ?wl=1 → auto-resume: ensureMetaMaskAccount →
+//     createWalletLinkChallenge → signLinkMessageWithMetaMask.
+//     After EVM signature obtained, deep-link BACK to Phantom with
+//     ?wl=2&cid=<challengeId>&evm=<evmAddr>&es=<evmSig>&ms=<base64(messageSolana)>.
+//
+//   Phase 3 — Phantom browser (window.solana available):
+//     Page loads with ?wl=2 → auto-resume: signLinkMessageWithPhantom
+//     using messageSolana from URL → verifyWalletLink with stored EVM
+//     signature + fresh Solana signature → clear URL params → success.
+//
+// SECURITY:
+//   * The EVM signature passed via URL is a time-limited proof (the
+//     challenge expires in 5 minutes per the backend). It can ONLY be
+//     used for THIS specific challenge — an attacker who intercepts it
+//     would still need the corresponding Solana signature for the same
+//     challenge to complete the link.
+//   * The Solana wallet address passed via URL is a PUBLIC key — not
+//     a private key. Putting it in the URL is safe.
+//   * No private keys, seed phrases, or long-lived secrets are ever
+//     stored in the URL or sessionStorage.
+//   * URL params are cleared immediately after use via
+//     window.history.replaceState (removes them from the address bar
+//     and future browser history entries).
+//   * The backend verification protocol is UNCHANGED — same challenge,
+//     same message, same personal_sign, same signMessage, same
+//     /api/wallet-link/verify payload.
+
+const MOBILE_WL_PARAM = 'wl'           // '1' = EVM sign phase, '2' = Solana sign phase
+const MOBILE_WL_SW_PARAM = 'sw'        // Solana wallet address (public key)
+const MOBILE_WL_CID_PARAM = 'cid'      // challengeId from backend
+const MOBILE_WL_EVM_PARAM = 'evm'      // EVM wallet address (0x...)
+const MOBILE_WL_ES_PARAM = 'es'        // EVM signature (0x... hex)
+const MOBILE_WL_MS_PARAM = 'ms'        // base64-encoded messageSolana
+
+// Read the mobile wallet-link phase from the current URL.
+// Returns:
+//   { phase: '1', solanaWallet }     — inside MetaMask Mobile, need to EVM-sign
+//   { phase: '2', challengeId, evmWallet, evmSignature, messageSolana } — back in Phantom, need to Solana-sign
+//   null                              — not in the mobile wallet-link flow (desktop, or fresh visit)
+export function getMobileWalletLinkPhase() {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const phase = params.get(MOBILE_WL_PARAM)
+  if (!phase) return null
+
+  if (phase === '1') {
+    const solanaWallet = params.get(MOBILE_WL_SW_PARAM)
+    if (!solanaWallet) return null
+    return { phase: '1', solanaWallet }
+  }
+
+  if (phase === '2') {
+    const challengeId = params.get(MOBILE_WL_CID_PARAM)
+    const evmWallet = params.get(MOBILE_WL_EVM_PARAM)
+    const evmSignature = params.get(MOBILE_WL_ES_PARAM)
+    const msB64 = params.get(MOBILE_WL_MS_PARAM)
+    if (!challengeId || !evmWallet || !evmSignature || !msB64) return null
+    let messageSolana = ''
+    try { messageSolana = atob(msB64) } catch { return null }
+    return { phase: '2', challengeId, evmWallet, evmSignature, messageSolana }
+  }
+
+  return null
+}
+
+// Remove the mobile wallet-link params from the URL without triggering
+// a page reload. Uses window.history.replaceState so the params don't
+// linger in the browser's address bar or history.
+export function clearMobileWalletLinkParams() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.delete(MOBILE_WL_PARAM)
+  url.searchParams.delete(MOBILE_WL_SW_PARAM)
+  url.searchParams.delete(MOBILE_WL_CID_PARAM)
+  url.searchParams.delete(MOBILE_WL_EVM_PARAM)
+  url.searchParams.delete(MOBILE_WL_ES_PARAM)
+  url.searchParams.delete(MOBILE_WL_MS_PARAM)
+  window.history.replaceState({}, '', url.toString())
+}
+
+// Construct the MetaMask Mobile deep-link URL for Phase 1.
+// Appends ?wl=1&sw=<solanaWallet> to the current Ronin URL so that
+// when MetaMask Mobile opens the page, the app auto-resumes the
+// EVM signing step.
+export function openMetaMaskMobileForWalletLink(solanaWallet) {
+  if (typeof window === 'undefined') return false
+  if (!solanaWallet) return false
+  const url = new URL(window.location.href)
+  url.searchParams.set(MOBILE_WL_PARAM, '1')
+  url.searchParams.set(MOBILE_WL_SW_PARAM, solanaWallet)
+  // Strip any existing wl=2 params from a previous attempt
+  url.searchParams.delete(MOBILE_WL_CID_PARAM)
+  url.searchParams.delete(MOBILE_WL_EVM_PARAM)
+  url.searchParams.delete(MOBILE_WL_ES_PARAM)
+  url.searchParams.delete(MOBILE_WL_MS_PARAM)
+  const dappUrl = `${url.host}${url.pathname}${url.search}${url.hash}`
+  window.location.href = `https://metamask.app.link/dapp/${dappUrl}`
+  return true
+}
+
+// Construct the Phantom deep-link URL for Phase 2→3 transition.
+// Appends ?wl=2&cid=<challengeId>&evm=<evmAddr>&es=<evmSig>&ms=<base64(messageSolana)>
+// to the current Ronin URL so that when Phantom opens the page, the app
+// auto-resumes the Solana signing step.
+export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature, messageSolana }) {
+  if (typeof window === 'undefined') return false
+  if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return false
+  const url = new URL(window.location.href)
+  url.searchParams.set(MOBILE_WL_PARAM, '2')
+  url.searchParams.set(MOBILE_WL_CID_PARAM, challengeId)
+  url.searchParams.set(MOBILE_WL_EVM_PARAM, evmWallet)
+  url.searchParams.set(MOBILE_WL_ES_PARAM, evmSignature)
+  url.searchParams.set(MOBILE_WL_MS_PARAM, btoa(messageSolana))
+  // Strip the Phase 1 solanaWallet param — not needed anymore
+  url.searchParams.delete(MOBILE_WL_SW_PARAM)
+  const dappUrl = `${url.host}${url.pathname}${url.search}${url.hash}`
+  // Phantom's deep-link opens the URL inside Phantom's in-app browser
+  window.location.href = `https://phantom.app/ul/browse/${encodeURIComponent(url.toString())}?ref=${encodeURIComponent(window.location.origin)}`
+  return true
+}
+
 // Ask MetaMask to sign the EVM linking message via personal_sign.
 // Returns the 0x-prefixed hex signature.
 export async function signLinkMessageWithMetaMask({ address, message }) {

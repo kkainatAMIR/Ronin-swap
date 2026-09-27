@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, SectionHeading, Tag } from './Layout'
 import Icon from './Icon'
 import { useWallet } from '../context/WalletContext'
@@ -15,6 +15,10 @@ import {
   signRevokeMessageWithPhantom,
   getPhantomProvider,
   openMetaMaskMobile,
+  openMetaMaskMobileForWalletLink,
+  openPhantomForSolanaSign,
+  getMobileWalletLinkPhase,
+  clearMobileWalletLinkParams,
   EVM_REDIRECTING_TO_METAMASK_MOBILE,
 } from '../services/walletLinkService'
 
@@ -53,6 +57,10 @@ const STEP_ERROR = 'error'
 // is injected, and then they click "Link EVM Wallet" again. No
 // challenge has been created yet, so there's nothing to roll back.
 const STEP_OPENING_METAMASK_MOBILE = 'opening-metamask-mobile'
+// Mobile-only Phase 2→3: EVM signature obtained inside MetaMask Mobile.
+// We're deep-linking BACK to Phantom so the user can sign the Solana
+// message. No user action needed — this is a brief redirect state.
+const STEP_RETURNING_TO_PHANTOM = 'returning-to-phantom'
 
 // The 4 user-visible progress steps. Indexed by step number.
 const PROGRESS_STEPS = [
@@ -69,6 +77,9 @@ function stepToProgressIndex(step) {
   if (step === STEP_SIGNING_SOLANA) return 1
   if (step === STEP_VERIFYING) return 2
   if (step === STEP_SUCCESS) return 4  // all done
+  // Mobile intermediate states show the EVM step as complete (EVM
+  // sig was obtained in MetaMask Mobile) and the Solana step as active.
+  if (step === STEP_RETURNING_TO_PHANTOM) return 1
   return -1
 }
 
@@ -102,31 +113,201 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   const hasPhantom = Boolean(getPhantomProvider())
   const linkedList = linkedEvmWallets || []
 
+  // =====================================================================
+  // MOBILE AUTO-RESUME — detect wallet-link phase from URL params
+  // =====================================================================
+  //
+  // On mobile, the wallet-link flow spans two browser contexts:
+  //   Phase 1: Phantom browser → deep-link to MetaMask Mobile
+  //   Phase 2: MetaMask Mobile browser → EVM connect + sign → deep-link back to Phantom
+  //   Phase 3: Phantom browser → Solana sign + verify
+  //
+  // When the page reloads in a new browser context, all React state is
+  // lost. We use URL params (?wl=1 or ?wl=2&...) to detect which phase
+  // we're in and auto-resume the EXACT SAME desktop flow.
+  //
+  // A ref guard prevents double-execution (React StrictMode runs
+  // effects twice in dev).
+  const mobileResumeStartedRef = useRef(false)
+
+  useEffect(() => {
+    if (mobileResumeStartedRef.current) return
+    const mobilePhase = getMobileWalletLinkPhase()
+    if (!mobilePhase) return
+
+    // ---- Phase 2: inside MetaMask Mobile's in-app browser ----
+    // window.ethereum IS available (MetaMask Mobile injected it).
+    // Auto-start: ensureMetaMaskAccount → createChallenge → personal_sign.
+    // This is the EXACT SAME code path as desktop startLink(), just
+    // triggered automatically instead of by a button click.
+    if (mobilePhase.phase === '1') {
+      const phaseSolanaWallet = mobilePhase.solanaWallet
+      // Verify window.ethereum is actually available (we're inside
+      // MetaMask Mobile). If not, the user opened the URL in a
+      // non-MetaMask browser — clear the params and show the normal
+      // IDLE state.
+      const hasMetaMask = Boolean(
+        (typeof window !== 'undefined' && window.ethereum?.isMetaMask) ||
+        (Array.isArray(window.ethereum?.providers) && window.ethereum.providers.some((p) => p?.isMetaMask))
+      )
+      if (!hasMetaMask) {
+        clearMobileWalletLinkParams()
+        return
+      }
+      mobileResumeStartedRef.current = true
+      // Auto-start the EVM link flow. This calls the EXACT same
+      // createWalletLinkChallenge + signLinkMessageWithMetaMask that
+      // desktop uses — no separate mobile signing protocol.
+      setStep(STEP_REQUESTING_CHALLENGE)
+      setError('')
+      setErrorCode('')
+      ;(async () => {
+        try {
+          const evm = await ensureMetaMaskAccount()
+          if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
+            // Shouldn't happen — we're inside MetaMask Mobile, so
+            // the provider should be available. If it's not, fall
+            // back to the error state.
+            throw new Error('MetaMask provider became unavailable.')
+          }
+          setEvmAddress(evm)
+          const challenge = await createWalletLinkChallenge({
+            solanaWallet: phaseSolanaWallet,
+            evmWallet: evm,
+          })
+          setActiveLink({
+            solanaWallet: challenge.solanaWallet,
+            evmWallet: challenge.evmWallet,
+            challengeId: challenge.challengeId,
+            messageEvm: challenge.messageEvm,
+            messageSolana: challenge.messageSolana,
+          })
+          // Sign with MetaMask (personal_sign). Same as desktop.
+          setStep(STEP_SIGNING_EVM)
+          const evmSig = await signLinkMessageWithMetaMask({
+            address: challenge.evmWallet,
+            message: challenge.messageEvm,
+          })
+          // EVM signature obtained. On desktop, we'd continue to
+          // signSolana. On mobile, window.solana is NOT available
+          // inside MetaMask Mobile's browser — we need to deep-link
+          // BACK to Phantom so the user can sign the Solana message.
+          setStep(STEP_RETURNING_TO_PHANTOM)
+          openPhantomForSolanaSign({
+            challengeId: challenge.challengeId,
+            evmWallet: challenge.evmWallet,
+            evmSignature: evmSig,
+            messageSolana: challenge.messageSolana,
+          })
+        } catch (e) {
+          const msg = e?.message || 'Mobile EVM signing failed.'
+          console.error('[WalletLinkPanel] mobile phase 2 failed', { message: msg })
+          clearMobileWalletLinkParams()
+          setError(msg)
+          setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
+          setStep(STEP_ERROR)
+        }
+      })()
+      return
+    }
+
+    // ---- Phase 3: back in Phantom's in-app browser ----
+    // window.solana IS available (Phantom injected it). The URL
+    // contains the challengeId + EVM signature + messageSolana from
+    // Phase 2. Auto-resume: signLinkMessageWithPhantom → verifyWalletLink.
+    // This is the EXACT SAME verifyWalletLink call that desktop makes.
+    if (mobilePhase.phase === '2') {
+      const hasPhantomNow = Boolean(getPhantomProvider())
+      if (!hasPhantomNow) {
+        // Not in Phantom yet — clear params and show idle.
+        clearMobileWalletLinkParams()
+        return
+      }
+      mobileResumeStartedRef.current = true
+      const { challengeId, evmWallet, evmSignature, messageSolana } = mobilePhase
+      setEvmAddress(evmWallet)
+      setActiveLink({
+        solanaWallet: solanaWallet || '',
+        evmWallet,
+        challengeId,
+        messageEvm: '', // not needed for Solana signing
+        messageSolana,
+      })
+      // Clear the URL params NOW — they contain the EVM signature
+      // which we've already read into memory. Don't leave it in the
+      // URL longer than necessary.
+      clearMobileWalletLinkParams()
+      // Sign with Phantom (signMessage). Same as desktop.
+      setStep(STEP_SIGNING_SOLANA)
+      setError('')
+      setErrorCode('')
+      ;(async () => {
+        try {
+          const solanaSig = await signLinkMessageWithPhantom({ message: messageSolana })
+          // Verify with backend. Same endpoint, same payload as desktop.
+          setStep(STEP_VERIFYING)
+          const result = await verifyWalletLink({
+            challengeId,
+            evmSignature,
+            solanaSignature: solanaSig,
+          })
+          await refreshLinkedWallets()
+          try {
+            const identity = await getVerifiedRewardIdentity(solanaWallet)
+            if (identity?.linked_evm_wallets) {
+              setAggregatedPoints(identity)
+            }
+          } catch (aggErr) {
+            console.warn('[WalletLinkPanel] could not fetch aggregated balance', aggErr?.message)
+          }
+          setStep(STEP_SUCCESS)
+          onLinkedChange?.(result)
+        } catch (e) {
+          const msg = e?.message || 'Mobile Solana signing or verification failed.'
+          console.error('[WalletLinkPanel] mobile phase 3 failed', { message: msg })
+          setError(msg)
+          setErrorCode(String(e?.code || 'MOBILE_SOLANA_FAILED'))
+          setStep(STEP_ERROR)
+        }
+      })()
+      return
+    }
+  }, [solanaWallet, refreshLinkedWallets, onLinkedChange])
+
   // --- Step 1: Connect MetaMask + create challenge ---
   //
-  // On mobile without an injected MetaMask provider, ensureMetaMaskAccount()
-  // returns the EVM_REDIRECTING_TO_METAMASK_MOBILE sentinel WITHOUT
-  // triggering the navigation itself. We:
-  //   1. setStep(STEP_OPENING_METAMASK_MOBILE) FIRST, so React renders
-  //      the "Opening MetaMask…" waiting state
-  //   2. setShouldOpenMetaMaskMobile(true) to schedule the navigation
-  //      for the next useEffect tick — AFTER React has committed the
-  //      state update.
+  // DESKTOP (unchanged): window.ethereum is injected → ensureMetaMaskAccount()
+  // returns the address → createWalletLinkChallenge → signLinkMessageWithMetaMask
+  // → signLinkMessageWithPhantom → verifyWalletLink. This is the canonical
+  // desktop flow and is byte-for-byte preserved.
   //
-  // Calling openMetaMaskMobile() synchronously inside startLink()
-  // (the previous implementation) set window.location.href BEFORE
-  // React had a chance to render the waiting state, which caused a
-  // "Can't perform a React state update on an unmounted component"
-  // crash on mobile Safari/Chrome as the page tore down mid-render.
+  // MOBILE Phase 1: window.ethereum is NOT injected (Phantom browser).
+  // ensureMetaMaskAccount() returns the EVM_REDIRECTING_TO_METAMASK_MOBILE
+  // sentinel. We:
+  //   1. setStep(STEP_OPENING_METAMASK_MOBILE) FIRST — React renders the
+  //      "Opening MetaMask…" waiting state
+  //   2. setShouldOpenMetaMaskMobile(true) to schedule the deep-link
+  //      navigation on the NEXT useEffect tick (after React commits)
+  //   3. The deep-link uses openMetaMaskMobileForWalletLink(solanaWallet)
+  //      which appends ?wl=1&sw=<solanaWallet> to the Ronin URL. When
+  //      MetaMask Mobile opens the page, the mobile auto-resume useEffect
+  //      (above) detects ?wl=1 and auto-starts Phase 2 (EVM connect +
+  //      sign). This is the SAME createWalletLinkChallenge + personal_sign
+  //      that desktop uses — no separate mobile signing protocol.
   const [shouldOpenMetaMaskMobile, setShouldOpenMetaMaskMobile] = useState(false)
+  const pendingSolanaWalletRef = useRef(null)
 
   useEffect(() => {
     if (!shouldOpenMetaMaskMobile) return
-    // The waiting state has now been committed to the DOM. Safe to
-    // trigger the deep-link navigation — the page will tear down,
-    // but React has already finished rendering.
     setShouldOpenMetaMaskMobile(false)
-    openMetaMaskMobile()
+    // Use the wallet-link-specific deep-link that appends ?wl=1&sw=<solanaWallet>
+    // so MetaMask Mobile can auto-resume the EVM signing flow.
+    const sw = pendingSolanaWalletRef.current
+    if (sw) {
+      openMetaMaskMobileForWalletLink(sw)
+    } else {
+      openMetaMaskMobile()
+    }
   }, [shouldOpenMetaMaskMobile])
 
   const startLink = useCallback(async () => {
@@ -143,18 +324,18 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     try {
       const evm = await ensureMetaMaskAccount()
 
-      // Mobile: no injected MetaMask provider. ensureMetaMaskAccount()
-      // returned the sentinel WITHOUT navigating. We set the waiting
-      // state FIRST, then schedule the navigation for the next tick
-      // so React commits the state update before the page tears down.
-      // No challenge has been created yet — the user will click "Link
-      // EVM Wallet" again once the site reloads inside MetaMask
-      // Mobile's in-app browser.
+      // Mobile Phase 1: no injected MetaMask provider. Schedule the
+      // deep-link to MetaMask Mobile with ?wl=1&sw=<solanaWallet> so
+      // the flow auto-resumes when MetaMask Mobile opens the page.
       if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
+        pendingSolanaWalletRef.current = solanaWallet
         setStep(STEP_OPENING_METAMASK_MOBILE)
         setShouldOpenMetaMaskMobile(true)
         return
       }
+
+      // DESKTOP: window.ethereum was available, so ensureMetaMaskAccount()
+      // returned the EVM address. Continue with the normal desktop flow.
 
       setEvmAddress(evm)
       const challenge = await createWalletLinkChallenge({
@@ -426,20 +607,50 @@ export default function WalletLinkPanel({ onLinkedChange }) {
         <div className="ronin-wallet-link-flow">
           <div className="ronin-wallet-link-flow-header">
             <strong>Opening MetaMask…</strong>
-            <small>If MetaMask didn't open automatically, tap the button below.</small>
+            <small>The EVM signing flow will continue automatically once MetaMask opens.</small>
           </div>
           <div className="ronin-wallet-link-mobile-waiting">
             <span className="ronin-wallet-link-spinner" aria-label="Loading" />
             <p>
-              MetaMask Mobile will reopen this page in its in-app browser.
-              Once it does, tap <strong>Link EVM Wallet</strong> again to continue.
+              MetaMask Mobile will reopen this page in its in-app browser and
+              automatically continue the EVM wallet-link flow. You'll be asked
+              to approve the MetaMask connection and sign the linking message.
             </p>
-            <Button variant="outline" icon="refresh" onClick={() => openMetaMaskMobile()}>
+            <Button variant="outline" icon="refresh" onClick={() => {
+              const sw = pendingSolanaWalletRef.current
+              if (sw) openMetaMaskMobileForWalletLink(sw)
+              else openMetaMaskMobile()
+            }}>
               Open MetaMask
             </Button>
             <Button variant="outline" onClick={resetFlow}>
               Cancel
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================
+          STATE: RETURNING_TO_PHANTOM — mobile Phase 2→3 transition
+          =================================================================
+          EVM signature was obtained inside MetaMask Mobile. We're
+          deep-linking BACK to Phantom so the user can sign the Solana
+          message. The page is about to navigate away — this is a brief
+          redirect state with no user action required.
+          ================================================================= */}
+      {step === STEP_RETURNING_TO_PHANTOM && (
+        <div className="ronin-wallet-link-flow">
+          <div className="ronin-wallet-link-flow-header">
+            <strong>✓ EVM signed — returning to Phantom…</strong>
+            <small>The Solana signing step will continue automatically once Phantom opens.</small>
+          </div>
+          <div className="ronin-wallet-link-mobile-waiting">
+            <span className="ronin-wallet-link-spinner" aria-label="Loading" />
+            <p>
+              Your EVM wallet signature was obtained in MetaMask. We're now
+              reopening this page in Phantom so you can sign the Solana linking
+              message to complete the wallet link.
+            </p>
           </div>
         </div>
       )}
