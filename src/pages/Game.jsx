@@ -22,7 +22,7 @@ export default function Game() {
   return (
     <>
       <PageHero eyebrow="Game / 04" title="Enter the world" titleAccent="of Ronin." text="A living progression layer for the people who choose to keep walking." image="/images/game-landscape.jpg" className="game-hero">
-        <div className="page-hero-ref-actions"><Button onClick={play} icon={wallet ? 'gamepad' : 'wallet'}>{wallet ? 'Play now' : 'Connect to play'}</Button><Tag tone="light">COMING SOON</Tag><Button href="#game-profile" variant="outline" icon="arrowDown">View profile</Button></div>
+        <div className="page-hero-ref-actions"><Button onClick={play} icon={wallet ? 'gamepad' : 'wallet'}>{wallet ? 'Play now (COMING SOON)' : 'Connect to play (COMING SOON)'}</Button><Button href="#game-profile" variant="outline" icon="arrowDown">View profile</Button></div>
       </PageHero>
 
       <section className="game-nav-section enhanced-nav" style={{ padding: '0' }}>

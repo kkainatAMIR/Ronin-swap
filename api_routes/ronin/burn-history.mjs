@@ -17,11 +17,20 @@ function json(res, status, body) {
 
 async function rpc(method, params) {
   if (!API_KEY) throw new Error('HELIUS_API_KEY is not configured.')
-  const response = await fetch(RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
-  })
+  let response
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await fetch(RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
+      })
+      break
+    } catch (error) {
+      if (attempt === 1 || error?.name !== 'TypeError') throw error
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+  }
   const payload = await response.json().catch(() => null)
   if (!response.ok || payload?.error) throw new Error(payload?.error?.message || `Helius RPC returned ${response.status}.`)
   return payload.result
@@ -78,7 +87,11 @@ export default async function handler(req, res) {
     })
   } catch (error) {
     console.error('RONIN burn history endpoint failed:', error)
-    const status = /429|rate limit|quota/i.test(error?.message || '') ? 503 : 500
-    return json(res, status, { error: error?.message || 'Live burn history unavailable.', code: status === 503 ? 'RPC_QUOTA_EXCEEDED' : 'BURN_HISTORY_UNAVAILABLE' })
+    const message = `${error?.message || ''} ${error?.cause?.code || ''} ${error?.cause?.message || ''}`
+    const rateLimited = /429|rate limit|quota/i.test(message)
+    const upstreamUnavailable = /fetch failed|network|timeout|connect|enotfound|econn/i.test(message)
+    const status = rateLimited || upstreamUnavailable ? 503 : 500
+    const code = rateLimited ? 'RPC_QUOTA_EXCEEDED' : upstreamUnavailable ? 'RPC_UNAVAILABLE' : 'BURN_HISTORY_UNAVAILABLE'
+    return json(res, status, { error: error?.message || 'Live burn history unavailable.', code })
   }
 }

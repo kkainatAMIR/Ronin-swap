@@ -1596,7 +1596,7 @@
   .app-route-swap .swap-hero-bg { left: 0; opacity: .28; height: 360px; }
   .app-route-swap .swap-hero-scrim { background: linear-gradient(180deg,rgba(251,248,243,.28),rgba(251,248,243,.94) 88%); }
   .app-route-swap .swap-hero-inner { display: grid; grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 14px; width: min(100% - 32px,680px); padding: 22px 0 24px; }
-  .app-route-swap .swap-hero-copy { max-width: 680px; padding: 0; text-align: center; align-items: center; }
+  .app-route-swap .swap-hero-copy { width: 100%; max-width: 680px; margin-inline: auto; padding: 0; text-align: center; align-items: center; }
   .app-route-swap .swap-hero-title,.app-route-swap .swap-hero-powered { text-align: center; justify-content: center; }
   .app-route-swap .swap-hero-sub,.app-route-swap .swap-hero-text { text-align: center; margin-inline: auto; }
   .app-route-swap .swap-hero-points { margin-inline: auto; }

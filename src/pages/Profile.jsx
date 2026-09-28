@@ -187,16 +187,19 @@ export default function Profile() {
     // is a demo profile (no real address).
     if (!allWalletAddresses || allWalletAddresses.length === 0) {
       setData(null)
+      setVisibleActivityCount(3)
       setState(wallet?.isDemo ? 'demo' : 'idle')
       setError('')
       return undefined
     }
     if (wallet?.isDemo) {
       setData(null)
+      setVisibleActivityCount(3)
       setState('demo')
       setError('')
       return undefined
     }
+    setVisibleActivityCount(3)
     setState('loading')
     setError('')
     getAggregatedProfileData(allWalletAddresses)
@@ -207,6 +210,7 @@ export default function Profile() {
 
   const retry = () => {
     if (!allWalletAddresses || allWalletAddresses.length === 0) return
+    setVisibleActivityCount(3)
     setState('loading')
     setError('')
     getAggregatedProfileData(allWalletAddresses)
