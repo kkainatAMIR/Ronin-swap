@@ -143,12 +143,18 @@ export default function Rank() {
           <div><span className="data-label">SEASON POINTS</span><strong style={{ display: 'block', marginTop: '6px' }}>{Number(leaderboard.wallet?.seasonPoints || 0).toLocaleString()}</strong></div>
           <div><span className="data-label">SEASON VOLUME</span><strong style={{ display: 'block', marginTop: '6px' }}>${Number(leaderboard.wallet?.seasonVolume || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong></div>
         </div>}
-        <div className="surface-card leaderboard-table-card" style={{ marginTop: '14px', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 160px 160px 120px', gap: '12px', padding: '14px 18px', borderBottom: '1px solid var(--line)' }}><span className="data-label">RANK</span><span className="data-label">SAMURAI</span><span className="data-label">VERIFIED VOLUME</span><span className="data-label">SAMURAI POINTS</span><span className="data-label">SWAPS</span></div>
+        <div className="surface-card leaderboard-table-card" style={{ marginTop: '14px' }}>
+          <div className="leaderboard-table-header"><span className="data-label">RANK</span><span className="data-label">SAMURAI</span><span className="data-label">VERIFIED VOLUME</span><span className="data-label">SAMURAI POINTS</span><span className="data-label">SWAPS</span></div>
           {leaderboardState === 'loading' && <p style={{ padding: '26px 18px', margin: 0, color: 'var(--muted)' }}>Loading Samurai leaderboard...</p>}
           {leaderboardState === 'error' && <p style={{ padding: '26px 18px', margin: 0, color: 'var(--red)' }}>Unable to load leaderboard. Please try again.</p>}
           {leaderboardState === 'ready' && !leaderboard.entries.length && <p style={{ padding: '26px 18px', margin: 0, color: 'var(--muted)' }}>No verified swap activity yet. Be the first Samurai.</p>}
-          {leaderboardState === 'ready' && leaderboard.entries.map((entry) => <div key={entry.wallet} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 160px 160px 120px', gap: '12px', padding: '15px 18px', alignItems: 'center', background: leaderboardWallet?.toLowerCase() === entry.wallet?.toLowerCase() ? 'rgba(185,28,28,.08)' : 'transparent', borderBottom: '1px solid var(--line)' }}><strong>#{entry.rank}</strong><span style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>{entry.wallet.slice(0, 5)}...{entry.wallet.slice(-5)}</span><span>${Number(entry.verifiedVolume).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span><strong>{Number(entry.samuraiPoints).toLocaleString()}</strong><span>{Number(entry.qualifyingSwaps).toLocaleString()}</span></div>)}
+          {leaderboardState === 'ready' && leaderboard.entries.map((entry) => <div className="leaderboard-table-row" key={entry.wallet} style={{ background: leaderboardWallet?.toLowerCase() === entry.wallet?.toLowerCase() ? 'rgba(185,28,28,.08)' : 'transparent' }}>
+            <div className="leaderboard-entry-rank"><small>RANK</small><strong>#{entry.rank}</strong></div>
+            <div className="leaderboard-entry-wallet"><small>SAMURAI</small><span className="leaderboard-wallet-short">{entry.wallet.slice(0, 5)}...{entry.wallet.slice(-5)}</span><span className="leaderboard-wallet-full">{entry.wallet}</span></div>
+            <div className="leaderboard-entry-volume"><small>VERIFIED VOLUME</small><span>${Number(entry.verifiedVolume).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
+            <div className="leaderboard-entry-points"><small>SAMURAI POINTS</small><strong>{Number(entry.samuraiPoints).toLocaleString()}</strong></div>
+            <div className="leaderboard-entry-swaps"><small>SWAPS</small><span>{Number(entry.qualifyingSwaps).toLocaleString()}</span></div>
+          </div>)}
         </div>
       </section>
     </>

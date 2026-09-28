@@ -13,6 +13,7 @@ import ComingSoon from '../components/ComingSoon'
 import { SWAP_ENABLED } from '../config/features'
 import { FEATURED_TOKEN_SECTIONS, RONIN_QUICK_PAIRS, SOL_MINT, TOKEN_BY_MINT, TRUSTED_TOKENS } from '../config/tokenRegistry'
 import { RONIN_MINT } from '../data'
+import { getAddress } from 'ethers'
 import { executeJupiterOrder, getJupiterOrder, getJupiterOrderV1Fallback, JupiterApiError, processSamuraiPoints, recordVerifiedSwap, verifySwapTransaction } from '../services/jupiterService'
 import { confirmSolanaTransaction, getRoninBalance, getSolBalance, sendSignedSolanaTransaction } from '../services/roninService'
 import { getAllTokenAccounts } from '../services/shieldService'
@@ -775,7 +776,7 @@ function toEthereumPanelToken(trending) {
       : 18,
     category: 'trending',
     logoURI: trending.logoURI || null,
-    fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${address}/logo.png`,
+    fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(address)}/logo.png`,
     featured: false,
     verified: false,
   }
@@ -1418,7 +1419,7 @@ function TokenMark({ token, size = 25 }) {
     const addr = String(token?.address || '').toLowerCase()
     if (/^0x[0-9a-f]{40}$/.test(addr)) {
       list.push(`https://tokens.1inch.io/${addr}.png`)
-      list.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${addr}/logo.png`)
+      list.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(addr)}/logo.png`)
       list.push(`https://cdn.robinhood.com/ncw_assets/logos/${addr}.png`)
     }
     // De-duplicate (DexScreener + 1inch sometimes return the same URL)

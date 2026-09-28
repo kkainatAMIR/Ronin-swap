@@ -2,7 +2,7 @@ export const ETHEREUM_CHAIN_ID = 1
 export const ETHEREUM_NATIVE = Object.freeze({ chainId: 1, type: 'native', address: null, symbol: 'ETH', name: 'Ether', decimals: 18, category: 'native', logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png', featured: true, verified: true })
 
 function token(address, symbol, name, category = 'featured') {
-  return Object.freeze({ chainId: 1, type: 'erc20', address, symbol, name, decimals: null, category, logoURI: `https://tokens.1inch.io/${address}.png`, fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${address}/logo.png`, featured: true, verified: true })
+  return Object.freeze({ chainId: 1, type: 'erc20', address, symbol, name, decimals: null, category, logoURI: `https://tokens.1inch.io/${address.toLowerCase()}.png`, fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${address}/logo.png`, featured: true, verified: true })
 }
 
 export const ETHEREUM_FEATURED_TOKENS = Object.freeze([

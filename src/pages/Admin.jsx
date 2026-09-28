@@ -51,13 +51,30 @@ export default function Admin() {
     try {
       let currentWallet = connectedWallet
       if (!currentWallet || currentWallet.isDemo) { await connectWallet(); currentWallet = null }
-      const provider = getSolanaProvider()
-      const address = currentWallet?.address || provider?.publicKey?.toString?.()
-      if (!address || !provider?.signMessage) throw new Error('Connect a wallet that supports message signing.')
+      let provider = null
+      let address = ''
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        provider = getSolanaProvider()
+        address = provider?.publicKey?.toString?.() || provider?.publicKey || currentWallet?.address || ''
+        if (provider?.signMessage && address) break
+        if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 150))
+      }
+      if (provider?.connect && !address && !provider.isConnected) {
+        const connection = await provider.connect()
+        provider = getSolanaProvider() || provider
+        address = provider?.publicKey?.toString?.() || provider?.publicKey || connection?.publicKey?.toString?.() || connection?.publicKey || ''
+      }
+      if (!address || !provider?.signMessage) {
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        throw new Error(isMobile
+          ? 'Open Ronin Swap inside the Phantom app and reconnect your administrator wallet.'
+          : 'Connect a wallet that supports message signing.')
+      }
       const challengeResponse = await fetch('/api/admin/auth?action=challenge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet: address }) })
       const challenge = await challengeResponse.json()
       if (!challengeResponse.ok) throw new Error(challenge.error || 'Admin wallet is not authorized.')
-      const signed = await provider.signMessage(new TextEncoder().encode(challenge.message), 'utf8')
+      const messageBytes = new TextEncoder().encode(challenge.message)
+      const signed = await provider.signMessage(messageBytes)
       const normalizeSignatureBytes = (value) => {
         if (value instanceof Uint8Array) return value
         if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)

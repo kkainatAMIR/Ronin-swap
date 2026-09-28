@@ -124,6 +124,7 @@ export default function Profile() {
   const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded } = useWallet()
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
+  const [visibleActivityCount, setVisibleActivityCount] = useState(3)
 
   // Detect mobile wallet-link phase from URL. On mobile, the EVM
   // wallet-link flow spans two browser contexts (Phantom → MetaMask
@@ -295,7 +296,7 @@ export default function Profile() {
           <section className="profile-header-section">
             <div className="profile-header-mark"><div className="profile-avatar">侍</div><span className="profile-mark-line" /></div>
             <div className="profile-header-copy"><span className="eyebrow">MY SAMURAI IDENTITY</span><h1>SAMURAI PROFILE</h1><p className="profile-wallet-address">{displayWalletAddress || '—'}</p><button className="profile-copy-button" onClick={() => navigator.clipboard?.writeText(displayWalletAddress)}><Icon name="copy" size={13} /> Copy wallet address</button></div>
-            <div className="profile-header-rank"><span className="profile-data-label">CURRENT RANK</span><strong>{currentRank?.name || 'UNRANKED'}</strong><small>{profile?.balance != null ? `${formatCompact(profile.balance)} RONIN` : 'RONIN balance unavailable'}</small></div>
+            <div className="profile-header-rank"><span className="profile-data-label">CURRENT RANK</span><div className="profile-current-rank">{currentRank?.image && <img src={currentRank.image} alt="" />}<strong>{currentRank?.name || 'UNRANKED'}</strong></div><small>{profile?.balance != null ? `${formatCompact(profile.balance)} RONIN` : 'RONIN balance unavailable'}</small></div>
           </section>
         </div>
       </section>
@@ -355,11 +356,11 @@ export default function Profile() {
       )}
 
       <section className="profile-main-grid">
-        <div className="profile-panel profile-rank-panel"><SectionHeading eyebrow="THE WAY FORWARD" title="Rank progress" text={nextRank ? `${formatNumber(Math.max(0, Number(nextRank.minBalance || 0) - Number(profile?.balance || 0)))} RONIN until ${nextRank.name}.` : 'You hold the highest configured rank.'} /><div className="profile-rank-line"><strong>{currentRank?.name || 'Unranked'}</strong><span>{nextRank?.name || 'MAX RANK'}</span></div><ProgressBar value={rankProgress} rightLabel={`${rankProgress}%`} /><small className="profile-muted">Rank is calculated from the existing RONIN holding system.</small></div>
+        <div className="profile-panel profile-rank-panel"><SectionHeading eyebrow="THE WAY FORWARD" title="Rank progress" text={nextRank ? `${formatNumber(Math.max(0, Number(nextRank.minBalance || 0) - Number(profile?.balance || 0)))} RONIN until ${nextRank.name}.` : 'You hold the highest configured rank.'} /><div className="profile-rank-line"><span className="profile-rank-current">{currentRank?.image && <img src={currentRank.image} alt="" />}<strong>{currentRank?.name || 'Unranked'}</strong></span><span>{nextRank?.name || 'MAX RANK'}</span></div><ProgressBar value={rankProgress} rightLabel={`${rankProgress}%`} /><small className="profile-muted">Rank is calculated from the existing RONIN holding system.</small></div>
         <div className="profile-panel"><SectionHeading eyebrow="YOUR POSITION" title="Leaderboard" /><div className="profile-leaderboard-position">{stats.currentRank ? `#${formatNumber(Number(stats.currentRank))}` : '—'}<span>YOUR LEADERBOARD POSITION</span></div><div className="profile-neighbors">{neighborEntries.length ? neighborEntries.map((entry) => <div className={(entry.wallet && allWalletAddresses.some((addr) => addr.toLowerCase() === entry.wallet.toLowerCase())) ? 'is-you' : ''} key={`${entry.rank}-${entry.wallet}`}><span>#{entry.rank}</span><span>{(entry.wallet && allWalletAddresses.some((addr) => addr.toLowerCase() === entry.wallet.toLowerCase())) ? 'YOU' : short(entry.wallet)}</span><strong>{formatNumber(entry.samuraiPoints)} SP</strong></div>) : <p className="profile-muted">Your position will appear after your first qualifying swap.</p>}</div></div>
       </section>
 
-      <section className="profile-panel profile-journey-panel"><SectionHeading eyebrow="PERSONAL PROGRESS" title="Your Samurai journey" /><div className="profile-journey-grid"><div><span className="profile-data-label">POINTS</span><strong>{formatNumber(points)} SP</strong></div><div><span className="profile-data-label">VOLUME</span><strong>${volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div><div><span className="profile-data-label">RANK</span><strong>{currentRank?.name || 'UNRANKED'}</strong></div><div><span className="profile-data-label">REWARDS</span><strong>—</strong><small>Not configured</small></div></div></section>
+      <section className="profile-panel profile-journey-panel"><SectionHeading eyebrow="PERSONAL PROGRESS" title="Your Samurai journey" /><div className="profile-journey-grid"><div><span className="profile-data-label">POINTS</span><strong>{formatNumber(points)} SP</strong></div><div><span className="profile-data-label">VOLUME</span><strong>${volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div><div><span className="profile-data-label">RANK</span><span className="profile-journey-rank">{currentRank?.image && <img src={currentRank.image} alt="" />}<strong>{currentRank?.name || 'UNRANKED'}</strong></span></div><div><span className="profile-data-label">REWARDS</span><strong>—</strong><small>Not configured</small></div></div></section>
 
       <section className="profile-frequent-section">
         <div className="profile-frequent-decor" aria-hidden="true">
@@ -377,7 +378,7 @@ export default function Profile() {
         </div>
       </section>
 
-      <section className="profile-activity-section"><SectionHeading eyebrow="VERIFIED ON-CHAIN" title="Your recent activity" text="Only verified swaps belonging to this connected wallet are shown." />{hasActivity ? <div className="profile-activity-list">{data.swaps.slice(0, 20).map((swap) => <ActivityRow key={`${swap.chain_id}-${swap.signature}`} swap={swap} />)}</div> : <div className="profile-activity-empty"><Icon name="swapVertical" size={22} /><p>No Samurai activity yet.</p><small>Make your first swap to begin your journey.</small></div>}</section>
+      <section className="profile-activity-section"><SectionHeading eyebrow="VERIFIED ON-CHAIN" title="Your recent activity" text="Only verified swaps belonging to this connected wallet are shown." />{hasActivity ? <><div className="profile-activity-list">{data.swaps.slice(0, visibleActivityCount).map((swap) => <ActivityRow key={`${swap.chain_id}-${swap.signature}`} swap={swap} />)}</div>{visibleActivityCount < data.swaps.length && <button type="button" className="profile-activity-more" onClick={() => setVisibleActivityCount((count) => count + 10)}>View More</button>}</> : <div className="profile-activity-empty"><Icon name="swapVertical" size={22} /><p>No Samurai activity yet.</p><small>Make your first swap to begin your journey.</small></div>}</section>
 
       <section className="profile-shield-panel"><div><span className="eyebrow">WALLET PROTECTION</span><h2>Shield status</h2><p>Personal Shield scan history is not currently indexed for this wallet. The existing Shield scanner remains available from the Shield page.</p></div><Button variant="outline" icon="arrowUpRight" href="#shield">Open Shield</Button></section>
     </main>
