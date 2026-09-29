@@ -10,6 +10,7 @@ import { useWallet, getSolanaProvider } from '../context/WalletContext'
 import Icon from '../components/Icon'
 import { Button, Sakura } from '../components/Layout'
 import ComingSoon from '../components/ComingSoon'
+import TokenImportRow from '../components/TokenImportRow'
 import { SWAP_ENABLED } from '../config/features'
 import { FEATURED_TOKEN_SECTIONS, RONIN_QUICK_PAIRS, SOL_MINT, TOKEN_BY_MINT, TRUSTED_TOKENS } from '../config/tokenRegistry'
 import { RONIN_MINT } from '../data'
@@ -189,6 +190,10 @@ function JupiterMark({ size = 16 }) {
 
 function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, onClose }) {
   const [search, setSearch] = useState('')
+  // Imported tokens (via the "Import this token" row at the top of
+  // the picker). Persists for the picker's lifetime — cleared when
+  // the picker closes. NOT persisted to localStorage.
+  const [importedTokens, setImportedTokens] = useState([])
   const query = search.trim().toLowerCase()
 
   // Merge wallet-discovered tokens with the curated catalog. Tokens that
@@ -220,8 +225,15 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
         })
       }
     }
+    // Merge imported tokens last so they don't override curated/wallet
+    // entries (a curated entry with the same address always wins).
+    for (const token of importedTokens) {
+      const key = (token.address || '').toLowerCase()
+      if (!key || map.has(key)) continue
+      map.set(key, token)
+    }
     return Array.from(map.values())
-  }, [walletTokens])
+  }, [walletTokens, importedTokens])
 
   const tokens = selectorTokens.filter((token) => token !== other && (!query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)))
   const sectionTokens = (section) => ETHEREUM_FEATURED_SECTIONS[section].map((symbol) => selectorTokens.find((token) => token.symbol === symbol)).filter((token) => token && token !== other && (!query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query)))
@@ -276,6 +288,21 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
           </div>
         )}
         <div className="swap-token-results" role="listbox">
+          {/* "Import this token" row — only shows when the search query
+              looks like a valid EVM contract address AND no curated/wallet/
+              imported token in the list matches. Click → fetch metadata
+              from /api/token-info/evm?chain=ethereum, add to list with
+              trust='custom', let user pick it. */}
+          <TokenImportRow
+            chainKey="ethereum"
+            query={search}
+            existingTokens={selectorTokens}
+            onImported={(token) => {
+              const key = (token.address || '').toLowerCase()
+              if (!key) return
+              setImportedTokens((prev) => prev.some((t) => (t.address || '').toLowerCase() === key) ? prev : [...prev, token])
+            }}
+          />
           {tokens.length ? tokens.map((token) => {
             const balance = Number(token.walletBalance || 0)
             return (
@@ -287,7 +314,7 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
                   <small>{token.type === 'native' ? 'Native ETH' : token.address}</small>
                 </span>
                 <span className="swap-token-trust" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                  <span>{token.trust === 'wallet' ? 'WALLET' : 'FEATURED'}</span>
+                  <span>{token.trust === 'wallet' ? 'WALLET' : token.trust === 'custom' ? 'IMPORTED' : 'FEATURED'}</span>
                   {balance > 0 && <small style={{ color: '#ff8d8d', fontSize: '10px' }}>{balance.toLocaleString(undefined, { maximumFractionDigits: 6 })}</small>}
                 </span>
               </button>
@@ -297,6 +324,49 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
       </div>
     </div>,
     document.body,
+  )
+}
+
+// =====================================================================
+// ImportedTokenSecurityBanner — yellow warning banner shown above
+// the swap CTA when an imported (non-curated, non-wallet) token is
+// selected as either the from or to token.
+// =====================================================================
+// Rendered by each of the three swap panels (Solana / Ethereum /
+// Robinhood) when `fromToken.trust === 'custom'` OR
+// `toToken.trust === 'custom'`. The banner reminds the user that
+// imported tokens are user-supplied addresses that RoninSwap has NOT
+// verified against any registry — they should double-check the
+// contract address before continuing.
+//
+// The banner is INFORMATIONAL ONLY — it does not block the swap. The
+// existing isWalletImpersonation() check (extended to also check
+// `trust === 'custom'`) already BLOCKS scam tokens that spoof a
+// curated symbol. This banner is for the much larger class of
+// legitimately-named but unverified tokens the user explicitly chose
+// to import.
+// =====================================================================
+function ImportedTokenSecurityBanner({ fromToken, toToken }) {
+  const importedFrom = fromToken?.trust === 'custom' ? fromToken : null
+  const importedTo = toToken?.trust === 'custom' ? toToken : null
+  if (!importedFrom && !importedTo) return null
+  const imported = importedFrom || importedTo
+  const label = importedFrom && importedTo
+    ? `${importedFrom.symbol || 'from'} + ${importedTo.symbol || 'to'}`
+    : (imported.symbol || 'the imported token')
+  return (
+    <div className="swap-imported-token-warning" role="alert">
+      <Icon name="info" size={14} />
+      <div>
+        <strong>Unverified token: {label}</strong>
+        <small>
+          You're swapping an imported token that RoninSwap has NOT verified against any
+          registry. Double-check the contract address before continuing — imported tokens
+          can be scams with similar names. RoninSwap is not responsible for losses from
+          unverified tokens.
+        </small>
+      </div>
+    </div>
   )
 }
 
@@ -664,6 +734,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quote ? formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6) : ''} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {account ? `${balanceLabel(toToken)} ${toToken.symbol}` : '--'}</span></div>
       </div>
+      <ImportedTokenSecurityBanner fromToken={fromToken} toToken={toToken} />
       <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'signing' ? 'CONFIRM IN METAMASK...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       <SwapCompletedBanner
         visible={showCompletedBanner}
@@ -810,6 +881,10 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [trending, setTrending] = useState({ state: 'idle', results: [] })
+  // Imported tokens (via the "Import this token" row at the top of
+  // the picker). Persists for the picker's lifetime — cleared when
+  // the picker closes. NOT persisted to localStorage.
+  const [importedTokens, setImportedTokens] = useState([])
   const query = search.trim().toLowerCase()
 
   useEffect(() => {
@@ -859,7 +934,16 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
     : filter === 'trending' ? trending.results.map((item) => ({ chainId: 4663, chainKey: 'robinhood', type: 'erc20', address: item.address, symbol: item.symbol, name: item.name, decimals: item.decimals, logoURI: item.logoURI, isMeme: false, activity: item.activity }))
     : sections.all
 
-  const results = [ROBINHOOD_NATIVE_TOKEN, ...baseList]
+  // Imported tokens appear in EVERY filter so the user can pick them
+  // regardless of which filter tab they're on. The existing-token-key
+  // dedup below ensures a curated/wallet token with the same address
+  // always wins over the imported duplicate.
+  const mergedImported = useMemo(() => {
+    const existing = new Set([ROBINHOOD_NATIVE_TOKEN, ...baseList].map((t) => robinhoodTokenKey(t)))
+    return importedTokens.filter((t) => !existing.has(robinhoodTokenKey(t)))
+  }, [importedTokens, baseList])
+
+  const results = [ROBINHOOD_NATIVE_TOKEN, ...baseList, ...mergedImported]
     .filter((token) => robinhoodTokenKey(token) !== robinhoodTokenKey(other))
     .filter((token) => !query || `${token.symbol} ${token.name} ${token.address || 'native'}`.toLowerCase().includes(query))
 
@@ -896,6 +980,21 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
           </div>
         )}
         <div className="swap-token-results" role="listbox">
+          {/* "Import this token" row — only shows when the search query
+              looks like a valid EVM contract address AND no curated/wallet/
+              imported token in the list matches. Click → fetch metadata
+              from /api/token-info/evm?chain=robinhood, add to list with
+              trust='custom', let user pick it. */}
+          <TokenImportRow
+            chainKey="robinhood"
+            query={search}
+            existingTokens={[ROBINHOOD_NATIVE_TOKEN, ...baseList, ...mergedImported]}
+            onImported={(token) => {
+              const key = (token.address || '').toLowerCase()
+              if (!key) return
+              setImportedTokens((prev) => prev.some((t) => (t.address || '').toLowerCase() === key) ? prev : [...prev, token])
+            }}
+          />
           {results.length ? results.map((token) => {
             const balance = Number(token.walletBalance || 0)
             return (
@@ -903,7 +1002,7 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
                 <TokenMark token={token} size={30} />
                 <span className="swap-token-result-copy"><strong>{token.symbol}</strong><small>{token.name}</small><small>{token.type === 'native' ? 'Native ETH' : shortMint(token.address)}</small></span>
                 <span className="swap-token-trust" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                  <span>{token.type === 'native' ? 'NATIVE' : token.isMeme ? 'MEME' : token.walletBalance != null ? 'WALLET' : 'CATALOG'}</span>
+                  <span>{token.trust === 'custom' ? 'IMPORTED' : token.type === 'native' ? 'NATIVE' : token.isMeme ? 'MEME' : token.walletBalance != null ? 'WALLET' : 'CATALOG'}</span>
                   {balance > 0 && <small style={{ color: '#ff8d8d', fontSize: '10px' }}>{balance.toLocaleString(undefined, { maximumFractionDigits: 6 })}</small>}
                 </span>
               </button>
@@ -1302,6 +1401,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quoteOutputAmount} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(toToken)} {toToken.symbol}</span></div>
       </div>
+      <ImportedTokenSecurityBanner fromToken={fromToken} toToken={toToken} />
       <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       <SwapCompletedBanner
         visible={showCompletedBanner}
@@ -1505,7 +1605,12 @@ function shortMint(mint) {
 }
 
 function isWalletImpersonation(token) {
-  if (token.trust !== 'wallet') return false
+  // Check both wallet-discovered tokens AND custom-imported tokens.
+  // Custom-imported tokens (user pasted an address into the picker)
+  // need the SAME impersonation check — a scam token using "USDC" as
+  // its symbol but a different mint/address must be BLOCKED regardless
+  // of whether it was discovered via wallet scan or manual import.
+  if (token.trust !== 'wallet' && token.trust !== 'custom') return false
   const symbol = String(token.symbol || '').trim().toLowerCase()
   const name = String(token.name || '').trim().toLowerCase()
   if (!symbol && !name) return false
@@ -1517,6 +1622,11 @@ function isWalletImpersonation(token) {
 
 function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose }) {
   const [search, setSearch] = useState('')
+  // Imported tokens (via the "Import this token" row at the top of
+  // the picker). Persists for the picker's lifetime — cleared when
+  // the picker closes. NOT persisted to localStorage (no implicit
+  // trust across page loads).
+  const [importedTokens, setImportedTokens] = useState([])
   const query = search.trim().toLowerCase()
   const selectorTokens = useMemo(() => {
     const map = new Map(TRUSTED_TOKENS.map((token) => [token.mint, token]))
@@ -1529,12 +1639,23 @@ function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose 
         logoURI: token.logo || null,
       })
     }
+    // Merge imported tokens last so they don't override curated/wallet
+    // entries (a curated entry with the same mint always wins).
+    for (const token of importedTokens) {
+      const existing = map.get(token.mint)
+      if (existing) {
+        // The mint matches an existing curated/wallet token — keep
+        // the existing entry (it's verified). Drop the duplicate import.
+        continue
+      }
+      map.set(token.mint, token)
+    }
     return Array.from(map.values()).map((token) => isWalletImpersonation(token) ? {
       ...token,
       securityWarning: 'Possible token impersonation. Mint does not match the curated token.',
       blocked: true,
     } : token)
-  }, [walletTokens])
+  }, [walletTokens, importedTokens])
   const results = useMemo(() => selectorTokens.filter((token) => {
     if (token.mint === other.mint) return false
     return !query || [token.symbol, token.name, token.mint].some((value) => String(value || '').toLowerCase().includes(query))
@@ -1571,6 +1692,19 @@ function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose 
           })}
         </div>}
         <div className="swap-token-results" role="listbox">
+          {/* "Import this token" row — only shows when the search query
+              looks like a valid Solana mint AND no curated/wallet/imported
+              token in the list matches. Click → fetch metadata from the
+              backend's /api/token-info/solana endpoint, add it to the
+              list with trust='custom', and let the user pick it. */}
+          <TokenImportRow
+            chainKey="solana"
+            query={search}
+            existingTokens={selectorTokens}
+            onImported={(token) => {
+              setImportedTokens((prev) => prev.some((t) => t.mint === token.mint) ? prev : [...prev, token])
+            }}
+          />
           {results.length ? results.map((token) => {
             const balance = Number(token.walletBalance || 0)
             return (
@@ -2482,6 +2616,7 @@ export default function Swap() {
               </div>
             </div>
 
+            <ImportedTokenSecurityBanner fromToken={fromToken} toToken={toToken} />
             <button
               type="button"
               className="swap-cta"

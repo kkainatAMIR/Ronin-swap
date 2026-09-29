@@ -450,6 +450,33 @@
 .swap-token-result-copy small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .swap-token-trust { color: var(--red); font: 700 9px var(--mono); text-transform: uppercase; }
 .swap-token-empty-state { padding: 22px 4px; color: var(--muted); font-size: 12px; text-align: center; }
+
+/* ─── Token Import Row (paste-a-mint-and-fetch-metadata) ───── */
+/* The "Import this token" button shown at the top of the picker
+   results when the search query looks like a valid mint/contract
+   address AND no curated/wallet token matches. Uses the same
+   .swap-token-result base styling so it visually matches the
+   other rows; the IMPORTED tag + plus icon distinguishes it. */
+.swap-token-import-row { padding-top: 5px; border-bottom: 1px solid var(--line); }
+.swap-token-import-result { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 4px; border: 0; background: var(--cream); color: var(--ink); text-align: left; cursor: pointer; border-radius: 4px; }
+.swap-token-import-result:hover { background: rgba(255, 141, 141, .08); }
+.swap-token-import-result:disabled { cursor: progress; opacity: .7; }
+.swap-token-import-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 141, 141, .14); color: var(--red); flex-shrink: 0; }
+.swap-token-import-address { font: 700 9px var(--mono); color: var(--muted); word-break: break-all; white-space: normal !important; }
+.swap-token-import-error { padding: 6px 4px; color: var(--red); font-size: 11px; }
+.swap-token-import-disclaimer { padding: 6px 4px 10px; color: var(--muted); font-size: 10px; line-height: 1.4; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+
+/* ─── Imported Token Security Banner ────────────────────────── */
+/* Yellow warning banner shown above the swap CTA when an imported
+   (trust='custom') token is selected as from or to. Informational
+   only — does NOT block the swap. The existing
+   isWalletImpersonation() check already BLOCKS scam tokens that
+   spoof a curated symbol. */
+.swap-imported-token-warning { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin: 0 0 8px; background: rgba(255, 193, 7, .12); border: 1px solid rgba(255, 193, 7, .45); border-radius: 5px; color: var(--ink); }
+.swap-imported-token-warning > svg { color: #d97706; flex-shrink: 0; margin-top: 1px; }
+.swap-imported-token-warning strong { display: block; font: 700 11px var(--mono); text-transform: uppercase; color: #92400e; margin-bottom: 4px; }
+.swap-imported-token-warning small { display: block; font-size: 11px; line-height: 1.45; color: var(--ink); opacity: .85; }
+
 .swap-token-logo { object-fit: cover; }
 .swap-token { border: 0; background: none; color: inherit; cursor: pointer; }
 .swap-quick-pairs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }

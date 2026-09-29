@@ -80,6 +80,9 @@ import swapVerify from '../api_routes/swap/verify.mjs'
 import swapRecord from '../api_routes/swap/record.mjs'
 import swapPoints from '../api_routes/swap/points.mjs'
 
+import tokenInfoSolana from '../api_routes/token-info/solana.mjs'
+import tokenInfoEvm from '../api_routes/token-info/evm.mjs'
+
 import walletLinkChallenge from '../api_routes/wallet-link/challenge.mjs'
 import walletLinkVerify from '../api_routes/wallet-link/verify.mjs'
 import walletLinkList from '../api_routes/wallet-link/list.mjs'
@@ -197,6 +200,14 @@ export const ROUTES = {
   'POST /api/swap/verify':  swapVerify,
   'POST /api/swap/record':  swapRecord,
   'POST /api/swap/points':  swapPoints,
+
+  // ─── Token info (read-only import-by-address lookup) ───
+  // Used by the swap page's "Import this token" row when the user
+  // pastes a mint/contract address that isn't in the curated catalog
+  // AND isn't held by their wallet. Returns public on-chain metadata
+  // only — never writes to the database.
+  'GET /api/token-info/solana': tokenInfoSolana,
+  'GET /api/token-info/evm':    tokenInfoEvm,
 
   // ─── Wallet Link (cryptographic Solana↔EVM linking) ───
   // 1. POST /api/wallet-link/challenge  – server creates a one-time-use
