@@ -17,8 +17,10 @@ import {
   openMetaMaskMobile,
   openMetaMaskMobileForWalletLink,
   openPhantomForSolanaSign,
-  buildPhantomForSolanaSignUrl,
   getMobileWalletLinkPhase,
+  getMobileWalletLinkPersistedState,
+  markMobileWalletLinkPhaseCompleted,
+  isMobileWalletLinkSessionExpired,
   clearMobileWalletLinkParams,
   clearMobileWalletLinkState,
   EVM_REDIRECTING_TO_METAMASK_MOBILE,
@@ -63,6 +65,16 @@ const STEP_OPENING_METAMASK_MOBILE = 'opening-metamask-mobile'
 // We're deep-linking BACK to Phantom so the user can sign the Solana
 // message. No user action needed — this is a brief redirect state.
 const STEP_RETURNING_TO_PHANTOM = 'returning-to-phantom'
+// Mobile-only: returning to the Ronin Swap / Phantom browser after
+// MetaMask approval. Brief intermediate state used while the page
+// detects the persisted Phase 2 state and re-establishes context
+// before the Solana signing step fires.
+const STEP_RETURNING_TO_RONIN = 'returning-to-ronin'
+// Mobile-only: Phantom connection popup is showing (provider.connect()
+// was called on an unconnected Phantom wallet). Distinguished from
+// STEP_SIGNING_SOLANA because the user is approving a CONNECTION, not
+// a signature.
+const STEP_CONNECTING_PHANTOM = 'connecting-phantom'
 
 // The 4 user-visible progress steps. Indexed by step number.
 const PROGRESS_STEPS = [
@@ -82,6 +94,8 @@ function stepToProgressIndex(step) {
   // Mobile intermediate states show the EVM step as complete (EVM
   // sig was obtained in MetaMask Mobile) and the Solana step as active.
   if (step === STEP_RETURNING_TO_PHANTOM) return 1
+  if (step === STEP_RETURNING_TO_RONIN) return 1
+  if (step === STEP_CONNECTING_PHANTOM) return 1
   return -1
 }
 
@@ -96,6 +110,22 @@ function sameEvmAddress(left, right) {
     && left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
+// Debug-gated info logger — mirrors walletLinkService.js::logInfo.
+// Set localStorage['ronin.debugWalletLink'] = '1' to enable verbose
+// tracing. Defaults to OFF in production to avoid leaking sensitive
+// flow data (challenge IDs, signature lengths, full deep-link URLs).
+function isWalletLinkDebug() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('ronin.debugWalletLink') === '1'
+  } catch {
+    return false
+  }
+}
+function logInfo(...args) {
+  if (!isWalletLinkDebug()) return
+  console.info(...args)
+}
+
 export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
   const { wallet, verifiedEvmWallets, refreshLinkedWallets, solanaPayoutWallet } = useWallet()
   const [step, setStep] = useState(STEP_IDLE)
@@ -108,12 +138,13 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
 
   // Diagnostic: log on every render what the URL looks like + what
   // getMobileWalletLinkPhase returns. This helps trace exactly where
-  // the flow stops on mobile.
-  if (typeof window !== 'undefined') {
+  // the flow stops on mobile. Gated behind a debug flag so production
+  // doesn't leak sensitive flow data.
+  if (isWalletLinkDebug() && typeof window !== 'undefined') {
     const urlSearch = window.location.search || '(empty)'
     const phase = getMobileWalletLinkPhase()
     if (phase) {
-      console.info('[WalletLinkMobile] WalletLinkPanel render — mobile phase active', {
+      logInfo('[WalletLinkMobile] WalletLinkPanel render — mobile phase active', {
         phase: phase.phase,
         urlSearch: urlSearch.slice(0, 80),
         step,
@@ -192,6 +223,23 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
 
   useEffect(() => {
     if (mobileResumeStartedRef.current) return
+
+    // STEP 8 — proactive session-expiry check.
+    //
+    // If the persisted state is older than 5 minutes (the backend
+    // challenge TTL), don't try to resume — the challenge is gone
+    // server-side. Clear the state and show a clean "session expired"
+    // error so the user can start fresh.
+    if (isMobileWalletLinkSessionExpired()) {
+      mobileResumeStartedRef.current = true
+      clearMobileWalletLinkParams()
+      clearMobileWalletLinkState()
+      setError('Linking session expired. Please try again.')
+      setErrorCode('SESSION_EXPIRED')
+      setStep(STEP_ERROR)
+      return
+    }
+
     const mobilePhase = getMobileWalletLinkPhase()
     if (!mobilePhase) return
 
@@ -212,6 +260,7 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
     if (mobilePhase.phase === '1') {
       const phaseSolanaWallet = mobilePhase.solanaWallet
       const phaseExpectedEvmWallet = mobilePhase.expectedEvmWallet || expectedEvmWallet
+      const phaseAttemptId = mobilePhase.attemptId
 
       // Detect MetaMask provider at a single point in time.
       const detectMetaMaskNow = () => Boolean(
@@ -226,31 +275,42 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
 
       const startPhase2 = () => {
         mobileResumeStartedRef.current = true
-        console.info('[WalletLinkMobile] MetaMask provider detected')
+        logInfo('[WalletLinkMobile] MetaMask provider detected', { attemptId: phaseAttemptId })
         setStep(STEP_REQUESTING_CHALLENGE)
         setError('')
         setErrorCode('')
         ;(async () => {
           try {
-            console.info('[WalletLinkMobile] eth_requestAccounts started')
+            logInfo('[WalletLinkMobile] eth_requestAccounts started', { attemptId: phaseAttemptId })
             const evm = await ensureMetaMaskAccount()
             if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
               throw new Error('MetaMask provider became unavailable.')
             }
+            // STEP 4 / STEP 5 — pre-sign check that MetaMask is on the
+            // intended wallet. We do NOT blindly trust accounts[0].
+            // If the user came from a Profile page that pre-selected an
+            // EVM wallet (expectedEvmWallet), we verify MetaMask is on
+            // that account BEFORE creating a challenge.
             if (phaseExpectedEvmWallet && !sameEvmAddress(evm, phaseExpectedEvmWallet)) {
-              throw new Error(`MetaMask is connected to ${shortAddr(evm)}, but this Profile is linking ${shortAddr(phaseExpectedEvmWallet)}. Switch to the Profile wallet and try again.`)
+              const err = new Error(
+                `Wrong MetaMask wallet selected. MetaMask is connected to ${shortAddr(evm)}, but you selected ${shortAddr(phaseExpectedEvmWallet)} on Ronin Swap. Switch MetaMask to the correct wallet and try again.`
+              )
+              err.code = 'WRONG_EVM_WALLET'
+              throw err
             }
-            console.info('[WalletLinkMobile] MetaMask account received', {
+            logInfo('[WalletLinkMobile] MetaMask account received', {
               evmShort: evm.slice(0, 6) + '...' + evm.slice(-4),
+              attemptId: phaseAttemptId,
             })
             setEvmAddress(evm)
-            console.info('[WalletLinkMobile] challenge creation started')
+            logInfo('[WalletLinkMobile] challenge creation started', { attemptId: phaseAttemptId })
             const challenge = await createWalletLinkChallenge({
               solanaWallet: phaseSolanaWallet,
               evmWallet: evm,
             })
-            console.info('[WalletLinkMobile] challenge created', {
+            logInfo('[WalletLinkMobile] challenge created', {
               challengeId: challenge.challengeId,
+              attemptId: phaseAttemptId,
             })
             setActiveLink({
               solanaWallet: challenge.solanaWallet,
@@ -260,47 +320,67 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
               messageSolana: challenge.messageSolana,
             })
             // Sign with MetaMask (personal_sign). Same as desktop.
+            // The post-sign signer-recovery check inside
+            // signLinkMessageWithMetaMask (in walletLinkService.js)
+            // catches the case where MetaMask signed with a different
+            // account than the one we passed (a known mobile race
+            // when the user switches accounts mid-flow).
             setStep(STEP_SIGNING_EVM)
-            console.info('[WalletLinkMobile] personal_sign started')
+            logInfo('[WalletLinkMobile] personal_sign started', { attemptId: phaseAttemptId })
             const evmSig = await signLinkMessageWithMetaMask({
               address: challenge.evmWallet,
               message: challenge.messageEvm,
             })
-            console.info('[WalletLinkMobile] personal_sign completed', {
+            logInfo('[WalletLinkMobile] personal_sign completed', {
               sigLen: evmSig?.length,
+              attemptId: phaseAttemptId,
             })
+            // Mark Phase 1 (EVM signature) as completed in the persisted
+            // state. This makes the resume logic idempotent — if the
+            // user manually goes back to MetaMask after this point, the
+            // auto-resume will see that Phase 1 is already done and
+            // immediately re-trigger the Phantom handoff instead of
+            // creating a duplicate challenge + signature.
+            markMobileWalletLinkPhaseCompleted('1')
             // EVM signature obtained. On desktop, we'd continue to
             // signSolana. On mobile, window.solana is NOT available
             // inside MetaMask Mobile's browser — we need to deep-link
             // BACK to Phantom so the user can sign the Solana message.
             setStep(STEP_RETURNING_TO_PHANTOM)
-            console.info('[WalletLinkMobile] Phase 2 deep-link generation started')
-            const phantomUrl = buildPhantomForSolanaSignUrl({
+            logInfo('[WalletLinkMobile] Phase 2 deep-link generation started', { attemptId: phaseAttemptId })
+            // STEP 7 — single authoritative handoff path.
+            //   openPhantomForSolanaSign returns { ok, universalLink,
+            //   customSchemeLink } — we no longer call
+            //   buildPhantomForSolanaSignUrl separately (the previous
+            //   double-call was the "racing deeplink" behavior the
+            //   user wants cleaned up). The returned universalLink is
+            //   used for the manual fallback button; the custom scheme
+            //   is fired only by the controlled 1500ms fallback timer
+            //   inside openPhantomForSolanaSign (no racing here).
+            const phantomResult = openPhantomForSolanaSign({
               challengeId: challenge.challengeId,
               evmWallet: challenge.evmWallet,
               evmSignature: evmSig,
               messageSolana: challenge.messageSolana,
             })
-            setPhantomFallbackUrl(phantomUrl?.universalLink || '')
-            const phantomOk = openPhantomForSolanaSign({
-              challengeId: challenge.challengeId,
-              evmWallet: challenge.evmWallet,
-              evmSignature: evmSig,
-              messageSolana: challenge.messageSolana,
-            })
-            if (!phantomOk) {
-              console.error('[WalletLinkMobile] Phantom handoff failed — openPhantomForSolanaSign returned false')
+            if (!phantomResult?.ok) {
+              console.error('[WalletLinkMobile] Phantom handoff failed — openPhantomForSolanaSign returned no result', { attemptId: phaseAttemptId })
               clearMobileWalletLinkParams()
               setError('Phantom handoff could not be started. Please try again.')
               setErrorCode('PHANTOM_HANDOFF_FAILED')
               setStep(STEP_ERROR)
               return
             }
-            console.info('[WalletLinkMobile] navigation to Phantom started')
+            // Store the universal link for the manual fallback button.
+            setPhantomFallbackUrl(phantomResult.universalLink || '')
+            logInfo('[WalletLinkMobile] navigation to Phantom started', { attemptId: phaseAttemptId })
           } catch (e) {
             const msg = e?.message || 'Mobile EVM signing failed.'
-            console.error('[WalletLinkMobile] Phase 2 failed', { message: msg })
+            console.error('[WalletLinkMobile] Phase 2 failed', { message: msg, code: e?.code, attemptId: phaseAttemptId })
             clearMobileWalletLinkParams()
+            // Preserve the WRONG_EVM_WALLET code so the UI shows the
+            // specific "wrong wallet" message instead of the generic
+            // "could not be completed" error.
             setError(msg)
             setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
             setStep(STEP_ERROR)
@@ -365,12 +445,13 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
     // to 5 seconds. Do NOT clear URL params until Phantom provider
     // is confirmed available.
     if (mobilePhase.phase === '2') {
-      const { challengeId, evmWallet, evmSignature, messageSolana } = mobilePhase
-      console.info('[WalletLinkMobile] wl=2 detected', {
+      const { challengeId, evmWallet, evmSignature, messageSolana, attemptId } = mobilePhase
+      logInfo('[WalletLinkMobile] wl=2 detected', {
         challengeId,
         evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
         sigLen: evmSignature?.length,
         msLen: messageSolana?.length,
+        attemptId,
       })
 
       // Detect Phantom provider at a single point in time.
@@ -378,13 +459,29 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
 
       const startPhase3 = () => {
         mobileResumeStartedRef.current = true
-        console.info('[WalletLinkMobile] Phantom provider detected')
-        console.info('[WalletLinkMobile] challengeId detected', { challengeId })
-        console.info('[WalletLinkMobile] EVM wallet detected', {
-          evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
-        })
-        console.info('[WalletLinkMobile] EVM signature detected', { sigLen: evmSignature?.length })
-        console.info('[WalletLinkMobile] Solana message decoded', { msLen: messageSolana?.length })
+        logInfo('[WalletLinkMobile] Phantom provider detected', { attemptId })
+
+        // STEP 9 — detect Solana wallet mismatch (e.g., user switched
+        // Phantom accounts mid-flow). If the connected Phantom wallet
+        // doesn't match the solanaWallet the challenge was created for,
+        // abort with a clear error. The backend will also reject this
+        // (SOLANA_SIGNER_MISMATCH), but the frontend check gives a
+        // clearer message.
+        const phantomProvider = getPhantomProvider()
+        const connectedSolana = phantomProvider?.publicKey ? phantomProvider.publicKey.toString().trim() : ''
+        const intendedSolana = solanaWallet || ''
+        if (intendedSolana && connectedSolana && connectedSolana !== intendedSolana) {
+          console.error('[WalletLinkMobile] Phantom connected to wrong Solana wallet', {
+            connectedShort: connectedSolana.slice(0, 4) + '...' + connectedSolana.slice(-4),
+            intendedShort: intendedSolana.slice(0, 4) + '...' + intendedSolana.slice(-4),
+            attemptId,
+          })
+          clearMobileWalletLinkParams()
+          setError(`Wrong Phantom wallet selected. Phantom is connected to ${shortAddr(connectedSolana)}, but the link challenge was created for ${shortAddr(intendedSolana)}. Switch Phantom to the correct wallet and try again.`)
+          setErrorCode('WRONG_SOLANA_WALLET')
+          setStep(STEP_ERROR)
+          return
+        }
 
         setEvmAddress(evmWallet)
         setActiveLink({
@@ -403,28 +500,41 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
         setErrorCode('')
         ;(async () => {
           try {
-            console.info('[WalletLinkMobile] Phantom signMessage started')
+            logInfo('[WalletLinkMobile] Phantom signMessage started', { attemptId })
             const solanaSig = await signLinkMessageWithPhantom({
               message: messageSolana,
               expectedAddress: solanaWallet || undefined,
             })
-            console.info('[WalletLinkMobile] Phantom signMessage completed', {
+            logInfo('[WalletLinkMobile] Phantom signMessage completed', {
               sigLen: solanaSig?.length,
+              attemptId,
             })
+            // Mark Phase 2 (Solana signature) as completed in the
+            // persisted state. The verify call below is the final
+            // step — if it fails (e.g., backend rejects), the user
+            // can retry, but the Solana signature itself is done.
+            markMobileWalletLinkPhaseCompleted('2')
             // Verify with backend. Same endpoint, same payload as desktop.
             setStep(STEP_VERIFYING)
-            console.info('[WalletLinkMobile] verify request started', { challengeId })
+            logInfo('[WalletLinkMobile] verify request started', { challengeId, attemptId })
             const result = await verifyWalletLink({
               challengeId,
               evmSignature,
               solanaSignature: solanaSig,
             })
-            console.info('[WalletLinkMobile] verify request completed', {
+            logInfo('[WalletLinkMobile] verify request completed', {
               success: result?.success,
               solanaWalletShort: result?.solanaWallet ? result.solanaWallet.slice(0, 4) + '...' + result.solanaWallet.slice(-4) : null,
               evmWalletShort: result?.evmWallet ? result.evmWallet.slice(0, 6) + '...' + result.evmWallet.slice(-4) : null,
+              attemptId,
             })
 
+            // STEP 11 — refresh verified linked-wallet state + profile
+            // points state after a successful link. The existing
+            // architecture treats the linked EVM wallet as part of
+            // the user's reward identity while Solana remains the
+            // payout wallet — we preserve that architecture here.
+            //
             // CRITICAL: refreshLinkedWallets() uses wallet?.address from
             // React state, but after the mobile deep-link return, the
             // closure captured wallet?.address=null (Phantom hadn't
@@ -440,22 +550,28 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             // 3. If wallet.address was null, poll for it to become available
             //    (bounded, ~5s) then call refreshLinkedWalletsRef.current()
             //    again — this time it will succeed and update verifiedEvmWallets
-            console.info('[WalletLinkMobile] refreshLinkedWallets started')
+            logInfo('[WalletLinkMobile] refreshLinkedWallets started', { attemptId })
             await refreshLinkedWalletsRef.current()
-            console.info('[WalletLinkMobile] refreshLinkedWallets completed')
+            logInfo('[WalletLinkMobile] refreshLinkedWallets completed', { attemptId })
 
             // ALSO fetch verified identity using the solana wallet from
             // the verify response — this is the authoritative address.
             // If refreshLinkedWallets returned early (stale wallet.address),
             // this fetch ensures the UI still shows the linked EVM wallet.
+            //
+            // BUGFIX: list.mjs returns `linkedEvmWallets` (camelCase),
+            // NOT `linked_evm_wallets` (snake_case). The previous
+            // check used the wrong field name, so setAggregatedPoints
+            // was never called. Fixed.
             if (result?.solanaWallet) {
               try {
-                console.info('[WalletLinkMobile] fetching verified identity using result.solanaWallet')
+                logInfo('[WalletLinkMobile] fetching verified identity using result.solanaWallet', { attemptId })
                 const identity = await getVerifiedRewardIdentity(result.solanaWallet)
-                console.info('[WalletLinkMobile] verified identity fetched', {
-                  linkedEvmCount: identity?.linked_evm_wallets?.length || 0,
+                logInfo('[WalletLinkMobile] verified identity fetched', {
+                  linkedEvmCount: identity?.linkedEvmWallets?.length || 0,
+                  attemptId,
                 })
-                if (identity?.linked_evm_wallets) {
+                if (identity?.linkedEvmWallets) {
                   setAggregatedPoints(identity)
                 }
               } catch (aggErr) {
@@ -473,7 +589,7 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             // startPhase3 was created. React state won't update inside this
             // async closure.
             if (!wallet?.address) {
-              console.info('[WalletLinkMobile] wallet.address still null — polling for Phantom reconnect')
+              logInfo('[WalletLinkMobile] wallet.address still null — polling for Phantom reconnect', { attemptId })
               let reconnectAttempts = 0
               const MAX_RECONNECT_ATTEMPTS = 20  // 5 seconds at 250ms
               await new Promise((resolve) => {
@@ -488,13 +604,13 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
                   )
                   if (phantomConnected) {
                     clearInterval(reconnectTimer)
-                    console.info('[WalletLinkMobile] Phantom reconnected (provider publicKey detected)')
+                    logInfo('[WalletLinkMobile] Phantom reconnected (provider publicKey detected)', { attemptId })
                     resolve()
                     return
                   }
                   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
                     clearInterval(reconnectTimer)
-                    console.warn('[WalletLinkMobile] Phantom reconnect wait timed out after 5s')
+                    console.warn('[WalletLinkMobile] Phantom reconnect wait timed out after 5s', { attemptId })
                     resolve()
                   }
                 }, 250)
@@ -502,11 +618,11 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
               // Give React a tick to process the wallet state update from
               // Phantom's connect event, then call refreshLinkedWallets again
               await new Promise((resolve) => setTimeout(resolve, 500))
-              console.info('[WalletLinkMobile] re-calling refreshLinkedWallets after reconnect wait')
+              logInfo('[WalletLinkMobile] re-calling refreshLinkedWallets after reconnect wait', { attemptId })
               await refreshLinkedWalletsRef.current()
-              console.info('[WalletLinkMobile] refreshLinkedWallets re-call completed')
+              logInfo('[WalletLinkMobile] refreshLinkedWallets re-call completed', { attemptId })
             }
-            console.info('[WalletLinkMobile] LINK SUCCESS')
+            logInfo('[WalletLinkMobile] LINK SUCCESS', { attemptId })
             clearMobileWalletLinkState()
             setStep(STEP_SUCCESS)
             onLinkedChange?.(result)
@@ -516,6 +632,7 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
               message: msg,
               code: e?.code,
               challengeId,
+              attemptId,
             })
             setError(msg)
             setErrorCode(String(e?.code || 'MOBILE_SOLANA_FAILED'))
@@ -564,6 +681,161 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
     }
   }, [solanaWallet, refreshLinkedWallets, onLinkedChange, expectedEvmWallet])
 
+  // =====================================================================
+  // STEP 8 — RESUME AFTER MANUAL BACK NAVIGATION
+  // =====================================================================
+  //
+  // When the user manually taps Back from MetaMask Mobile to return to
+  // Phantom (or vice versa), the WalletLinkPanel React component might
+  // still be mounted (the page wasn't fully torn down — it was put into
+  // a back/forward cache or the OS backgrounded the browser). In that
+  // case, the auto-resume useEffect above does NOT re-fire (no React
+  // dep changed), and the `mobileResumeStartedRef.current` guard is
+  // still true from the previous run. The flow is stuck.
+  //
+  // This listener-based resume handles that case. When the page becomes
+  // visible again (visibilitychange → 'visible', pageshow, or focus),
+  // we re-evaluate the persisted state. The resume is IDEMPOTENT:
+  //   * If a flow is already in progress, the existing guard prevents
+  //     re-execution.
+  //   * If the persisted state shows Phase 1 is already completed and
+  //     we're inside MetaMask Mobile (ethereum available), we re-fire
+  //     the Phantom handoff (openPhantomForSolanaSign) using the
+  //     persisted challengeId/evmWallet/evmSignature/messageSolana.
+  //   * If the persisted state shows Phase 2 is persisted and we're
+  //     inside Phantom (solana available), we let the auto-resume
+  //     useEffect handle it (reset the guard first).
+  //   * If the persisted state is expired, we clear it and show the
+  //     "session expired" error.
+  //
+  // Multiple lifecycle events (TEST H) must NOT create duplicate
+  // operations. The guard + the isDuplicateMobileHandoff() check
+  // inside openPhantomForSolanaSign prevent duplicates.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const handleResume = () => {
+      // Defer to next tick so we don't race with the page becoming
+      // visible (the URL might still be mid-navigation).
+      setTimeout(() => {
+        // If a flow is already in progress (e.g., Phase 2 personal_sign
+        // popup is showing), do nothing.
+        if (mobileResumeStartedRef.current) return
+
+        // STEP G — proactive session-expiry check on resume.
+        const persisted = getMobileWalletLinkPersistedState()
+        if (!persisted) return
+        if (persisted.expired) {
+          mobileResumeStartedRef.current = true
+          clearMobileWalletLinkParams()
+          clearMobileWalletLinkState()
+          setError('Linking session expired. Please try again.')
+          setErrorCode('SESSION_EXPIRED')
+          setStep(STEP_ERROR)
+          return
+        }
+
+        // Determine which provider is available in the current
+        // browser context. This is what tells us whether we're
+        // inside MetaMask Mobile's in-app browser (window.ethereum
+        // injected) or Phantom's in-app browser (window.solana
+        // injected).
+        const hasMetaMaskNow = Boolean(
+          (window.ethereum?.isMetaMask && !window.ethereum?.isPhantom) ||
+          (Array.isArray(window.ethereum?.providers) &&
+            window.ethereum.providers.some((p) => p?.isMetaMask && !p?.isPhantom))
+        )
+        const hasPhantomNow = Boolean(getPhantomProvider())
+
+        // CASE 1: We're inside MetaMask Mobile's browser, and Phase 1
+        // (EVM signature) is already completed. We need to re-trigger
+        // the Phantom handoff (because the user manually came back to
+        // MetaMask instead of going to Phantom after signing).
+        if (hasMetaMaskNow && !hasPhantomNow && persisted.phase === '2' &&
+            persisted.challengeId && persisted.evmWallet &&
+            persisted.evmSignature && persisted.messageSolana) {
+          logInfo('[WalletLinkMobile] resume: re-triggering Phantom handoff from persisted Phase 2 state', {
+            challengeId: persisted.challengeId,
+            attemptId: persisted.attemptId,
+          })
+          mobileResumeStartedRef.current = true
+          setStep(STEP_RETURNING_TO_PHANTOM)
+          setEvmAddress(persisted.evmWallet)
+          const phantomResult = openPhantomForSolanaSign({
+            challengeId: persisted.challengeId,
+            evmWallet: persisted.evmWallet,
+            evmSignature: persisted.evmSignature,
+            messageSolana: persisted.messageSolana,
+          })
+          if (phantomResult?.universalLink) {
+            setPhantomFallbackUrl(phantomResult.universalLink)
+          }
+          return
+        }
+
+        // CASE 2: We're inside Phantom's browser, and Phase 2 is
+        // persisted (challengeId + evmSignature etc.). The auto-resume
+        // useEffect should have fired on mount, but if the user came
+        // back via manual back navigation while the component was still
+        // mounted, the useEffect's guard (mobileResumeStartedRef.current)
+        // might be stale. Reset the guard so the auto-resume useEffect
+        // can re-fire on the NEXT React render cycle.
+        //
+        // We do NOT directly invoke the Phase 3 logic here because it
+        // has heavy state-setup (setStep, setActiveLink, clearMobileWalletLinkParams,
+        // etc.) that's tightly coupled to the closure in the
+        // auto-resume useEffect. Instead, we reset the guard and let
+        // the next render cycle's auto-resume handle it.
+        if (hasPhantomNow && persisted.phase === '2' &&
+            persisted.challengeId && persisted.evmWallet &&
+            persisted.evmSignature && persisted.messageSolana) {
+          logInfo('[WalletLinkMobile] resume: Phantom available + Phase 2 persisted — resetting guard for auto-resume', {
+            challengeId: persisted.challengeId,
+            attemptId: persisted.attemptId,
+          })
+          // Only reset if the guard was previously set (otherwise we
+          // might double-fire on the first mount).
+          if (mobileResumeStartedRef.current) {
+            mobileResumeStartedRef.current = false
+          }
+          return
+        }
+
+        // CASE 3: We're inside Phantom's browser, and Phase 1 is
+        // persisted (only solanaWallet, no challengeId). This means
+        // the user came back to Phantom BEFORE MetaMask signed —
+        // they should re-trigger the MetaMask handoff from Phase 1.
+        // But Phantom doesn't have window.ethereum, so we can't
+        // EVM-sign here. Show a clear message: "Return to MetaMask
+        // to continue" or "Cancel and try again".
+        if (hasPhantomNow && persisted.phase === '1' && persisted.solanaWallet) {
+          logInfo('[WalletLinkMobile] resume: Phantom available but Phase 1 only persisted — needs MetaMask', {
+            attemptId: persisted.attemptId,
+          })
+          // Don't take action — the user can use the "Cancel" button
+          // to reset and try again, or open MetaMask Mobile manually.
+          return
+        }
+      }, 100)
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') handleResume()
+    }
+    const onPageShow = () => handleResume()
+    const onFocus = () => handleResume()
+
+    window.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      window.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
   // --- Step 1: Connect MetaMask + create challenge ---
   //
   // DESKTOP (unchanged): window.ethereum is injected → ensureMetaMaskAccount()
@@ -608,6 +880,13 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
       setStep(STEP_ERROR)
       return
     }
+    // STEP I — clear any stale persisted state from a previous
+    // failed attempt before starting a fresh link. This guarantees
+    // the new attempt cannot be interfered with by old sessionStorage
+    // state. openMetaMaskMobileForWalletLink also clears state
+    // before minting a fresh attemptId, but we clear here too for
+    // the desktop path (which doesn't go through the mobile helper).
+    clearMobileWalletLinkState()
     setStep(STEP_REQUESTING_CHALLENGE)
     setError('')
     setErrorCode('')
@@ -615,8 +894,17 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
     try {
       const evm = await ensureMetaMaskAccount()
 
+      // STEP 4 / STEP 5 — pre-sign check that MetaMask is on the
+      // intended wallet. We do NOT blindly trust accounts[0].
+      // The post-sign signer-recovery check inside
+      // signLinkMessageWithMetaMask catches a switch BETWEEN this
+      // check and the actual personal_sign call (a known mobile race).
       if (evm !== EVM_REDIRECTING_TO_METAMASK_MOBILE && expectedEvmWallet && !sameEvmAddress(evm, expectedEvmWallet)) {
-        throw new Error(`MetaMask is connected to ${shortAddr(evm)}, but this Profile is linking ${shortAddr(expectedEvmWallet)}. Switch to the Profile wallet and try again.`)
+        const err = new Error(
+          `Wrong MetaMask wallet selected. MetaMask is connected to ${shortAddr(evm)}, but you selected ${shortAddr(expectedEvmWallet)} on Ronin Swap. Switch MetaMask to the correct wallet and try again.`
+        )
+        err.code = 'WRONG_EVM_WALLET'
+        throw err
       }
 
       // Mobile Phase 1: no injected MetaMask provider. Schedule the
@@ -665,11 +953,20 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
         address: challenge.evmWallet,
         message: challenge.messageEvm,
       })
+      // The post-sign signer-recovery check inside
+      // signLinkMessageWithMetaMask passed — the signature was
+      // produced by the intended EVM wallet. Continue to Solana.
       await signSolana({ ...challenge, evmSignature: evmSig })
     } catch (e) {
       const msg = e?.message || 'MetaMask signature failed.'
       console.error('[WalletLinkPanel] EVM signature failed', { code: e?.code, message: msg })
-      if (/reject|denied|4001/i.test(msg)) {
+      if (e?.code === 'WRONG_EVM_WALLET') {
+        // The signer recovery check inside signLinkMessageWithMetaMask
+        // caught a wallet mismatch. Preserve the WRONG_EVM_WALLET
+        // code so the UI shows the specific "wrong wallet" hint.
+        setError(msg)
+        setErrorCode('WRONG_EVM_WALLET')
+      } else if (/reject|denied|4001/i.test(msg)) {
         setError('You cancelled the MetaMask signature. The link was not created.')
         setErrorCode('EVM_REJECTED')
       } else {
@@ -998,6 +1295,12 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             •  → pending
           The copy explicitly says "Message signatures only — no
           transactions are being sent."
+
+          STEP 10 — Clean mobile states. The mobile intermediate
+          states (RETURNING_TO_PHANTOM, RETURNING_TO_RONIN,
+          CONNECTING_PHANTOM) are rendered in their own blocks
+          below; this block covers the canonical desktop flow +
+          the active signing/verifying steps on mobile.
           ================================================================= */}
       {(step === STEP_REQUESTING_CHALLENGE ||
         step === STEP_SIGNING_EVM ||
@@ -1005,7 +1308,17 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
         step === STEP_VERIFYING) && (
         <div className="ronin-wallet-link-flow">
           <div className="ronin-wallet-link-flow-header">
-            <strong>Linking your wallets…</strong>
+            <strong>
+              {step === STEP_REQUESTING_CHALLENGE
+                ? 'Opening MetaMask…'
+                : step === STEP_SIGNING_EVM
+                  ? 'Waiting for MetaMask approval…'
+                  : step === STEP_SIGNING_SOLANA
+                    ? 'Connecting Phantom…'
+                    : step === STEP_VERIFYING
+                      ? 'Verifying wallet…'
+                      : 'Linking your wallets…'}
+            </strong>
             <small>Message signatures only — no blockchain transactions are being sent.</small>
           </div>
           <ol className="ronin-wallet-link-progress">
@@ -1074,9 +1387,13 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             <p>
               Your eligible EVM Samurai Points are now associated with your Solana reward identity.
             </p>
-            {aggregatedPoints?.solana_wallet && (
+            {/* BUGFIX: list.mjs returns camelCase `solanaWallet`, NOT
+                snake_case `solana_wallet`. The previous check used
+                the wrong field name, so the "Linked to:" line was
+                never shown. Fixed. */}
+            {aggregatedPoints?.solanaWallet && (
               <small className="ronin-wallet-link-points">
-                Linked to: <code>{shortAddr(aggregatedPoints.solana_wallet)}</code>
+                Linked to: <code>{shortAddr(aggregatedPoints.solanaWallet)}</code>
               </small>
             )}
             <small className="ronin-wallet-link-note">
@@ -1100,12 +1417,51 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             <Icon name="info" size={22} />
           </div>
           <div>
-            <strong>Wallet linking could not be completed</strong>
+            <strong>
+              {errorCode === 'WRONG_EVM_WALLET'
+                ? 'Wrong MetaMask wallet selected'
+                : errorCode === 'WRONG_SOLANA_WALLET'
+                  ? 'Wrong Phantom wallet selected'
+                  : errorCode === 'SESSION_EXPIRED'
+                    ? 'Linking session expired'
+                    : errorCode === 'EVM_REJECTED' || errorCode === 'SOLANA_REJECTED'
+                      ? 'Linking cancelled'
+                      : 'Wallet linking could not be completed'}
+            </strong>
             <p>{error || 'Please try again.'}</p>
             {errorCode && errorCode !== 'VERIFY_FAILED' && (
               <code className="ronin-wallet-link-error-code">{errorCode}</code>
             )}
             {/* Actionable hints per error code */}
+            {errorCode === 'WRONG_EVM_WALLET' && (
+              <div className="ronin-wallet-link-hint">
+                <small>
+                  MetaMask approved a different wallet than the one you selected on
+                  Ronin Swap. Open MetaMask, switch to the correct wallet
+                  ({evmAddress ? shortAddr(evmAddress) : 'the one you intended to link'}),
+                  and click <strong>Try again</strong>. The wrong wallet was NOT linked.
+                </small>
+              </div>
+            )}
+            {errorCode === 'WRONG_SOLANA_WALLET' && (
+              <div className="ronin-wallet-link-hint">
+                <small>
+                  Phantom is connected to a different Solana wallet than the one
+                  the link challenge was created for. Disconnect Phantom and
+                  reconnect with the correct wallet, then click
+                  <strong>Try again</strong>.
+                </small>
+              </div>
+            )}
+            {errorCode === 'SESSION_EXPIRED' && (
+              <div className="ronin-wallet-link-hint">
+                <small>
+                  The 5-minute link challenge window has elapsed. Click
+                  <strong>Try again</strong> to start a fresh link — the old
+                  challenge is no longer usable on the backend.
+                </small>
+              </div>
+            )}
             {errorCode === 'EVM_ALREADY_LINKED_ELSEWHERE' && (
               <div className="ronin-wallet-link-hint">
                 <small>
@@ -1139,6 +1495,21 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             {errorCode === 'CHALLENGE_EXPIRED' && (
               <div className="ronin-wallet-link-hint">
                 <small>The signatures took longer than 5 minutes. Click <strong>Try again</strong> and approve both popups faster.</small>
+              </div>
+            )}
+            {errorCode === 'METAMASK_PROVIDER_TIMEOUT' && (
+              <div className="ronin-wallet-link-hint">
+                <small>MetaMask Mobile did not inject its provider. Make sure you opened the deep-link inside MetaMask Mobile's in-app browser (not Safari/Chrome), then click <strong>Try again</strong>.</small>
+              </div>
+            )}
+            {errorCode === 'PHANTOM_PROVIDER_TIMEOUT' && (
+              <div className="ronin-wallet-link-hint">
+                <small>Phantom did not inject its provider. Make sure you opened the return deep-link inside Phantom's in-app browser, then click <strong>Try again</strong>.</small>
+              </div>
+            )}
+            {errorCode === 'PHANTOM_HANDOFF_FAILED' && (
+              <div className="ronin-wallet-link-hint">
+                <small>The Phantom handoff could not be started. Click <strong>Try again</strong>, or open Phantom manually and return to Ronin Swap.</small>
               </div>
             )}
           </div>

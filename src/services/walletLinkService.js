@@ -1,16 +1,29 @@
 // =====================================================================
 // Wallet Link Service (frontend client)
 // =====================================================================
-// Talks to the /api/wallet-link/* endpoints. Never performs signature
-// verification on the frontend — that's the backend's job. The frontend
-// only:
+// Talks to the /api/wallet-link/* endpoints. The backend remains the
+// authoritative signature verifier — the frontend only:
 //   1. asks the backend to create a challenge
 //   2. asks MetaMask + Phantom to sign the messages returned by (1)
 //   3. submits both signatures to the backend for verification
 //
 // The frontend never invents nonces, never aggregates wallet lists for
 // the backend, and never trusts localStorage for ownership.
+//
+// FRONTEND SIGNER RECOVERY (defense in depth, NOT authoritative):
+//   After MetaMask returns a personal_sign signature, the frontend
+//   recovers the actual signer with ethers.verifyMessage and compares
+//   it to the intended EVM wallet. If they don't match, the flow aborts
+//   immediately with a clear "wrong wallet selected" message — the
+//   request is never sent to the backend. This is purely a UX
+//   short-circuit; the backend still does its own verifyMessage call
+//   and would reject a mismatched signature with EVM_SIGNATURE_INVALID.
+//   The frontend check is also a defense against a user who switches
+//   MetaMask accounts BETWEEN the pre-sign eth_accounts check and the
+//   actual personal_sign call (a known mobile race).
 // =====================================================================
+
+import { ethers } from 'ethers'
 
 // POST /api/wallet-link/challenge
 // Returns: { success, challengeId, nonce, solanaWallet, evmWallet,
@@ -243,7 +256,38 @@ const MOBILE_WL_ROUTE_PARAM = 'route'  // Ronin page route (e.g. 'profile') — 
 const MOBILE_WL_EXPECTED_EVM_PARAM = 'expectedEvm'
 const MOBILE_WL_STORAGE_KEY = 'ronin.mobileWalletLinkState'
 const MOBILE_WL_HANDOFF_DEDUPE_MS = 2000
+// Must mirror the backend CHALLENGE_TTL_MS in api/_lib/walletLinkAuth.mjs.
+// Used for proactive session-expiry checks on the frontend so the user
+// sees a clean "session expired" message instead of a hanging flow.
+const MOBILE_WL_SESSION_TTL_MS = 5 * 60_000
 let lastMobileHandoff = null
+
+// Verbose logging gate. Defaults to OFF in production — set
+// localStorage['ronin.debugWalletLink'] = '1' to enable. Always logs
+// errors and warnings; only info-level wallet-link traces are gated.
+// This prevents sensitive flow data (full deep-link URLs, signature
+// lengths, challenge IDs) from being logged in production.
+function isWalletLinkDebug() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('ronin.debugWalletLink') === '1'
+  } catch {
+    return false
+  }
+}
+
+function logInfo(...args) {
+  if (!isWalletLinkDebug()) return
+  console.info(...args)
+}
+
+function generateAttemptId() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {}
+  return 'att-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
 
 function saveMobileWalletLinkState(state) {
   if (typeof window === 'undefined') return
@@ -252,7 +296,13 @@ function saveMobileWalletLinkState(state) {
       window.sessionStorage.removeItem(MOBILE_WL_STORAGE_KEY)
       return
     }
-    const payload = { ...state, savedAt: Date.now() }
+    // Preserve the existing attemptId across updates so a single
+    // wallet-link attempt can be correlated across phase transitions.
+    // A NEW attemptId is only minted when the user starts a fresh link
+    // (startLink) — see openMetaMaskMobileForWalletLink / Phase 1 entry.
+    const prev = readMobileWalletLinkState()
+    const attemptId = state.attemptId || prev?.attemptId || generateAttemptId()
+    const payload = { ...state, attemptId, savedAt: Date.now() }
     window.sessionStorage.setItem(MOBILE_WL_STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // sessionStorage may be unavailable in some privacy-restricted browsers;
@@ -271,6 +321,46 @@ function readMobileWalletLinkState() {
   } catch {
     return null
   }
+}
+
+// Public read-only accessor. Used by the WalletLinkPanel's
+// visibilitychange / pageshow / focus listeners to decide whether to
+// resume the flow when the user manually returns to the page.
+export function getMobileWalletLinkPersistedState() {
+  const state = readMobileWalletLinkState()
+  if (!state) return null
+  // Proactive session-expiry check — if the saved state is older than
+  // the backend challenge TTL (5 min), treat it as expired.
+  if (typeof state.savedAt === 'number' && Date.now() - state.savedAt > MOBILE_WL_SESSION_TTL_MS) {
+    return { ...state, expired: true }
+  }
+  return state
+}
+
+// Mark a phase as completed. The WalletLinkPanel calls this after each
+// phase finishes successfully so the resume logic can skip already-done
+// phases (idempotency for pageshow / focus / visibilitychange).
+export function markMobileWalletLinkPhaseCompleted(phase) {
+  const state = readMobileWalletLinkState()
+  if (!state) return
+  const completed = Array.isArray(state.completedPhases) ? [...state.completedPhases] : []
+  if (!completed.includes(phase)) completed.push(phase)
+  saveMobileWalletLinkState({ ...state, completedPhases: completed, lastCompletedAt: Date.now() })
+}
+
+// Public check for completed phases.
+export function isMobileWalletLinkPhaseCompleted(phase) {
+  const state = readMobileWalletLinkState()
+  if (!state) return false
+  return Array.isArray(state.completedPhases) && state.completedPhases.includes(phase)
+}
+
+// Check whether the persisted session is expired (older than 5 minutes).
+export function isMobileWalletLinkSessionExpired() {
+  const state = readMobileWalletLinkState()
+  if (!state) return false
+  if (typeof state.savedAt !== 'number') return false
+  return Date.now() - state.savedAt > MOBILE_WL_SESSION_TTL_MS
 }
 
 function normalizeEvmAddress(address) {
@@ -329,21 +419,43 @@ export function getMobileWalletLinkPhase() {
   const persisted = readMobileWalletLinkState()
 
   if (!phase && persisted) {
+    // Session-expiry check on persisted state. If the saved state is
+    // older than 5 min, return null so the panel can show "session
+    // expired" instead of trying to resume a stale challenge that the
+    // backend has already expired/reaped.
+    if (typeof persisted.savedAt === 'number' && Date.now() - persisted.savedAt > MOBILE_WL_SESSION_TTL_MS) {
+      logInfo('[WalletLinkMobile] persisted state expired — not resuming', {
+        ageMs: Date.now() - persisted.savedAt,
+        ttlMs: MOBILE_WL_SESSION_TTL_MS,
+      })
+      return null
+    }
     if (persisted.phase === '1' && persisted.solanaWallet) {
-      console.info('[WalletLinkMobile] persisted wl=1 state detected', {
+      logInfo('[WalletLinkMobile] persisted wl=1 state detected', {
         solanaWalletShort: persisted.solanaWallet.slice(0, 4) + '...' + persisted.solanaWallet.slice(-4),
+        attemptId: persisted.attemptId,
+        completedPhases: persisted.completedPhases || [],
       })
       const expectedEvmWallet = /^0x[a-fA-F0-9]{40}$/.test(persisted.expectedEvmWallet || '') ? persisted.expectedEvmWallet : null
-      return { phase: '1', solanaWallet: persisted.solanaWallet, expectedEvmWallet }
+      return { phase: '1', solanaWallet: persisted.solanaWallet, expectedEvmWallet, attemptId: persisted.attemptId }
     }
     if (persisted.phase === '2' && persisted.challengeId && persisted.evmWallet && persisted.evmSignature && persisted.messageSolana) {
-      console.info('[WalletLinkMobile] persisted wl=2 state detected', {
+      logInfo('[WalletLinkMobile] persisted wl=2 state detected', {
         challengeId: persisted.challengeId,
         evmWalletShort: persisted.evmWallet.slice(0, 6) + '...' + persisted.evmWallet.slice(-4),
         sigLen: persisted.evmSignature?.length,
         msLen: persisted.messageSolana?.length,
+        attemptId: persisted.attemptId,
+        completedPhases: persisted.completedPhases || [],
       })
-      return { phase: '2', challengeId: persisted.challengeId, evmWallet: persisted.evmWallet, evmSignature: persisted.evmSignature, messageSolana: persisted.messageSolana }
+      return {
+        phase: '2',
+        challengeId: persisted.challengeId,
+        evmWallet: persisted.evmWallet,
+        evmSignature: persisted.evmSignature,
+        messageSolana: persisted.messageSolana,
+        attemptId: persisted.attemptId,
+      }
     }
   }
 
@@ -354,12 +466,14 @@ export function getMobileWalletLinkPhase() {
     if (!solanaWallet) return null
     const expectedEvmCandidate = getParam(MOBILE_WL_EXPECTED_EVM_PARAM)
     const expectedEvmWallet = /^0x[a-fA-F0-9]{40}$/.test(expectedEvmCandidate || '') ? expectedEvmCandidate : null
-    saveMobileWalletLinkState({ phase: '1', solanaWallet, expectedEvmWallet, route: getParam(MOBILE_WL_ROUTE_PARAM) || 'profile' })
-    console.info('[WalletLinkMobile] wl=1 detected', {
+    const existingAttemptId = persisted?.attemptId
+    saveMobileWalletLinkState({ phase: '1', solanaWallet, expectedEvmWallet, route: getParam(MOBILE_WL_ROUTE_PARAM) || 'profile', attemptId: existingAttemptId })
+    logInfo('[WalletLinkMobile] wl=1 detected', {
       solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
       source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
+      attemptId: existingAttemptId,
     })
-    return { phase: '1', solanaWallet, expectedEvmWallet }
+    return { phase: '1', solanaWallet, expectedEvmWallet, attemptId: existingAttemptId }
   }
 
   if (phase === '2') {
@@ -370,15 +484,17 @@ export function getMobileWalletLinkPhase() {
     if (!challengeId || !evmWallet || !evmSignature || !msB64) return null
     let messageSolana = ''
     try { messageSolana = atob(msB64) } catch { return null }
-    saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: getParam(MOBILE_WL_ROUTE_PARAM) || 'profile' })
-    console.info('[WalletLinkMobile] wl=2 detected', {
+    const existingAttemptId = persisted?.attemptId
+    saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: getParam(MOBILE_WL_ROUTE_PARAM) || 'profile', attemptId: existingAttemptId })
+    logInfo('[WalletLinkMobile] wl=2 detected', {
       challengeId,
       evmWalletShort: evmWallet.slice(0, 6) + '...' + evmWallet.slice(-4),
       sigLen: evmSignature?.length,
       msLen: messageSolana?.length,
       source: searchParams.get(MOBILE_WL_PARAM) ? 'search' : 'hash',
+      attemptId: existingAttemptId,
     })
-    return { phase: '2', challengeId, evmWallet, evmSignature, messageSolana }
+    return { phase: '2', challengeId, evmWallet, evmSignature, messageSolana, attemptId: existingAttemptId }
   }
 
   return null
@@ -480,7 +596,7 @@ export function openMetaMaskMobileForWalletLink(solanaWallet, expectedEvmWallet)
   const expectedAddress = /^0x[a-fA-F0-9]{40}$/.test(expectedEvmWallet || '') ? expectedEvmWallet : null
   const handoffKey = `metamask:${solanaWallet.trim()}:${normalizeEvmAddress(expectedAddress)}`
   if (isDuplicateMobileHandoff(handoffKey)) {
-    console.info('[WalletLinkMobile] duplicate MetaMask handoff suppressed')
+    logInfo('[WalletLinkMobile] duplicate MetaMask handoff suppressed')
     return true
   }
 
@@ -505,12 +621,27 @@ export function openMetaMaskMobileForWalletLink(solanaWallet, expectedEvmWallet)
   const destinationUrl = `${target.origin}${target.pathname}${target.search}`
   const deepLink = `https://metamask.app.link/dapp/${destinationUrl}`
 
-  saveMobileWalletLinkState({ phase: '1', solanaWallet, expectedEvmWallet: expectedAddress, route: 'profile' })
+  // Mint a FRESH attemptId for this new link attempt. Clear any stale
+  // persisted state first — this guarantees a previously-failed attempt
+  // can never interfere with a new one (TEST I: "old attempt cannot
+  // interfere with the new attempt"). The new attemptId is propagated
+  // through every subsequent phase via saveMobileWalletLinkState /
+  // getMobileWalletLinkPhase.
+  const freshAttemptId = generateAttemptId()
+  clearMobileWalletLinkState()
+  saveMobileWalletLinkState({
+    phase: '1',
+    solanaWallet,
+    expectedEvmWallet: expectedAddress,
+    route: 'profile',
+    attemptId: freshAttemptId,
+  })
 
-  console.info('[WalletLinkMobile] deep-link destination generated', {
+  logInfo('[WalletLinkMobile] deep-link destination generated', {
     destinationUrl,
     phase: 1,
     solanaWalletShort: solanaWallet.slice(0, 4) + '...' + solanaWallet.slice(-4),
+    attemptId: freshAttemptId,
   })
 
   window.location.href = deepLink
@@ -559,7 +690,7 @@ export function buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignat
   const destinationUrl = `${url.origin}${url.pathname}${url.search}`
 
   const targetUrl = new URL(destinationUrl)
-  console.info('[WalletLinkMobile] Phantom return URL prepared', {
+  logInfo('[WalletLinkMobile] Phantom return URL prepared', {
     targetOrigin: targetUrl.origin,
     targetPath: targetUrl.pathname,
     hasWl: targetUrl.searchParams.has('wl'),
@@ -572,7 +703,7 @@ export function buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignat
 
   const phantomDeepLink = `https://phantom.app/ul/browse/${encodeURIComponent(destinationUrl)}?ref=${encodeURIComponent(window.location.origin)}`
 
-  console.info('[WalletLinkMobile] Phantom deep-link generated', {
+  logInfo('[WalletLinkMobile] Phantom deep-link generated', {
     hostname: new URL(phantomDeepLink).hostname,
     pathname: new URL(phantomDeepLink).pathname,
     phase: 2,
@@ -590,27 +721,89 @@ export function buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignat
 }
 
 export function openPhantomForSolanaSign({ challengeId, evmWallet, evmSignature, messageSolana }) {
-  if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return false
+  if (!challengeId || !evmWallet || !evmSignature || !messageSolana) return null
   const handoffKey = `phantom:${challengeId}`
   if (isDuplicateMobileHandoff(handoffKey)) {
-    console.info('[WalletLinkMobile] duplicate Phantom handoff suppressed', { challengeId })
-    return true
+    logInfo('[WalletLinkMobile] duplicate Phantom handoff suppressed', { challengeId })
+    // Return the previously-built links so the panel can still show
+    // the manual fallback button if the user dismisses the duplicate.
+    const fallback = buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignature, messageSolana })
+    return fallback?.ok
+      ? { ok: true, universalLink: fallback.universalLink, customSchemeLink: fallback.customSchemeLink, deduped: true }
+      : null
   }
   const target = buildPhantomForSolanaSignUrl({ challengeId, evmWallet, evmSignature, messageSolana })
-  if (!target || !target.ok) return false
+  if (!target || !target.ok) return null
 
   saveMobileWalletLinkState({ phase: '2', challengeId, evmWallet, evmSignature, messageSolana, route: 'profile' })
 
+  // Single authoritative handoff: trigger the universal link ONCE.
+  // No racing custom-scheme launch — the custom scheme is only used as
+  // a controlled fallback below.
   try {
     window.location.href = target.universalLink
   } catch (error) {
     console.warn('[WalletLinkMobile] Phantom universal-link handoff failed', { message: error?.message })
   }
-  return true
+
+  // CONTROLLED FALLBACK TIMER (single, not racing):
+  //   If the page is still alive after 1500ms, the universal link did
+  //   not navigate (Phantom is not installed, or the OS didn't open the
+  //   universal link). In that case, try the custom scheme ONCE. If
+  //   that also fails, the panel's manual "Open Phantom to continue"
+  //   button (rendered from the returned universalLink) is the user's
+  //   last resort. There is no second timer — at most one fallback
+  //   navigation fires.
+  try {
+    setTimeout(() => {
+      try {
+        // If the page is still here, the universal link didn't work.
+        // Try the custom scheme as a one-shot fallback.
+        window.location.href = target.customSchemeLink
+      } catch {
+        // Custom scheme also failed — UI fallback button is the last resort.
+      }
+    }, 1500)
+  } catch {
+    // setTimeout itself failed (shouldn't happen) — ignore.
+  }
+
+  return { ok: true, universalLink: target.universalLink, customSchemeLink: target.customSchemeLink }
 }
 
 // Ask MetaMask to sign the EVM linking message via personal_sign.
 // Returns the 0x-prefixed hex signature.
+//
+// CRITICAL — SIGNER RECOVERY (Step 4 of the spec):
+//   MetaMask may sign with whatever account is currently selected,
+//   even if the `address` parameter passed to personal_sign specifies
+//   a different account. This is the well-known "wrong/stale MetaMask
+//   account" bug on mobile: the user intends to link Wallet B, but
+//   MetaMask has Wallet A selected from an earlier session, and signs
+//   the message with Wallet A's private key.
+//
+//   To catch this on the FRONTEND (so the user sees a clear
+//   "wrong wallet" message instead of a generic backend rejection):
+//     1. After personal_sign returns a signature, recover the actual
+//        signer using ethers.verifyMessage(message, signature).
+//     2. Normalize both the recovered address and the intended address
+//        (lowercase 0x...).
+//     3. If they don't match, throw an error with code
+//        'WRONG_EVM_WALLET' and the specific message below. The flow
+//        aborts here — the request is NEVER sent to the backend, so
+//        no database row can be created for the wrong wallet.
+//
+//   This is purely a UX short-circuit. The backend still does its own
+//   verifyMessage call (defense in depth) and would reject a mismatched
+//   signature with EVM_SIGNATURE_INVALID. The frontend check just gives
+//   the user a clearer error message and avoids a wasted network round-trip.
+//
+// PRE-SIGN CHECK (kept from the existing implementation):
+//   Before signing, we still call eth_accounts and verify the intended
+//   address is in the list of connected accounts. If not, we throw the
+//   same 'MetaMask is connected to a different EVM wallet...' error.
+//   This catches the case where the user has the wrong account selected
+//   BEFORE we even ask them to sign.
 export async function signLinkMessageWithMetaMask({ address, message }) {
   const provider = getMetaMaskProvider()
   if (!provider) throw new Error('MetaMask is not available in this browser.')
@@ -620,11 +813,16 @@ export async function signLinkMessageWithMetaMask({ address, message }) {
       const accounts = await provider.request({ method: 'eth_accounts' })
       const available = Array.isArray(accounts) ? accounts.map((item) => normalizeEvmAddress(item)) : []
       if (!available.includes(expectedAddress)) {
-        throw new Error('MetaMask is connected to a different EVM wallet than the one being linked.')
+        const err = new Error('MetaMask is connected to a different EVM wallet than the one being linked. Switch MetaMask to the correct wallet and try again.')
+        err.code = 'WRONG_EVM_WALLET'
+        throw err
       }
     } catch (error) {
-      if (error?.message && /different EVM wallet/.test(error.message)) throw error
-      console.warn('[WalletLinkMobile] unable to confirm active MetaMask account before signing', { message: error?.message })
+      if (error?.code === 'WRONG_EVM_WALLET') throw error
+      // If eth_accounts itself failed (e.g., provider race), don't block
+      // the sign — the post-sign signer recovery below is the real
+      // authority. Just log the diagnostic.
+      logInfo('[WalletLinkMobile] eth_accounts pre-check unavailable, relying on post-sign signer recovery', { message: error?.message })
     }
   }
   // personal_sign: params are [message, address]. The wallet will
@@ -636,7 +834,47 @@ export async function signLinkMessageWithMetaMask({ address, message }) {
   if (typeof signature !== 'string' || !signature.startsWith('0x')) {
     throw new Error('MetaMask returned an unexpected signature.')
   }
+
+  // POST-SIGN SIGNER RECOVERY (Step 4 of the spec).
+  //   ethers.verifyMessage applies the standard EIP-191 prefix:
+  //     \x19Ethereum Signed Message:\n<len><message>
+  //   and returns the recovered address. We compare lowercase.
+  //   This is the SAME call the backend makes in
+  //   api/_lib/walletLinkAuth.mjs::verifyEvmSignature — the backend
+  //   remains authoritative, but we do the same check on the frontend
+  //   for a clearer error message and to avoid a wasted /verify request.
+  if (expectedAddress) {
+    let recovered = ''
+    try {
+      recovered = normalizeEvmAddress(ethers.verifyMessage(message, signature))
+    } catch (recoveryError) {
+      // ethers failed to recover — let the backend reject it. Don't
+      // throw a misleading "wrong wallet" error; the signature might
+      // be malformed in a way ethers can't recover but the backend
+      // handles differently.
+      logInfo('[WalletLinkMobile] signer recovery failed — deferring to backend', { message: recoveryError?.message })
+    }
+    if (recovered && recovered !== expectedAddress) {
+      const err = new Error(
+        `Wrong MetaMask wallet selected. MetaMask approved a different wallet (${shortEvmForError(recovered)}) than the one you selected on Ronin Swap (${shortEvmForError(expectedAddress)}). Switch MetaMask to the correct wallet and try again.`
+      )
+      err.code = 'WRONG_EVM_WALLET'
+      err.recoveredAddress = recovered
+      err.expectedAddress = expectedAddress
+      throw err
+    }
+    logInfo('[WalletLinkMobile] signer recovered matches intended address', {
+      expectedShort: shortEvmForError(expectedAddress),
+    })
+  }
   return signature
+}
+
+// Shortener for the error message — only used inside the error string
+// displayed to the user. We never log the full address in production.
+function shortEvmForError(address) {
+  if (!address || address.length < 10) return address || ''
+  return `${address.slice(0, 6)}...${address.slice(-4)}`
 }
 
 // Ask Phantom to sign the Solana linking message via signMessage.
@@ -680,10 +918,10 @@ export async function signLinkMessageWithPhantom({ message, expectedAddress }) {
   // Phantom account is active before we request a signature. On desktop,
   // this is a no-op if already connected (Phantom returns immediately).
   if (provider.connect && !provider.isConnected) {
-    console.info('[WalletLinkMobile] Phantom not connected — calling connect()')
+    logInfo('[WalletLinkMobile] Phantom not connected — calling connect()')
     try {
       await provider.connect()
-      console.info('[WalletLinkMobile] Phantom connected successfully')
+      logInfo('[WalletLinkMobile] Phantom connected successfully')
     } catch (connectErr) {
       console.error('[WalletLinkMobile] Phantom connect() failed', { message: connectErr?.message })
       throw new Error('Phantom connection was rejected. Please approve the connection to sign the linking message.')
