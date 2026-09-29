@@ -25,7 +25,7 @@ import { Transaction } from '@solana/web3.js'
 // mobile browser without Phantom, or admin testing), the panel falls back
 // to the legacy /api/rewards/claim endpoint which uses the admin wallet
 // as the fee payer.
-export default function RewardClaimPanel({ wallet }) {
+export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
   const { solanaPayoutWallet, verifiedEvmWallets, verifiedIdentityLoaded, refreshLinkedWallets } = useWallet()
   const [balance, setBalance] = useState(null)
   // state: idle | loading | preparing | signing | submitting | confirming | success | error
@@ -43,12 +43,14 @@ export default function RewardClaimPanel({ wallet }) {
   const [retrySignatureInput, setRetrySignatureInput] = useState('')
   const [retryError, setRetryError] = useState('')
 
-  // The wallet passed in by Profile.jsx may be either:
-  //   * the Phantom Solana address (preferred — that's the payout wallet)
-  //   * an EVM address (legacy behavior when no Phantom connected)
-  // Prefer solanaPayoutWallet if it's been loaded from the backend
-  // (so claims always go to the verified Solana payout wallet).
-  const effectiveWallet = solanaPayoutWallet || wallet
+  const profileWalletIsEvm = Boolean(wallet && /^0x[a-fA-F0-9]{40}$/.test(wallet))
+  const profileEvmIsLinked = profileWalletIsEvm && Array.isArray(verifiedEvmWallets)
+    && verifiedEvmWallets.some((address) => address.toLowerCase() === wallet.toLowerCase())
+  const requiresPhantomClaimGuard = profileWalletIsEvm && (!profileEvmIsLinked || !solanaPayoutWallet)
+  // Keep the selected unlinked EVM address as the balance query target so
+  // its existing points are visible. Once it is verified, use the canonical
+  // Solana payout identity for the existing aggregate balance and claim flow.
+  const effectiveWallet = profileWalletIsEvm && !profileEvmIsLinked ? wallet : (solanaPayoutWallet || wallet)
 
   const load = useCallback(async () => {
     if (!effectiveWallet) return
@@ -72,6 +74,7 @@ export default function RewardClaimPanel({ wallet }) {
     if (verifiedIdentityLoaded) load()
   }, [verifiedIdentityLoaded, verifiedEvmWallets?.length, load])
 
+  const isEvmWallet = Boolean(effectiveWallet && /^0x[a-fA-F0-9]{40}$/.test(effectiveWallet))
   const claimable = Number(balance?.claimable_points || 0)
   const rewardsEnabled = Boolean(balance?.rewards_enabled)
   const hasActiveSeason = Boolean(balance?.has_active_season)
@@ -79,18 +82,25 @@ export default function RewardClaimPanel({ wallet }) {
   const rate = Number(balance?.reward_points_per_unit || 1000)
   const network = balance?.network || 'mainnet-beta'  // backend tells us which network
   const estimatedReward = claimable > 0 && rate > 0 ? claimable / rate : 0
+  const showEvmClaimNotice = requiresPhantomClaimGuard && claimable > 0
 
   const handleClaim = async () => {
     if (!effectiveWallet || claimable <= 0 || state !== 'idle') return
 
     // SECURITY: claims must always go to the verified Solana payout
-    // wallet. If effectiveWallet is an EVM address (legacy fallback
-    // when no Phantom connected), reject — the backend would reject
-    // it anyway (claim_reward raises EVM_CLAIM_NOT_ALLOWED), but we
-    // surface a clearer message here.
+    // wallet. If the user is viewing a connected MetaMask wallet that
+    // is not yet linked to the verified reward identity, do not start
+    // a claim or allow an EVM fallback path.
+    if (requiresPhantomClaimGuard) {
+      setShowLinkPanel(true)
+      setError(profileEvmIsLinked
+        ? 'Connect Phantom to claim SOL rewards through your verified Solana payout wallet.'
+        : 'Connect Phantom, then link this MetaMask wallet to your Solana reward identity before claiming SOL rewards.')
+      return
+    }
+
     if (/^0x[a-fA-F0-9]{40}$/.test(effectiveWallet)) {
       setError('Connect a Solana wallet to claim your SOL rewards. EVM wallets cannot be Solana payout recipients.')
-      setState('error')
       return
     }
 
@@ -401,12 +411,17 @@ export default function RewardClaimPanel({ wallet }) {
       {/* Case 1: EVM wallet connected as the requested payout wallet,
           but no verified Solana link. The user must connect a Solana
           wallet to receive SOL. */}
-      {effectiveWallet && /^0x[a-fA-F0-9]{40}$/.test(effectiveWallet) && (
+      {showEvmClaimNotice && (
         <div className="profile-rewards-notice profile-rewards-notice-warn">
           <Icon name="info" size={16} />
           <div>
-            <strong>You have Samurai Points from an EVM wallet.</strong>
-            <small>Connect a Solana wallet (Phantom) and link it to this EVM wallet to receive SOL rewards. EVM addresses cannot be Solana payout recipients.</small>
+            <strong>{profileEvmIsLinked ? 'CONNECT PHANTOM TO CLAIM' : 'SWITCH TO PHANTOM TO CLAIM'}</strong>
+            <small>{profileEvmIsLinked
+              ? 'This MetaMask wallet is already linked. Connect its Solana reward wallet to claim the existing aggregated SOL balance.'
+              : 'You earned these Samurai Points through this MetaMask wallet. SOL rewards are paid through your Solana reward wallet. Switch to Phantom and link this MetaMask wallet to your Solana reward identity. Once linked, its eligible points can be included in your SOL reward balance.'}</small>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {!profileEvmIsLinked && <Button variant="outline" icon="link" onClick={() => setShowLinkPanel(true)}>Link this MetaMask wallet</Button>}
           </div>
         </div>
       )}
@@ -448,7 +463,7 @@ export default function RewardClaimPanel({ wallet }) {
 
       {/* Inline wallet-link panel (toggled by the CTAs above) */}
       {showLinkPanel && (
-        <WalletLinkPanel onLinkedChange={() => { refreshLinkedWallets(); setShowLinkPanel(false) }} />
+        <WalletLinkPanel expectedEvmWallet={profileWalletIsEvm ? wallet : expectedEvmWallet} onLinkedChange={() => { refreshLinkedWallets(); setShowLinkPanel(false) }} />
       )}
       {/* End verified-identity UX states ------------------------------ */}
 
@@ -474,10 +489,10 @@ export default function RewardClaimPanel({ wallet }) {
         <Button
           variant="primary"
           icon="gift"
-          onClick={handleClaim}
-          disabled={claimable <= 0 || !rewardsEnabled || state !== 'idle'}
+          onClick={showEvmClaimNotice ? () => { setShowLinkPanel(true); setError('Connect Phantom, then link this MetaMask wallet to your Solana reward identity. After linking, claimable SOL rewards will be paid to your Solana wallet.') } : handleClaim}
+          disabled={showEvmClaimNotice ? false : claimable <= 0 || !rewardsEnabled || state !== 'idle'}
         >
-          {state !== 'idle' ? stateLabel : `Claim all claimable points`}
+          {showEvmClaimNotice ? 'Switch to Phantom to claim' : (state !== 'idle' ? stateLabel : `Claim all claimable points`)}
         </Button>
         <Button variant="outline" icon="refresh" onClick={load} disabled={state === 'loading' || state !== 'idle'}>Refresh</Button>
       </div>

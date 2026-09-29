@@ -200,8 +200,28 @@ export default function Burn() {
     try {
       const rawUnits = toRawUnits(amount, decimals)
       if (rawUnits <= 0n) throw new Error('Enter a valid amount.')
-      const preview = await getBurnPreview({ userPublicKey: wallet.address, burnAmountRaw: rawUnits })
-      setPreviewData({ ...preview, rawUnits, uiAmount: rawUnitsToUiAmount(rawUnits, decimals) })
+      const tokenAccounts = Array.isArray(profile?.tokenAccounts) ? profile.tokenAccounts : []
+      const tokenAccount = tokenAccounts
+        .filter((account) => BigInt(account.rawAmount || '0') >= rawUnits)
+        .sort((a, b) => {
+          const aAmount = BigInt(a.rawAmount || '0')
+          const bAmount = BigInt(b.rawAmount || '0')
+          return aAmount === bAmount ? 0 : aAmount > bAmount ? -1 : 1
+        })[0]
+      if (!tokenAccount) {
+        const largestAccountBalance = tokenAccounts.reduce((largest, account) => {
+          const accountBalance = BigInt(account.rawAmount || '0')
+          return accountBalance > largest ? accountBalance : largest
+        }, 0n)
+        const totalBalance = BigInt(profile?.rawBalance || '0')
+        if (largestAccountBalance > 0n && rawUnits <= totalBalance) {
+          const maxSingleAccountAmount = rawToExactString(largestAccountBalance, decimals)
+          throw new Error(`Your RONIN is split across token accounts. Burn up to ${maxSingleAccountAmount} RONIN per transaction.`)
+        }
+        throw new Error('No RONIN token account has enough balance for this amount. Refresh your wallet balance and try again.')
+      }
+      const preview = await getBurnPreview({ userPublicKey: wallet.address, assetId: tokenAccount.address, burnAmountRaw: rawUnits })
+      setPreviewData({ ...preview, assetId: tokenAccount.address, rawUnits, uiAmount: rawUnitsToUiAmount(rawUnits, decimals) })
       setPhase('confirm')
     } catch (error) {
       console.error('RONIN burn preview failed', error)
@@ -253,7 +273,7 @@ export default function Burn() {
     try {
       // 1. Ask the RONIN backend (which holds the Sol Incinerator key) to
       // build the burn transaction for this exact wallet + amount.
-      const built = await buildBurnTransaction({ userPublicKey: wallet.address, burnAmountRaw: previewData.rawUnits })
+      const built = await buildBurnTransaction({ userPublicKey: wallet.address, assetId: previewData.assetId, burnAmountRaw: previewData.rawUnits })
       const txBytes = decodeBase58Transaction(built.serializedTransaction)
       const transaction = VersionedTransaction.deserialize(txBytes)
 

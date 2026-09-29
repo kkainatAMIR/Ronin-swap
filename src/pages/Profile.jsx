@@ -116,15 +116,31 @@ function FrequentSwapRow({ pair, rank }) {
   )
 }
 
-function NotConnected({ onConnect }) {
-  return <section className="profile-empty-state"><div className="profile-avatar profile-avatar-muted">侍</div><h1>CONNECT YOUR WALLET</h1><p>Connect your wallet to enter your Samurai profile.</p><Button icon="wallet" onClick={onConnect}>Connect wallet</Button></section>
+function NotConnected({ onConnectPhantom, onConnectMetaMask, disabled, error }) {
+  return (
+    <section className="profile-empty-state">
+      <div className="profile-avatar profile-avatar-muted">侍</div>
+      <h1>CONNECT YOUR WALLET</h1>
+      <p>Connect Phantom for Solana rewards, or MetaMask to view EVM points.</p>
+      <div className="profile-wallet-connect-buttons">
+        <Button icon="wallet" onClick={onConnectPhantom} disabled={disabled}>Connect Phantom</Button>
+        <Button variant="outline" icon="wallet" onClick={onConnectMetaMask} disabled={disabled}>Connect MetaMask</Button>
+      </div>
+      {error && <div className="error-box" role="alert"><Icon name="info" size={16} /><span>{error}</span></div>}
+    </section>
+  )
 }
 
 export default function Profile() {
-  const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded } = useWallet()
+  const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded, connectedEvmWallet, activeProfileWallet, connectionState, error: walletError, connectWallet, connectMetaMaskWallet } = useWallet()
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
   const [visibleActivityCount, setVisibleActivityCount] = useState(3)
+  const expectedLinkEvmWallet = (() => {
+    if (typeof window === 'undefined') return null
+    const address = new URLSearchParams(window.location.search).get('profileEvm')
+    return /^0x[a-fA-F0-9]{40}$/.test(address || '') ? address : null
+  })()
 
   // Detect mobile wallet-link phase from URL. On mobile, the EVM
   // wallet-link flow spans two browser contexts (Phantom → MetaMask
@@ -171,6 +187,13 @@ export default function Profile() {
     setDisclaimerDismissed(true)
     try { window.localStorage.setItem('ronin.profileWalletLinkDisclaimerV2', '1') } catch {}
   }
+
+  useEffect(() => {
+    if (!expectedLinkEvmWallet || !verifiedEvmWallets.some((address) => address.toLowerCase() === expectedLinkEvmWallet.toLowerCase())) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('profileEvm')
+    window.history.replaceState(window.history.state, '', url.toString())
+  }, [expectedLinkEvmWallet, verifiedEvmWallets])
 
   // Fetch aggregated profile data across ALL connected wallets (Phantom
   // + any MetaMask addresses tracked in localStorage). The list of
@@ -227,8 +250,8 @@ export default function Profile() {
   // swapped on Ethereum or Robinhood Chain via MetaMask). This lets
   // users view their multi-chain profile even if they don't have Phantom
   // installed.
-  const hasAnyWallet = Boolean(wallet) || (allWalletAddresses && allWalletAddresses.length > 0)
-  if (!hasAnyWallet) return <NotConnected onConnect={openWalletModal} />
+  const hasAnyWallet = Boolean(activeProfileWallet || wallet) || (allWalletAddresses && allWalletAddresses.length > 0)
+  if (!hasAnyWallet) return <NotConnected onConnectPhantom={connectWallet} onConnectMetaMask={connectMetaMaskWallet} disabled={connectionState === 'connecting'} error={walletError} />
   if (wallet?.isDemo) return <section className="profile-empty-state"><div className="profile-avatar">侍</div><Tag tone="red">UI PREVIEW</Tag><h1>SAMURAI PROFILE</h1><p>Connect a real wallet to load personal points, verified swaps, rank position, and live balance data.</p><Button variant="outline" icon="wallet" onClick={openWalletModal}>Connect real wallet</Button></section>
   if (state === 'loading' || walletDataState === 'loading') return <main className="profile-page"><ProfileSkeleton /></main>
   if (state === 'error') return <section className="profile-empty-state profile-error-state"><div className="profile-avatar profile-avatar-muted"><Icon name="info" size={24} /></div><h1>PROFILE UNAVAILABLE</h1><p>{error}</p><Button icon="refresh" onClick={retry}>Retry</Button></section>
@@ -272,7 +295,7 @@ export default function Profile() {
   // back to an EVM address. The EVM wallet link still appears in the
   // VERIFIED REWARD WALLETS section below — it's never confused with
   // the Solana reward wallet.
-  const displayWalletAddress = (wallet?.address && !wallet?.isDemo) ? wallet.address : (solanaPayoutWallet || '')
+  const displayWalletAddress = (activeProfileWallet && !activeProfileWallet.isDemo) ? activeProfileWallet.address : (solanaPayoutWallet || connectedEvmWallet?.address || '')
 
   return (
     <main className="profile-page">
@@ -302,6 +325,24 @@ export default function Profile() {
             <div className="profile-header-copy"><span className="eyebrow">MY SAMURAI IDENTITY</span><h1>SAMURAI PROFILE</h1><p className="profile-wallet-address">{displayWalletAddress || '—'}</p><button className="profile-copy-button" onClick={() => navigator.clipboard?.writeText(displayWalletAddress)}><Icon name="copy" size={13} /> Copy wallet address</button></div>
             <div className="profile-header-rank"><span className="profile-data-label">CURRENT RANK</span><div className="profile-current-rank">{currentRank?.image && <img src={currentRank.image} alt="" />}<strong>{currentRank?.name || 'UNRANKED'}</strong></div><small>{profile?.balance != null ? `${formatCompact(profile.balance)} RONIN` : 'RONIN balance unavailable'}</small></div>
           </section>
+          <div className="profile-wallet-connect-actions">
+            <div className="profile-wallet-connect-status">
+              <span className="profile-data-label">PROFILE WALLETS</span>
+              <div className="profile-wallet-connect-tags">
+                {wallet?.address && !wallet.isDemo && <Tag tone="green">PHANTOM · {short(wallet.address)}</Tag>}
+                {connectedEvmWallet?.address && <Tag tone="green">METAMASK · {short(connectedEvmWallet.address)}</Tag>}
+              </div>
+            </div>
+            <div className="profile-wallet-connect-buttons">
+              <Button variant="outline" icon="wallet" onClick={() => connectWallet(connectedEvmWallet?.address || expectedLinkEvmWallet || undefined)} disabled={connectionState === 'connecting'}>
+                {connectionState === 'connecting' ? 'Connecting…' : 'Connect Phantom'}
+              </Button>
+              <Button variant="outline" icon="wallet" onClick={connectMetaMaskWallet} disabled={connectionState === 'connecting'}>
+                {connectionState === 'connecting' ? 'Connecting…' : 'Connect MetaMask'}
+              </Button>
+            </div>
+            {walletError && <div className="error-box profile-wallet-connect-error" role="alert"><Icon name="info" size={16} /><span>{walletError}</span></div>}
+          </div>
         </div>
       </section>
 
@@ -318,7 +359,7 @@ export default function Profile() {
           wallet (not the localStorage-derived EVM list). The backend
           resolves linked wallets from the database; the frontend never
           supplies a list. */}
-      <RewardClaimPanel wallet={solanaPayoutWallet || wallet?.address || null} />
+      <RewardClaimPanel wallet={activeProfileWallet?.address || solanaPayoutWallet || wallet?.address || null} expectedEvmWallet={expectedLinkEvmWallet} />
 
       {/* Verified Reward Wallets section --------------------------------- */}
       {/* Clearly separates "Connected wallets" (UI convenience from
@@ -355,7 +396,7 @@ export default function Profile() {
               <p className="profile-muted">No EVM wallets linked yet. Link an EVM wallet to include its points in your reward balance.</p>
             )}
           </div>
-          <WalletLinkPanel />
+          <WalletLinkPanel expectedEvmWallet={connectedEvmWallet?.address || expectedLinkEvmWallet || undefined} />
         </section>
       )}
 

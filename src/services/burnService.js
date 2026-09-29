@@ -5,7 +5,6 @@
 // Vercel API functions, which are the only place that credential lives.
 
 import bs58 from 'bs58'
-import { RONIN_MINT } from '../data'
 
 export class BurnApiError extends Error {
   constructor(message, { status, detail } = {}) {
@@ -57,7 +56,7 @@ export function rawUnitsToUiAmount(rawUnits, decimals) {
  * rent-reclaim data for this exact wallet + amount, fetched fresh every
  * time. Nothing here is estimated or invented client-side.
  */
-export async function getBurnPreview({ userPublicKey, burnAmountRaw, assetId = RONIN_MINT }) {
+export async function getBurnPreview({ userPublicKey, burnAmountRaw, assetId }) {
   const response = await fetch('/api/burn/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -75,7 +74,7 @@ export async function getBurnPreview({ userPublicKey, burnAmountRaw, assetId = R
  * Incinerator. Returns a base58-encoded serialized transaction for the
  * connected wallet to sign — no server wallet is ever involved.
  */
-export async function buildBurnTransaction({ userPublicKey, burnAmountRaw, assetId = RONIN_MINT }) {
+export async function buildBurnTransaction({ userPublicKey, burnAmountRaw, assetId }) {
   const response = await fetch('/api/burn/build', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

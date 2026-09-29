@@ -191,7 +191,8 @@ export function Header({ route }) {
 }
 
 function WalletModal() {
-  const { wallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, error, hasSolanaProvider, isMobileDevice, walletModalOpen, closeWalletModal, connectDemo, connectWallet, disconnect } = useWallet()
+  const { wallet, connectedEvmWallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, error, hasSolanaProvider, isMobileDevice, walletModalOpen, closeWalletModal, connectDemo, connectWallet, connectMetaMaskWallet, disconnect } = useWallet()
+  const isMobileWalletChoice = isMobileDevice || (typeof window !== 'undefined' && window.innerWidth <= 768)
   const currentRank = getCurrentRank(profile)
   const liveBalance = profile && typeof profile.balance === 'number' ? formatCompact(profile.balance) : walletDataState === 'loading' ? '…' : '—'
   if (!walletModalOpen) return null
@@ -208,6 +209,16 @@ function WalletModal() {
               <div><span className="data-label">{wallet.isDemo ? 'Demo wallet' : 'Connected wallet'}</span><strong style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>{wallet.shortAddress}</strong><small style={{ fontSize: '8px', color: 'var(--muted-light)' }}>{wallet.provider}</small></div>
               <Tag tone={wallet.isDemo ? 'red' : 'green'}>{wallet.isDemo ? 'UI PREVIEW' : 'CONNECTED'}</Tag>
             </div>
+            <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
+              {connectedEvmWallet && (
+                <p className="wallet-hint" style={{ color: 'var(--ink)', margin: 0 }}>
+                  MetaMask connected: {connectedEvmWallet.shortAddress}
+                </p>
+              )}
+              <Button variant="outline" icon="wallet" onClick={connectMetaMaskWallet} disabled={connectionState === 'connecting'}>
+                {connectionState === 'connecting' ? 'Connecting…' : connectedEvmWallet ? 'Switch MetaMask account' : 'Connect MetaMask wallet'}
+              </Button>
+            </div>
             <div className="wallet-preview-stats">
               <div><span>RONIN BALANCE</span><strong>{liveBalance}</strong></div>
               <div><span>CLAN RANK</span><strong>{currentRank ? currentRank.name.toUpperCase() : walletDataState === 'loading' ? 'READING' : 'PENDING'}</strong></div>
@@ -219,17 +230,22 @@ function WalletModal() {
         ) : (
           <>
             <h2 id="wallet-dialog-title">Enter the clan.</h2>
-            <p className="modal-lead">Connect a Solana wallet to unlock your Ronin identity, rank progress, and ecosystem position.</p>
+            <p className="modal-lead">Connect Phantom for your Solana identity and payouts, or MetaMask to view your EVM points.</p>
             <div className="wallet-benefits">
               <span><Icon name="shield" size={16} /> Your holdings</span>
               <span><Icon name="trophy" size={16} /> Your rank</span>
               <span><Icon name="gamepad" size={16} /> Your progress</span>
             </div>
-            <Button icon="wallet" onClick={connectWallet} disabled={(!hasSolanaProvider && !isMobileDevice) || connectionState === 'connecting'}>
-              {connectionState === 'connecting' ? 'Connecting…' : (isMobileDevice && !hasSolanaProvider ? 'Open in Phantom' : 'Connect Solana wallet')}
-            </Button>
-            {!hasSolanaProvider && !isMobileDevice && <p className="wallet-hint">No browser wallet detected. Use the preview profile to explore the connected experience, or install Phantom to connect a real wallet.</p>}
-            {!hasSolanaProvider && isMobileDevice && <p className="wallet-hint" style={{ color: 'var(--ink)' }}>Tap above to securely open the RONIN ecosystem inside the Phantom mobile app.</p>}
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <Button icon="wallet" onClick={() => connectWallet(connectedEvmWallet?.address)} disabled={(!hasSolanaProvider && !isMobileDevice) || connectionState === 'connecting'}>
+                {connectionState === 'connecting' ? 'Connecting…' : (!hasSolanaProvider && isMobileWalletChoice ? 'Open in Phantom' : 'Connect Phantom wallet')}
+              </Button>
+              <Button variant="outline" icon="wallet" onClick={connectMetaMaskWallet} disabled={connectionState === 'connecting'}>
+                {connectionState === 'connecting' ? 'Connecting…' : connectedEvmWallet ? 'Switch MetaMask account' : 'Connect MetaMask wallet'}
+              </Button>
+            </div>
+            {!hasSolanaProvider && !isMobileWalletChoice && <p className="wallet-hint">No Phantom provider detected. Install Phantom for Solana access, or connect MetaMask to view EVM points.</p>}
+            {isMobileWalletChoice && <p className="wallet-hint" style={{ color: 'var(--ink)' }}>Choose Phantom for Solana, or MetaMask for EVM wallet access on mobile.</p>}
             {error && <div className="error-box"><Icon name="info" size={16} /><span>{error}</span></div>}
           </>
         )}

@@ -91,7 +91,12 @@ function shortAddr(addr) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
-export default function WalletLinkPanel({ onLinkedChange }) {
+function sameEvmAddress(left, right) {
+  return typeof left === 'string' && typeof right === 'string'
+    && left.trim().toLowerCase() === right.trim().toLowerCase()
+}
+
+export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
   const { wallet, verifiedEvmWallets, refreshLinkedWallets, solanaPayoutWallet } = useWallet()
   const [step, setStep] = useState(STEP_IDLE)
   const [error, setError] = useState('')
@@ -206,6 +211,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     // silently clearing state.
     if (mobilePhase.phase === '1') {
       const phaseSolanaWallet = mobilePhase.solanaWallet
+      const phaseExpectedEvmWallet = mobilePhase.expectedEvmWallet || expectedEvmWallet
 
       // Detect MetaMask provider at a single point in time.
       const detectMetaMaskNow = () => Boolean(
@@ -230,6 +236,9 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             const evm = await ensureMetaMaskAccount()
             if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
               throw new Error('MetaMask provider became unavailable.')
+            }
+            if (phaseExpectedEvmWallet && !sameEvmAddress(evm, phaseExpectedEvmWallet)) {
+              throw new Error(`MetaMask is connected to ${shortAddr(evm)}, but this Profile is linking ${shortAddr(phaseExpectedEvmWallet)}. Switch to the Profile wallet and try again.`)
             }
             console.info('[WalletLinkMobile] MetaMask account received', {
               evmShort: evm.slice(0, 6) + '...' + evm.slice(-4),
@@ -395,7 +404,10 @@ export default function WalletLinkPanel({ onLinkedChange }) {
         ;(async () => {
           try {
             console.info('[WalletLinkMobile] Phantom signMessage started')
-            const solanaSig = await signLinkMessageWithPhantom({ message: messageSolana })
+            const solanaSig = await signLinkMessageWithPhantom({
+              message: messageSolana,
+              expectedAddress: solanaWallet || undefined,
+            })
             console.info('[WalletLinkMobile] Phantom signMessage completed', {
               sigLen: solanaSig?.length,
             })
@@ -550,7 +562,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
       // Cleanup on unmount
       return () => { cancelled = true; clearInterval(pollTimer) }
     }
-  }, [solanaWallet, refreshLinkedWallets, onLinkedChange])
+  }, [solanaWallet, refreshLinkedWallets, onLinkedChange, expectedEvmWallet])
 
   // --- Step 1: Connect MetaMask + create challenge ---
   //
@@ -574,6 +586,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
   //      that desktop uses — no separate mobile signing protocol.
   const [shouldOpenMetaMaskMobile, setShouldOpenMetaMaskMobile] = useState(false)
   const pendingSolanaWalletRef = useRef(null)
+  const pendingExpectedEvmWalletRef = useRef(null)
 
   useEffect(() => {
     if (!shouldOpenMetaMaskMobile) return
@@ -582,7 +595,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     // so MetaMask Mobile can auto-resume the EVM signing flow.
     const sw = pendingSolanaWalletRef.current
     if (sw) {
-      openMetaMaskMobileForWalletLink(sw)
+      openMetaMaskMobileForWalletLink(sw, pendingExpectedEvmWalletRef.current)
     } else {
       openMetaMaskMobile()
     }
@@ -602,11 +615,16 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     try {
       const evm = await ensureMetaMaskAccount()
 
+      if (evm !== EVM_REDIRECTING_TO_METAMASK_MOBILE && expectedEvmWallet && !sameEvmAddress(evm, expectedEvmWallet)) {
+        throw new Error(`MetaMask is connected to ${shortAddr(evm)}, but this Profile is linking ${shortAddr(expectedEvmWallet)}. Switch to the Profile wallet and try again.`)
+      }
+
       // Mobile Phase 1: no injected MetaMask provider. Schedule the
       // deep-link to MetaMask Mobile with ?wl=1&sw=<solanaWallet> so
       // the flow auto-resumes when MetaMask Mobile opens the page.
       if (evm === EVM_REDIRECTING_TO_METAMASK_MOBILE) {
         pendingSolanaWalletRef.current = solanaWallet
+        pendingExpectedEvmWalletRef.current = expectedEvmWallet || null
         setStep(STEP_OPENING_METAMASK_MOBILE)
         setShouldOpenMetaMaskMobile(true)
         return
@@ -635,7 +653,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
       setErrorCode(String(e?.code || 'START_FAILED'))
       setStep(STEP_ERROR)
     }
-  }, [solanaWallet])
+  }, [solanaWallet, expectedEvmWallet])
 
   // --- Step 2: Sign with MetaMask ---
   const signEvm = useCallback(async (challenge) => {
@@ -668,7 +686,10 @@ export default function WalletLinkPanel({ onLinkedChange }) {
     setError('')
     setErrorCode('')
     try {
-      const solanaSig = await signLinkMessageWithPhantom({ message: messageSolana })
+      const solanaSig = await signLinkMessageWithPhantom({
+        message: messageSolana,
+        expectedAddress: solanaWallet,
+      })
       await verify({ challengeId, evmSignature, solanaSignature: solanaSig })
     } catch (e) {
       const msg = e?.message || 'Phantom signature failed.'
@@ -918,7 +939,7 @@ export default function WalletLinkPanel({ onLinkedChange }) {
             </p>
             <Button variant="outline" icon="refresh" onClick={() => {
               const sw = pendingSolanaWalletRef.current
-              if (sw) openMetaMaskMobileForWalletLink(sw)
+              if (sw) openMetaMaskMobileForWalletLink(sw, pendingExpectedEvmWalletRef.current)
               else openMetaMaskMobile()
             }}>
               Open MetaMask

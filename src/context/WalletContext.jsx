@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { PublicKey } from '@solana/web3.js'
 import { demoProfile } from '../data'
+import { connectEthereumWallet } from '../services/ethereumService'
 import { getRoninBalance, getRoninSupply, getLiveRoninStats } from '../services/roninService'
 import { getVerifiedRewardIdentity, getMobileWalletLinkPhase } from '../services/walletLinkService'
 
@@ -54,6 +55,17 @@ function isRealSolanaWalletAddress(address) {
   }
 }
 
+function uniqueWalletAddresses(addresses) {
+  const seen = new Set()
+  return addresses.filter((address) => {
+    if (typeof address !== 'string' || !address) return false
+    const key = /^0x[0-9a-fA-F]{40}$/.test(address) ? address.toLowerCase() : address
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export const getSolanaProvider = () => {
   if (typeof window === 'undefined') return null;
   // Standard Phantom detection
@@ -66,6 +78,7 @@ export const getSolanaProvider = () => {
 
 export function WalletProvider({ children }) {
   const [wallet, setWallet] = useState(null)
+  const [connectedEvmWallet, setConnectedEvmWallet] = useState(null)
   const [profile, setProfile] = useState(null)
   const [connectionState, setConnectionState] = useState('idle')
   const [walletDataState, setWalletDataState] = useState('idle')
@@ -172,6 +185,7 @@ export function WalletProvider({ children }) {
         balance: tokenBalance.amount,
         rawBalance: tokenBalance.rawAmount,
         decimals: tokenBalance.decimals,
+        tokenAccounts: tokenBalance.tokenAccounts,
         nfts: null,
         level: null,
         xp: null,
@@ -310,14 +324,23 @@ export function WalletProvider({ children }) {
     setNotice('Demo profile connected. Live wallet reads are clearly marked throughout the app.')
   }
 
-  const connectWallet = async () => {
+  const connectWallet = async (expectedEvmWallet) => {
     setError('')
     setConnectionState('connecting')
     try {
+      const requestedEvmWallet = /^0x[a-fA-F0-9]{40}$/.test(expectedEvmWallet || '')
+        ? expectedEvmWallet
+        : new URLSearchParams(window.location.search).get('profileEvm')
+      const expectedEvmAddress = /^0x[a-fA-F0-9]{40}$/.test(requestedEvmWallet || '') ? requestedEvmWallet : null
+      if (expectedEvmAddress) {
+        const url = new URL(window.location.href)
+        url.searchParams.set('profileEvm', expectedEvmAddress)
+        window.history.replaceState(window.history.state, '', url.toString())
+      }
       const provider = getSolanaProvider()
       if (!provider) {
         if (isMobileDevice) {
-          const url = window.location.href;
+          const url = window.location.href
           const ref = window.location.origin;
           window.location.href = `https://phantom.app/ul/browse/${encodeURIComponent(url)}?ref=${encodeURIComponent(ref)}`;
           setConnectionState('idle');
@@ -329,6 +352,7 @@ export function WalletProvider({ children }) {
       const address = response?.publicKey?.toString?.() || response?.publicKey
       if (!address) throw new Error('The wallet did not return a public key.')
       if (!isRealSolanaWalletAddress(address)) throw new Error('The wallet returned an invalid off-curve address. Disconnect and reconnect Phantom.')
+      setConnectedEvmWallet(null)
       setWallet({ address, shortAddress: shortAddress(address), provider: 'Solana wallet', isDemo: false })
       setProfile(null)
       setWalletDataState('loading')
@@ -343,12 +367,34 @@ export function WalletProvider({ children }) {
     }
   }
 
+  const connectMetaMaskWallet = async () => {
+    setError('')
+    setConnectionState('connecting')
+    try {
+      const address = await connectEthereumWallet()
+      if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+        throw new Error('MetaMask did not return a valid account address.')
+      }
+      const normalized = address.toLowerCase()
+      setConnectedEvmWallet({ address, shortAddress: shortAddress(address), provider: 'MetaMask', isDemo: false })
+      addEvmWallet(normalized)
+      setWallet((current) => current && !current.isDemo ? current : null)
+      setConnectionState('connected')
+      setWalletModalOpen(false)
+      setNotice('MetaMask connected. Your EVM points and linked reward identity will be read from the current profile wallet.')
+    } catch (connectError) {
+      setConnectionState('error')
+      setError(connectError?.message || 'MetaMask could not be connected.')
+    }
+  }
+
   const disconnect = () => {
     try {
       if (wallet && !wallet.isDemo) getSolanaProvider()?.disconnect?.()
     } catch {
       // State is still cleared if a provider does not expose disconnect().
     }
+    setConnectedEvmWallet(null)
     setWallet(null)
     setProfile(null)
     setWalletDataState('idle')
@@ -425,6 +471,11 @@ export function WalletProvider({ children }) {
       if (cancelled) return
       if (Array.isArray(accounts) && accounts[0]) {
         addEvmWallet(accounts[0])
+        setConnectedEvmWallet((current) => current
+          ? { address: accounts[0], shortAddress: shortAddress(accounts[0]), provider: 'MetaMask', isDemo: false }
+          : current)
+      } else {
+        setConnectedEvmWallet((current) => current ? null : current)
       }
     }
     metaMask.on?.('accountsChanged', handleAccountsChanged)
@@ -468,10 +519,16 @@ export function WalletProvider({ children }) {
     // Convenience: returns ALL known wallet addresses (Phantom + EVM)
     // for the current user. Used by the Profile page to fetch
     // aggregated stats. The Phantom address comes first if connected.
-    allWalletAddresses: [
+    // If a MetaMask wallet is actively selected in this session, include
+    // it in the current profile view even when Phantom is not connected.
+    activeProfileWallet: connectedEvmWallet || (wallet && !wallet.isDemo ? wallet : null),
+    connectedEvmWallet,
+    allWalletAddresses: uniqueWalletAddresses([
       ...(wallet?.address && !wallet.isDemo ? [wallet.address] : []),
+      ...(connectedEvmWallet?.address ? [connectedEvmWallet.address.toLowerCase()] : []),
+      ...(Array.isArray(verifiedEvmWallets) ? verifiedEvmWallets.map((address) => address.toLowerCase()) : []),
       ...evmWallets,
-    ],
+    ]),
     openWalletModal: () => { setError(''); setWalletModalOpen(true) },
     closeWalletModal: () => setWalletModalOpen(false),
     buyModalOpen,
@@ -479,6 +536,7 @@ export function WalletProvider({ children }) {
     closeBuyModal: () => setBuyModalOpen(false),
     connectDemo,
     connectWallet,
+    connectMetaMaskWallet,
     refreshWalletData: () => wallet && !wallet.isDemo ? refreshWalletData(wallet.address) : undefined,
     refreshLiveStats: async () => {
       setLiveStatsState('loading')
@@ -498,7 +556,7 @@ export function WalletProvider({ children }) {
     },
     disconnect,
     notice,
-  }), [wallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, tokenSupply, tokenSupplyState, liveStats, liveStatsState, error, hasSolanaProvider, isMobileDevice, walletModalOpen, buyModalOpen, notice, refreshWalletData, evmWallets, addEvmWallet, removeEvmWallet, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded, refreshLinkedWallets])
+  }), [wallet, connectedEvmWallet, profile, connectionState, walletDataState, walletDataError, lastUpdated, tokenSupply, tokenSupplyState, liveStats, liveStatsState, error, hasSolanaProvider, isMobileDevice, walletModalOpen, buyModalOpen, notice, refreshWalletData, evmWallets, addEvmWallet, removeEvmWallet, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded, refreshLinkedWallets])
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
 }

@@ -635,7 +635,6 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         <div>
           <h3>RONIN SWAP</h3>
           <span className="swap-widget-powered">Powered by <b>0x</b> · Ethereum Mainnet</span>
-          <span className="swap-contract-status">CONTRACT IN DEVELOPMENT</span>
         </div>
         <button type="button" className="swap-widget-gear" aria-label="Swap settings" disabled><Icon name="settings" size={18} /></button>
       </div>
@@ -1274,7 +1273,6 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
         <div>
           <h3>RONIN SWAP</h3>
           <span className="swap-widget-powered">Powered by <b>LI.FI</b> · Robinhood Chain</span>
-          <span className="swap-contract-status">CONTRACT IN DEVELOPMENT</span>
         </div>
         <button type="button" className="swap-widget-gear" aria-label="Swap settings" disabled><Icon name="settings" size={18} /></button>
       </div>
@@ -2397,7 +2395,6 @@ export default function Swap() {
               <div>
                 <h3>RONIN SWAP</h3>
                 <span className="swap-widget-powered">Powered by <JupiterMark size={15} /> <b>Jupiter</b></span>
-                <span className="swap-contract-status">CONTRACT IN DEVELOPMENT</span>
               </div>
               <button type="button" className="swap-widget-gear" onClick={handleSwapAction} aria-label="Swap settings" aria-disabled={paused ? 'true' : undefined} disabled={paused}>
                 <Icon name="settings" size={18} />

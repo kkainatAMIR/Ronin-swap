@@ -128,11 +128,14 @@ export async function getRoninBalance(ownerAddress) {
   const result = await rpcRequest('getTokenAccountsByOwner', [ownerAddress, { mint: RONIN_MINT }, { encoding: 'jsonParsed' }])
   let rawAmount = 0n
   let decimals = 0
+  const tokenAccounts = []
   for (const account of result?.value || []) {
     const tokenAmount = account?.account?.data?.parsed?.info?.tokenAmount
-    if (!tokenAmount) continue
-    rawAmount += BigInt(tokenAmount.amount || '0')
+    if (!tokenAmount || !account?.pubkey) continue
+    const accountRawAmount = String(tokenAmount.amount || '0')
+    rawAmount += BigInt(accountRawAmount)
     decimals = Number(tokenAmount.decimals || 0)
+    tokenAccounts.push({ address: account.pubkey, rawAmount: accountRawAmount })
   }
   const divisor = 10 ** decimals
   const amount = Number(rawAmount) / divisor
@@ -141,6 +144,7 @@ export async function getRoninBalance(ownerAddress) {
     rawAmount: rawAmount.toString(),
     decimals,
     accounts: result?.value?.length || 0,
+    tokenAccounts,
     updatedAt: Date.now(),
     source: 'Solana mainnet RPC',
   }
