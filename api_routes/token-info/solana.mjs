@@ -108,8 +108,77 @@ async function lookupViaJupiter(mint) {
   }
 }
 
-// Step 2: fall back to Solana RPC getAccountInfo. Verifies the mint
-// exists and is an SPL Mint. Returns decimals if available.
+// Step 2: try Helius DAS API (getAsset) if HELIUS_API_KEY is set.
+// The Helius getAsset method returns full token metadata for ANY mint
+// (including name, symbol, image URI, and even Metaplex off-chain
+// JSON content). This is the best source for non-Jupiter-listed
+// tokens because it parses Metaplex metadata on the backend.
+//
+// We call this via the same /api/solana/rpc proxy that the swap page
+// uses — the proxy already allows `getAsset` in its ALLOWED_METHODS
+// set, so this works in dev + production without any new env vars.
+async function lookupViaHelius(mint) {
+  // The Helius getAsset method takes the mint address as the first
+  // param. We POST to our own /api/solana/rpc proxy rather than
+  // hitting Helius directly — that way the API key stays server-side
+  // and we don't expose it to the browser.
+  const heliusEndpoint = runtimeEnv.HELIUS_API_KEY
+    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(runtimeEnv.HELIUS_API_KEY)}`
+    : null
+  if (!heliusEndpoint) return null
+  try {
+    const response = await fetchWithTimeout(heliusEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getAsset',
+        params: { id: mint },
+      }),
+    })
+    if (!response.ok) return null
+    const payload = await response.json().catch(() => null)
+    if (!payload || payload.error) return null
+    const asset = payload?.result
+    if (!asset || !asset.interface || asset.interface !== 'FungibleToken') {
+      // The mint exists but isn't a fungible token (could be an NFT
+      // collection, a non-fungible SPL, etc.). Treat as not-found.
+      return null
+    }
+    // Helius returns:
+    //   content.metadata.name (string)
+    //   content.metadata.symbol (string)
+    //   content.links.image (URL) or content.json.uri (off-chain JSON)
+    //   token_info.decimals? (older API versions may not have this)
+    const metadata = asset?.content?.metadata || {}
+    const links = asset?.content?.links || {}
+    const decimals = Number.isFinite(Number(asset?.token_info?.decimals))
+      ? Number(asset.token_info.decimals)
+      : Number.isFinite(Number(metadata.decimals))
+        ? Number(metadata.decimals)
+        : 9
+    const name = String(metadata.name || '').trim() || 'Unknown SPL Token'
+    const symbol = String(metadata.symbol || '').trim() || 'UNKNOWN'
+    const logoURI = links.image || asset?.content?.json?.image || asset?.content?.uri || null
+    return {
+      symbol,
+      name,
+      decimals,
+      logoURI,
+      verified: false,  // not in Jupiter's verified list
+      source: 'helius-das',
+    }
+  } catch {
+    return null
+  }
+}
+
+// Step 3: fall back to Solana RPC getAccountInfo. Verifies the mint
+// exists and is an SPL Mint. Returns decimals if available. This is
+// the LAST resort — it only confirms the mint exists and gives us
+// decimals; we have no name/symbol/logo for tokens not in Jupiter
+// or Helius' index.
 async function lookupViaSolanaRpc(mint) {
   const requestBody = {
     jsonrpc: '2.0',
@@ -172,7 +241,7 @@ export async function lookupSolanaTokenInfo(mint) {
     return { ...cachedEntry.payload, cached: true }
   }
 
-  // Step 1: Jupiter (has name/symbol/logo)
+  // Step 1: Jupiter (has name/symbol/logo for verified tokens)
   const jupiterResult = await lookupViaJupiter(normalized)
   if (jupiterResult) {
     const payload = { mint: normalized, ...jupiterResult, cached: false }
@@ -180,7 +249,19 @@ export async function lookupSolanaTokenInfo(mint) {
     return payload
   }
 
-  // Step 2: Solana RPC (verifies existence + decimals only)
+  // Step 2: Helius DAS API (has name/symbol/logo for ANY mint with
+  // Metaplex metadata — works for tokens not in Jupiter's list too).
+  // Only available if HELIUS_API_KEY is configured.
+  const heliusResult = await lookupViaHelius(normalized)
+  if (heliusResult) {
+    const payload = { mint: normalized, ...heliusResult, cached: false }
+    cache.set(normalized, { payload, cachedAt: Date.now() })
+    return payload
+  }
+
+  // Step 3: Solana RPC getAccountInfo (verifies the mint exists +
+  // returns decimals; no name/symbol/logo available). This is the
+  // LAST resort — returns "Unknown SPL Token" with no logo.
   const rpcResult = await lookupViaSolanaRpc(normalized)
   if (rpcResult) {
     const payload = { mint: normalized, ...rpcResult, cached: false }

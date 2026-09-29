@@ -202,6 +202,53 @@ function buildLogoUri(chainKey, address) {
   return null
 }
 
+// Try DexScreener for the logo URL + (potentially better) name/symbol.
+// DexScreener indexes pairs on most chains — for Ethereum mainnet it
+// returns ERC-20s that have any DEX listing; for Robinhood Chain it
+// returns tokens indexed via its 'robinhood' chainId. The response shape:
+//   {
+//     pairs: [
+//       { baseToken: { address, name, symbol }, info: { imageUrl }, ... },
+//       ...
+//     ]
+//   }
+//
+// We find the pair where baseToken.address matches our target (lowercased)
+// and pull its logo + name + symbol.
+async function lookupDexScreener(chainKey, address) {
+  const addressLower = address.toLowerCase()
+  // DexScreener's token endpoint accepts up to 30 addresses in one call.
+  // For our use case (1 address per lookup), the simple URL form is fine.
+  const url = `https://api.dexscreener.com/latest/dex/tokens/${addressLower}`
+  try {
+    const response = await fetchWithTimeout(url, { headers: { accept: 'application/json' } })
+    if (!response.ok) return null
+    const body = await response.json().catch(() => null)
+    if (!body || !Array.isArray(body.pairs) || body.pairs.length === 0) return null
+    // Find the pair where baseToken.address === our target on the right
+    // chain. DexScreener uses chainId strings:
+    //   'ethereum' for Ethereum mainnet (chainId 1)
+    //   'robinhood' for Robinhood Chain (chainId 4663)
+    const chainSlug = chainKey === 'ethereum' ? 'ethereum' : 'robinhood'
+    const matchingPair = body.pairs.find((pair) =>
+      pair?.chainId === chainSlug &&
+      String(pair?.baseToken?.address || '').toLowerCase() === addressLower
+    ) || body.pairs.find((pair) =>
+      String(pair?.baseToken?.address || '').toLowerCase() === addressLower
+    )
+    if (!matchingPair) return null
+    const baseToken = matchingPair.baseToken || {}
+    const info = matchingPair.info || {}
+    return {
+      name: String(baseToken.name || '').trim() || null,
+      symbol: String(baseToken.symbol || '').trim() || null,
+      logoURI: info.imageUrl || baseToken.logoURI || null,
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function lookupEvmTokenInfo(chainKey, address) {
   if (!ALLOWED_CHAINS.has(chainKey)) return null
   if (!isValidEvmAddress(address)) return null
@@ -216,30 +263,41 @@ export async function lookupEvmTokenInfo(chainKey, address) {
   const rpcUrl = resolveRpcUrl(chainKey)
   if (!rpcUrl) return null
 
-  // Fire all 3 eth_calls in parallel.
-  const [nameResult, symbolResult, decimalsResult] = await Promise.all([
+  // Fire all 3 eth_calls + the DexScreener lookup in parallel. The
+  // eth_calls give us the on-chain name/symbol/decimals (authoritative);
+  // DexScreener gives us a logo URL (which eth_call can't provide).
+  const [nameResult, symbolResult, decimalsResult, dexScreenerResult] = await Promise.all([
     ethCall(rpcUrl, addressLower, SELECTOR_NAME),
     ethCall(rpcUrl, addressLower, SELECTOR_SYMBOL),
     ethCall(rpcUrl, addressLower, SELECTOR_DECIMALS),
+    lookupDexScreener(chainKey, addressLower),
   ])
 
-  const name = decodeStringOrBytes32(nameResult) || 'Unknown Token'
-  const symbol = decodeStringOrBytes32(symbolResult) || 'UNKNOWN'
+  // On-chain name/symbol are AUTHORITATIVE — they always come from the
+  // contract itself. DexScreener is only used as a FALLBACK for name/symbol
+  // (when the contract returns bytes32 garbage) and as the PRIMARY source
+  // for the logo URL.
+  const name = decodeStringOrBytes32(nameResult) || dexScreenerResult?.name || 'Unknown Token'
+  const symbol = decodeStringOrBytes32(symbolResult) || dexScreenerResult?.symbol || 'UNKNOWN'
   const decimals = decodeUint8(decimalsResult)
   if (decimals == null) {
     // If decimals() failed, the address is either not a contract or
     // not an ERC-20. Treat as "not found" so the UI shows an error.
     return null
   }
+  // Prefer DexScreener's logo (covers Robinhood Chain + many obscure
+  // ERC-20s not in TrustWallet's repo). Fall back to TrustWallet assets
+  // URL pattern for Ethereum mainnet only.
+  const logoURI = dexScreenerResult?.logoURI || buildLogoUri(chainKey, addressLower)
 
   const payload = {
     address: addressLower,
     symbol,
     name,
     decimals,
-    logoURI: buildLogoUri(chainKey, addressLower),
+    logoURI,
     verified: false,
-    source: 'evm-rpc',
+    source: dexScreenerResult ? 'evm-rpc+dexscreener' : 'evm-rpc',
     chainKey,
     chainId: chainKey === 'ethereum' ? ETHEREUM_CHAIN_ID : ROBINHOOD_CHAIN_ID,
     cached: false,
