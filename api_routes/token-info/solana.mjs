@@ -10,10 +10,14 @@
 //   1. Jupiter token list API (https://lite-api.jup.ag/tokens/v2/mints)
 //      → returns { symbol, name, decimals, logoURI, ... } if the mint
 //        is in Jupiter's verified list.
-//   2. Solana RPC getAccountInfo(<mint>, { encoding: 'jsonParsed' })
-//      → verifies the account exists + is an SPL Mint. Returns decimals
-//        from the parsed data; falls back to name/symbol = 'UNKNOWN'
-//        and logoURI = null.
+//   2. Metaplex on-chain metadata via Solana RPC getAccountInfo(<pda>)
+//      → fetches the on-chain name/symbol/URI from the Metaplex Token
+//        Metadata program, then follows the off-chain URI (typically
+//        Arweave) to get the logo URL. Covers ANY SPL token that has
+//        Metaplex metadata (essentially all legitimate tokens).
+//   3. Solana RPC getAccountInfo(<mint>, { encoding: 'jsonParsed' })
+//      → last-resort fallback: verifies the mint exists + returns
+//        decimals only. name/symbol/logo are placeholders.
 //
 // SECURITY:
 //   * Validates mint format (Solana base58 32-44 chars).
@@ -30,7 +34,7 @@
 //   {
 //     mint, symbol, name, decimals, logoURI,
 //     verified: bool,    // true iff Jupiter's verified list contained it
-//     source: 'jupiter' | 'solana-rpc',
+//     source: 'jupiter' | 'metaplex' | 'solana-rpc',
 //     cached: bool
 //   }
 //
@@ -38,6 +42,7 @@
 // =====================================================================
 
 import { apiError, json, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
+import { PublicKey } from '@solana/web3.js'
 
 const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
 
@@ -45,6 +50,10 @@ const JUPITER_TOKEN_API = 'https://lite-api.jup.ag/tokens/v2/mints'
 const DEFAULT_SOLANA_RPC = 'https://api.mainnet-beta.solana.com'
 const LOOKUP_TIMEOUT_MS = 8_000
 const CACHE_TTL_MS = 5 * 60_000
+
+// Metaplex Token Metadata program ID (canonical on Solana mainnet).
+// Used to derive the deterministic PDA for a mint's metadata.
+const METAPLEX_TOKEN_METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYFfMx6dGk5RnTbDqpfK')
 
 // In-memory cache. Keyed by mint (lowercase). Per-process — won't
 // survive restarts, which is fine for this read-only metadata.
@@ -108,66 +117,123 @@ async function lookupViaJupiter(mint) {
   }
 }
 
-// Step 2: try Helius DAS API (getAsset) if HELIUS_API_KEY is set.
-// The Helius getAsset method returns full token metadata for ANY mint
-// (including name, symbol, image URI, and even Metaplex off-chain
-// JSON content). This is the best source for non-Jupiter-listed
-// tokens because it parses Metaplex metadata on the backend.
-//
-// We call this via the same /api/solana/rpc proxy that the swap page
-// uses — the proxy already allows `getAsset` in its ALLOWED_METHODS
-// set, so this works in dev + production without any new env vars.
-async function lookupViaHelius(mint) {
-  // The Helius getAsset method takes the mint address as the first
-  // param. We POST to our own /api/solana/rpc proxy rather than
-  // hitting Helius directly — that way the API key stays server-side
-  // and we don't expose it to the browser.
-  const heliusEndpoint = runtimeEnv.HELIUS_API_KEY
-    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(runtimeEnv.HELIUS_API_KEY)}`
-    : null
-  if (!heliusEndpoint) return null
+// Step 2: fetch Metaplex on-chain metadata. Computes the deterministic
+// PDA for the mint's Metaplex Token Metadata account, calls Solana RPC
+// getAccountInfo with base64 encoding, and parses the Borsh-serialized
+// layout (key + update_authority + mint + name + symbol + uri).
+// Optionally follows the off-chain URI to fetch the logo URL.
+async function lookupViaMetaplex(mint) {
   try {
-    const response = await fetchWithTimeout(heliusEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'getAsset',
-        params: { id: mint },
-      }),
-    })
-    if (!response.ok) return null
-    const payload = await response.json().catch(() => null)
-    if (!payload || payload.error) return null
-    const asset = payload?.result
-    if (!asset || !asset.interface || asset.interface !== 'FungibleToken') {
-      // The mint exists but isn't a fungible token (could be an NFT
-      // collection, a non-fungible SPL, etc.). Treat as not-found.
-      return null
+    const mintPubkey = new PublicKey(mint)
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('metadata'), METAPLEX_TOKEN_METADATA_PROGRAM_ID.toBuffer(), mintPubkey.toBuffer()],
+      METAPLEX_TOKEN_METADATA_PROGRAM_ID,
+    )
+    const requestBody = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getAccountInfo',
+      params: [pda.toString(), { encoding: 'base64' }],
     }
-    // Helius returns:
-    //   content.metadata.name (string)
-    //   content.metadata.symbol (string)
-    //   content.links.image (URL) or content.json.uri (off-chain JSON)
-    //   token_info.decimals? (older API versions may not have this)
-    const metadata = asset?.content?.metadata || {}
-    const links = asset?.content?.links || {}
-    const decimals = Number.isFinite(Number(asset?.token_info?.decimals))
-      ? Number(asset.token_info.decimals)
-      : Number.isFinite(Number(metadata.decimals))
-        ? Number(metadata.decimals)
-        : 9
-    const name = String(metadata.name || '').trim() || 'Unknown SPL Token'
-    const symbol = String(metadata.symbol || '').trim() || 'UNKNOWN'
-    const logoURI = links.image || asset?.content?.json?.image || asset?.content?.uri || null
+    const endpoints = solanaRpcEndpoints()
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetchWithTimeout(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        })
+        if (!response.ok) continue
+        const payload = await response.json().catch(() => null)
+        if (!payload || payload.error) continue
+        const value = payload?.result?.value
+        if (!value || !Array.isArray(value.data) || value.data.length < 1) continue
+        const data = Buffer.from(value.data[0], 'base64')
+        const parsed = parseMetaplexMetadataAccount(data)
+        if (!parsed) continue
+        // Optionally follow the off-chain URI to fetch the logo URL.
+        // The URI is typically an Arweave URL pointing to a JSON file
+        // with { name, symbol, image } fields.
+        let logoURI = null
+        if (parsed.uri) {
+          const offChain = await fetchOffChainMetadata(parsed.uri)
+          if (offChain) {
+            logoURI = offChain.image || offChain.logoURI || offChain.logo || null
+          }
+        }
+        return {
+          symbol: parsed.symbol || 'UNKNOWN',
+          name: parsed.name || (parsed.symbol ? `${parsed.symbol} Token` : 'Unknown SPL Token'),
+          decimals: 9, // Metaplex metadata doesn't include decimals — fall back to 9 (SPL default)
+          logoURI,
+          verified: false,
+          source: 'metaplex',
+        }
+      } catch {
+        // try next endpoint
+        continue
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+// Parse the Borsh-serialized Metaplex Token Metadata V1 account data.
+//
+// Layout:
+//   1 byte  : key (4 = MetadataV1)
+//   32 bytes: update_authority (PublicKey)
+//   32 bytes: mint (PublicKey)
+//   4 bytes : name length (LE uint32)
+//   N bytes : name (UTF-8, padded to 4-byte boundary)
+//   4 bytes : symbol length (LE uint32)
+//   N bytes : symbol (UTF-8, padded to 4-byte boundary)
+//   4 bytes : uri length (LE uint32)
+//   N bytes : uri (UTF-8, padded to 4-byte boundary)
+//   ... (other fields we don't need)
+function parseMetaplexMetadataAccount(data) {
+  try {
+    if (!Buffer.isBuffer(data) || data.length < 100) return null
+    let offset = 1 + 32 + 32 // skip key + update_authority + mint
+    const nameLen = data.readUInt32LE(offset)
+    offset += 4
+    if (offset + nameLen > data.length) return null
+    const name = data.toString('utf8', offset, offset + nameLen).replace(/\u0000+$/, '').trim()
+    offset += Math.ceil(nameLen / 4) * 4 // 4-byte boundary padding
+    if (offset + 4 > data.length) return null
+    const symbolLen = data.readUInt32LE(offset)
+    offset += 4
+    if (offset + symbolLen > data.length) return null
+    const symbol = data.toString('utf8', offset, offset + symbolLen).replace(/\u0000+$/, '').trim()
+    offset += Math.ceil(symbolLen / 4) * 4
+    if (offset + 4 > data.length) return null
+    const uriLen = data.readUInt32LE(offset)
+    offset += 4
+    if (offset + uriLen > data.length) return null
+    const uri = data.toString('utf8', offset, offset + uriLen).replace(/\u0000+$/, '').trim()
+    return { name, symbol, uri }
+  } catch {
+    return null
+  }
+}
+
+// Follow the off-chain URI (typically Arweave) to fetch the JSON
+// metadata that contains the logo/image URL.
+async function fetchOffChainMetadata(uri) {
+  if (!uri || typeof uri !== 'string') return null
+  try {
+    const response = await fetchWithTimeout(uri, { headers: { accept: 'application/json' } }, 5_000)
+    if (!response.ok) return null
+    const body = await response.json().catch(() => null)
+    if (!body || typeof body !== 'object') return null
     return {
-      symbol,
-      name,
-      decimals,
-      logoURI,
-      verified: false,  // not in Jupiter's verified list
-      source: 'helius-das',
+      name: typeof body.name === 'string' ? body.name : null,
+      symbol: typeof body.symbol === 'string' ? body.symbol : null,
+      image: typeof body.image === 'string' ? body.image : null,
+      logoURI: typeof body.logoURI === 'string' ? body.logoURI : null,
+      logo: typeof body.logo === 'string' ? body.logo : null,
     }
   } catch {
     return null
@@ -175,10 +241,7 @@ async function lookupViaHelius(mint) {
 }
 
 // Step 3: fall back to Solana RPC getAccountInfo. Verifies the mint
-// exists and is an SPL Mint. Returns decimals if available. This is
-// the LAST resort — it only confirms the mint exists and gives us
-// decimals; we have no name/symbol/logo for tokens not in Jupiter
-// or Helius' index.
+// exists and is an SPL Mint. Returns decimals if available.
 async function lookupViaSolanaRpc(mint) {
   const requestBody = {
     jsonrpc: '2.0',
@@ -241,7 +304,7 @@ export async function lookupSolanaTokenInfo(mint) {
     return { ...cachedEntry.payload, cached: true }
   }
 
-  // Step 1: Jupiter (has name/symbol/logo for verified tokens)
+  // Step 1: Jupiter (has name/symbol/logo)
   const jupiterResult = await lookupViaJupiter(normalized)
   if (jupiterResult) {
     const payload = { mint: normalized, ...jupiterResult, cached: false }
@@ -249,19 +312,15 @@ export async function lookupSolanaTokenInfo(mint) {
     return payload
   }
 
-  // Step 2: Helius DAS API (has name/symbol/logo for ANY mint with
-  // Metaplex metadata — works for tokens not in Jupiter's list too).
-  // Only available if HELIUS_API_KEY is configured.
-  const heliusResult = await lookupViaHelius(normalized)
-  if (heliusResult) {
-    const payload = { mint: normalized, ...heliusResult, cached: false }
+  // Step 2: Metaplex on-chain metadata (has name/symbol; follows URI for logo)
+  const metaplexResult = await lookupViaMetaplex(normalized)
+  if (metaplexResult) {
+    const payload = { mint: normalized, ...metaplexResult, cached: false }
     cache.set(normalized, { payload, cachedAt: Date.now() })
     return payload
   }
 
-  // Step 3: Solana RPC getAccountInfo (verifies the mint exists +
-  // returns decimals; no name/symbol/logo available). This is the
-  // LAST resort — returns "Unknown SPL Token" with no logo.
+  // Step 3: Solana RPC (verifies existence + decimals only)
   const rpcResult = await lookupViaSolanaRpc(normalized)
   if (rpcResult) {
     const payload = { mint: normalized, ...rpcResult, cached: false }

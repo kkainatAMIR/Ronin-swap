@@ -195,10 +195,17 @@ function decodeUint8(hexResult) {
 
 function buildLogoUri(chainKey, address) {
   if (chainKey === 'ethereum') {
-    // TrustWallet assets only indexes Ethereum mainnet. Robinhood
-    // Chain isn't in their database, so we return null there.
+    // For Ethereum mainnet, TrustWallet's GitHub assets repo indexes
+    // ~5,000+ tokens and returns a logo.png at this URL pattern. If the
+    // token isn't in their index, this URL returns 404 (the frontend
+    // TokenMark component already handles logo load failures via
+    // fallbackLogoURI / default icon).
     return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${address}/logo.png`
   }
+  // Robinhood Chain isn't indexed by TrustWallet. The DexScreener
+  // lookup below (lookupDexScreener) is the primary source for the
+  // logo URL on Robinhood Chain AND a fallback for Ethereum mainnet
+  // tokens not in TrustWallet's repo.
   return null
 }
 
