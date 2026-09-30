@@ -33,6 +33,185 @@ import { ethers } from 'ethers'
 
 const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
 
+// =====================================================================
+// SECURITY-1: DOMAIN/URI BINDING FOR SIGNED MESSAGES
+// =====================================================================
+// The production RoninSwap origin is bound into every signing message
+// so that a signed message cannot be replayed against a different
+// domain (phishing attack where an attacker hosts a look-alike site
+// and tricks the user into signing the wallet-link message there).
+//
+// Configurable via WALLET_LINK_ALLOWED_ORIGIN env var; defaults to the
+// production Vercel deployment.
+const WALLET_LINK_DOMAIN = String(runtimeEnv.WALLET_LINK_ALLOWED_ORIGIN || 'https://ronin-swap6.vercel.app')
+  .replace(/^https?:\/\//, '')  // strip protocol — store as bare domain
+  .replace(/\/$/, '')           // strip trailing slash
+const WALLET_LINK_URI = `https://${WALLET_LINK_DOMAIN}`
+
+// =====================================================================
+// SECURITY-7: CONTROLLED SECURITY-EVENT LOGGING
+// =====================================================================
+// logWalletLinkEvent() logs SAFE identifiers only. NEVER logs:
+//   * signatures (evmSignature / solanaSignature)
+//   * nonces (the cryptographic nonce — only challengeId is logged)
+//   * private keys / seed phrases / recovery phrases
+//   * raw authentication tokens
+//   * complete request bodies
+//   * cryptographic secrets
+//
+// Safe to log: challengeId, normalized wallet addresses (public),
+// event type, timestamp, error code.
+export function logWalletLinkEvent(event, data = {}) {
+  const entry = {
+    event,
+    timestamp: new Date().toISOString(),
+    // Only include safe fields from data — explicitly pick them
+    // rather than spreading the whole object, so we never accidentally
+    // log a signature or nonce.
+    ...(data.challengeId ? { challengeId: data.challengeId } : {}),
+    ...(data.solanaWallet ? { solanaWallet: data.solanaWallet } : {}),
+    ...(data.evmWallet ? { evmWallet: data.evmWallet } : {}),
+    ...(data.code ? { code: data.code } : {}),
+    ...(data.reason ? { reason: data.reason } : {}),
+    ...(data.attemptId ? { attemptId: data.attemptId } : {}),
+  }
+  // Use console.info for success events, console.warn for failures.
+  // Both go to the server's stdout/stderr (Vercel logs / dev terminal).
+  if (event.endsWith('_SUCCESS') || event === 'WALLET_LINK_CHALLENGE_CREATED') {
+    console.info(`[wallet-link] ${event}`, entry)
+  } else {
+    console.warn(`[wallet-link] ${event}`, entry)
+  }
+}
+
+// =====================================================================
+// SECURITY-4: ORIGIN/HOST VALIDATION FOR WALLET-LINK ENDPOINTS
+// =====================================================================
+// Validates the Origin header against an allowlist for ONLY the 4
+// wallet-link API endpoints. Does NOT add global CORS middleware —
+// this is a per-endpoint check called explicitly by each handler.
+//
+// Allowlist:
+//   * Production origin (WALLET_LINK_ALLOWED_ORIGIN env var)
+//   * localhost / 127.0.0.1 (any port — for local dev)
+//   * Missing Origin header (wallet in-app browsers sometimes strip it)
+//
+// An attacker with a wrong Origin (e.g. https://evil.com) is REJECTED.
+// An attacker with no Origin header is ALLOWED (but still needs to pass
+// the signature verification, which requires owning the wallet).
+//
+// Returns true if the request is allowed, false if it should be rejected.
+export function validateWalletLinkOrigin(req) {
+  if (typeof req === 'undefined' || req === null) return true
+  const origin = String(req.headers?.origin || req.headers?.Origin || '').trim()
+  // No Origin header → allow. This happens for:
+  //   * Same-origin requests (browser doesn't send Origin for same-origin GET)
+  //   * Some wallet in-app browsers that strip the Origin header
+  //   * Non-browser clients (curl, Postman)
+  // The signature verification is the authoritative security check —
+  // Origin validation is defense-in-depth on top of that.
+  if (!origin) return true
+
+  // Check the allowlist
+  const allowedOrigins = [
+    `https://${WALLET_LINK_DOMAIN}`,
+    `http://localhost`,
+    `http://127.0.0.1`,
+  ]
+  // Allow any localhost / 127.0.0.1 port (http://localhost:5173, etc.)
+  const isLocalhost = origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')
+  // Allow the exact production origin
+  const isProduction = origin === `https://${WALLET_LINK_DOMAIN}`
+  // Allow Vercel preview deployments IF the env var explicitly allows it
+  // (off by default — preview deployments are not trusted for wallet-link)
+  const allowPreview = String(runtimeEnv.WALLET_LINK_ALLOW_PREVIEW || '').toLowerCase() === 'true'
+  const isVercelPreview = allowPreview && origin.match(/^https:\/\/ronin-swap6-[a-z0-9]+\.vercel\.app$/)
+
+  if (isLocalhost || isProduction || isVercelPreview) {
+    return true
+  }
+  // Origin is present but not in the allowlist → reject
+  logWalletLinkEvent('WALLET_LINK_ORIGIN_REJECTED', { reason: 'origin_not_allowed' })
+  return false
+}
+
+// =====================================================================
+// SECURITY-3: PREVENT DUPLICATE ACTIVE CHALLENGES
+// =====================================================================
+// Before creating a new challenge for (solana_wallet, evm_wallet),
+// mark any existing PENDING challenges for the SAME pair as EXPIRED.
+// This prevents uncontrolled proliferation of pending challenges.
+//
+// Uses 'EXPIRED' status (already in the table's CHECK constraint) —
+// no migration needed. The old challenges are no longer found by
+// getPendingChallenge (which filters by status=eq.PENDING).
+//
+// This does NOT:
+//   * randomly invalidate valid challenges — only invalidates when a
+//    NEW challenge for the same pair is explicitly created by the user
+//   * interfere with the mobile flow — the mobile Phase 2 reuses the
+//    persisted challenge (PR #6), so it doesn't call createLinkChallenge
+//    again unless the user explicitly starts a fresh attempt
+//   * create a race condition — the supersede + insert is not atomic,
+//    but the worst case is that two challenges coexist briefly; the
+//    second one's supersede call catches the first within milliseconds
+async function supersedePendingChallenges(solanaWallet, evmWallet) {
+  try {
+    await supabaseRequest(
+      `wallet_link_challenges?solana_wallet=eq.${encodeURIComponent(solanaWallet)}&evm_wallet=eq.${encodeURIComponent(evmWallet)}&status=eq.PENDING`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: 'EXPIRED' }),
+      },
+    )
+  } catch (error) {
+    // Non-fatal — the new challenge is still created. The old ones
+    // will expire naturally via the 5-min TTL.
+    console.warn('[wallet-link] supersedePendingChallenges non-fatal:', error?.message || error)
+  }
+}
+
+// =====================================================================
+// SECURITY-6: PER-CHALLENGE VERIFY FAILURE RATE LIMITING
+// =====================================================================
+// In-memory counter for failed verify attempts per challengeId.
+// After MAX_VERIFY_FAILURES failed attempts, further verify attempts
+// for that challengeId are blocked for VERIFY_FAILURE_TTL_MS.
+//
+// This is NARROW (per-challengeId, not per-IP) so it doesn't
+// interfere with legitimate mobile retries (which use a new
+// challengeId each attempt). It only blocks brute-force attacks
+// against a single challenge's signature.
+//
+// In-memory (per-process) — doesn't survive restarts. Sufficient
+// because the challenge itself has a 5-min TTL.
+const MAX_VERIFY_FAILURES = 5
+const VERIFY_FAILURE_TTL_MS = 5 * 60_000
+const verifyFailureCounts = new Map() // challengeId -> { count, expiresAt }
+
+export function checkVerifyFailureLimit(challengeId) {
+  if (!challengeId) return true
+  const entry = verifyFailureCounts.get(challengeId)
+  if (!entry) return true
+  if (Date.now() > entry.expiresAt) {
+    verifyFailureCounts.delete(challengeId)
+    return true
+  }
+  return entry.count < MAX_VERIFY_FAILURES
+}
+
+export function recordVerifyFailure(challengeId) {
+  if (!challengeId) return
+  const now = Date.now()
+  const entry = verifyFailureCounts.get(challengeId)
+  if (!entry || now > entry.expiresAt) {
+    verifyFailureCounts.set(challengeId, { count: 1, expiresAt: now + VERIFY_FAILURE_TTL_MS })
+  } else {
+    entry.count += 1
+  }
+}
+
 // ---------------------------------------------------------------------
 // Address normalization + validation
 // ---------------------------------------------------------------------
@@ -118,9 +297,20 @@ async function supabaseRequest(path, options = {}) {
 
 // Build the human-readable linking message that the user signs in
 // MetaMask (EVM) and Phantom (Solana). Both messages share the same
-// core fields (domain, purpose, EVM addr, Solana addr, nonce, issued,
-// expires, challenge_id). They differ only in the trailing note about
-// which wallet is being proven.
+// core fields (domain, URI, purpose, EVM addr, Solana addr, nonce,
+// issued, expires, challenge_id). They differ only in the trailing
+// note about which wallet is being proven.
+//
+// SECURITY-1: The message now includes explicit domain/URI binding:
+//   Domain: <production RoninSwap domain>
+//   URI: <production RoninSwap URL>
+//   Purpose: Link EVM wallet to RoninSwap Solana reward identity
+//
+// This prevents a signed message from being replayed against a
+// different domain (phishing attack where an attacker hosts a
+// look-alike site and tricks the user into signing the wallet-link
+// message there — the message would contain the production domain,
+// so the attacker's site can't substitute its own domain).
 //
 // The message is intentionally human-readable so the user understands
 // what they're authorizing in the wallet popup. It also clearly states
@@ -130,6 +320,10 @@ function buildLinkMessage({ evmWallet, solanaWallet, nonce, challengeId, issuedA
   const expiresIso = new Date(expiresAt).toISOString()
   const lines = [
     'RoninSwap Wallet Link',
+    '',
+    `Domain: ${WALLET_LINK_DOMAIN}`,
+    `URI: ${WALLET_LINK_URI}`,
+    'Purpose: Link EVM wallet to RoninSwap Solana reward identity',
     '',
     'I authorize linking the following wallets for Samurai Points rewards:',
     '',
@@ -144,6 +338,7 @@ function buildLinkMessage({ evmWallet, solanaWallet, nonce, challengeId, issuedA
     'Purpose: cryptographically prove ownership of both wallets so Samurai Points earned on EVM chains can be aggregated into my Solana reward identity.',
     '',
     'This signature does not authorize transactions or token transfers.',
+    'This signature does not authorize token transfers.',
   ]
   if (which === 'evm') {
     lines.push('', `Signing as: EVM wallet ${evmWallet.toLowerCase()}`)
@@ -179,6 +374,15 @@ export async function createLinkChallenge({ solanaWallet, evmWallet } = {}) {
 
   const solanaCanonical = canonicalSolanaAddress(solanaWallet)
   const evmCanonical = canonicalEvmAddress(evmWallet)
+
+  // SECURITY-3: Supersede any existing PENDING challenges for the same
+  // (solana_wallet, evm_wallet) pair before creating a new one. This
+  // prevents uncontrolled proliferation of pending challenges. The old
+  // challenges are marked EXPIRED (already in the CHECK constraint —
+  // no migration needed) and will no longer be found by
+  // getPendingChallenge (which filters by status=eq.PENDING).
+  await supersedePendingChallenges(solanaCanonical, evmCanonical)
+
   const challengeId = 'wlc-' + crypto.randomBytes(16).toString('hex')
   const nonce = crypto.randomBytes(24).toString('hex')
   const issuedAt = Date.now()
@@ -206,6 +410,14 @@ export async function createLinkChallenge({ solanaWallet, evmWallet } = {}) {
       expires_at: new Date(expiresAt).toISOString(),
       status: 'PENDING',
     }]),
+  })
+
+  // SECURITY-7: Log the challenge creation event. Only safe identifiers
+  // are logged — no nonce, no signature, no message text.
+  logWalletLinkEvent('WALLET_LINK_CHALLENGE_CREATED', {
+    challengeId,
+    solanaWallet: solanaCanonical,
+    evmWallet: evmCanonical,
   })
 
   return {

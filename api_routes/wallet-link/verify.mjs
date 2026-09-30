@@ -42,6 +42,10 @@ import {
   verifySolanaSignature,
   callLinkWalletsRpc,
   isWalletLinkStoreConfigured,
+  validateWalletLinkOrigin,
+  logWalletLinkEvent,
+  checkVerifyFailureLimit,
+  recordVerifyFailure,
 } from '../../api/_lib/walletLinkAuth.mjs'
 
 function isValidChallengeId(value) {
@@ -58,6 +62,10 @@ function isValidSolanaSignature(value) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
+  // SECURITY-4: Origin/Host validation — wallet-link endpoints only.
+  if (!validateWalletLinkOrigin(req)) {
+    return apiError(res, 403, 'ORIGIN_NOT_ALLOWED', 'This request origin is not allowed for wallet-link operations.')
+  }
   if (!(await rateLimitPersistent(req, 'wallet_link_verify', 10, 60_000))) {
     return apiError(res, 429, 'RATE_LIMITED', 'Too many verify attempts. Try again shortly.')
   }
@@ -75,6 +83,15 @@ export default async function handler(req, res) {
     return apiError(res, 400, 'INVALID_CHALLENGE_ID',
       'A valid challengeId is required.')
   }
+  // SECURITY-6: Per-challengeId failure rate limiting. After 5 failed
+  // verify attempts (EVM/Solana signature invalid), block further verify
+  // attempts for this challengeId for 5 minutes. This is NARROW (per-
+  // challengeId, not per-IP) so it doesn't interfere with legitimate
+  // mobile retries (which use a new challengeId each attempt).
+  if (!checkVerifyFailureLimit(challengeId)) {
+    logWalletLinkEvent('WALLET_LINK_RATE_LIMITED', { challengeId, reason: 'verify_failures_exceeded' })
+    return apiError(res, 429, 'RATE_LIMITED', 'Too many failed verify attempts for this challenge. Please start a new link attempt.')
+  }
   if (!isValidEvmSignature(evmSignature)) {
     return apiError(res, 400, 'INVALID_EVM_SIGNATURE',
       'A valid EVM signature (0x + 130 hex chars) is required.')
@@ -90,17 +107,25 @@ export default async function handler(req, res) {
   try {
     challenge = await getPendingChallenge(challengeId)
   } catch (error) {
-    console.error('wallet-link/verify getPendingChallenge failed:', error?.message || error)
+    // SECURITY-8: Don't leak internal store errors — log a safe event
+    // and return a generic message.
+    logWalletLinkEvent('WALLET_LINK_STORE_UNAVAILABLE', { challengeId, code: 'get_pending_failed' })
     return apiError(res, 503, 'WALLET_LINK_STORE_UNAVAILABLE',
       'Could not read the challenge. Try again shortly.')
   }
 
   if (!challenge) {
+    // SECURITY-7: Log replay/expired/not-found events. This covers:
+    //   * Replay (challenge was already USED by a previous verify)
+    //   * Expired (challenge was marked EXPIRED by supersede or cron)
+    //   * Not found (challengeId doesn't exist)
+    logWalletLinkEvent('WALLET_LINK_REPLAY_REJECTED', { challengeId, reason: 'challenge_not_pending' })
     return apiError(res, 404, 'CHALLENGE_NOT_FOUND',
       'The challenge was not found, has expired, or has already been used.')
   }
 
   if (challenge.expiresAt < Date.now()) {
+    logWalletLinkEvent('WALLET_LINK_EXPIRED', { challengeId, solanaWallet: challenge.solanaWallet, evmWallet: challenge.evmWallet })
     return apiError(res, 410, 'CHALLENGE_EXPIRED',
       'The challenge has expired. Request a new link challenge.')
   }
@@ -111,6 +136,8 @@ export default async function handler(req, res) {
     signature: evmSignature,
     expectedAddress: challenge.evmWallet,
   })) {
+    recordVerifyFailure(challengeId)
+    logWalletLinkEvent('WALLET_LINK_SIGNATURE_INVALID', { challengeId, evmWallet: challenge.evmWallet, code: 'EVM_SIGNATURE_INVALID' })
     return apiError(res, 401, 'EVM_SIGNATURE_INVALID',
       'The EVM signature could not be verified. Make sure you signed the exact challenge message with the correct MetaMask account.')
   }
@@ -121,6 +148,8 @@ export default async function handler(req, res) {
     signature: solanaSignature,
     expectedAddress: challenge.solanaWallet,
   })) {
+    recordVerifyFailure(challengeId)
+    logWalletLinkEvent('WALLET_LINK_SIGNATURE_INVALID', { challengeId, solanaWallet: challenge.solanaWallet, code: 'SOLANA_SIGNATURE_INVALID' })
     return apiError(res, 401, 'SOLANA_SIGNATURE_INVALID',
       'The Solana signature could not be verified. Make sure you signed the exact challenge message with the correct Phantom wallet.')
   }
@@ -137,22 +166,23 @@ export default async function handler(req, res) {
     })
   } catch (error) {
     const code = error?.code || error?.message || 'LINK_RPC_FAILED'
-    // DIAGNOSTIC LOG: log the specific RPC failure code + the
-    // challenge_id so we can see exactly which 409 path is firing.
-    // This shows up in the dev server terminal (the terminal where
-    // you ran `npm run dev`). Safe — no signature/nonce data is
-    // logged, just the challenge_id and the error code.
-    console.warn('[wallet-link/verify] RPC raised', {
-      challengeId,
-      code,
-      status: error?.status,
-      message: error?.message,
-      // PostgREST may include the underlying PG error in body.
-      // Truncate to keep the log readable.
-      bodyPreview: error?.body
-        ? JSON.stringify(error.body).slice(0, 300)
-        : null,
-    })
+    // SECURITY-7 + SECURITY-8: Log the RPC failure code + challengeId
+    // (safe identifiers only — no signatures, nonces, or request bodies).
+    // This REPLACES the previous bodyPreview diagnostic log which could
+    // leak internal Supabase/Postgres error details.
+    logWalletLinkEvent('WALLET_LINK_RPC_FAILED', { challengeId, code, reason: 'link_rpc_error' })
+
+    // Log specific security-relevant events
+    if (code === 'EVM_SIGNER_MISMATCH' || code === 'SOLANA_SIGNER_MISMATCH') {
+      logWalletLinkEvent('WALLET_LINK_SIGNER_MISMATCH', { challengeId, code })
+    }
+    if (code === 'EVM_ALREADY_LINKED_ELSEWHERE') {
+      logWalletLinkEvent('WALLET_LINK_ALREADY_LINKED', { challengeId, evmWallet: challenge.evmWallet })
+    }
+    if (code === 'CHALLENGE_NOT_PENDING') {
+      logWalletLinkEvent('WALLET_LINK_REPLAY_REJECTED', { challengeId, reason: 'rpc_concurrent' })
+    }
+
     const friendly = {
       CHALLENGE_NOT_FOUND: 'The challenge was not found.',
       CHALLENGE_NOT_PENDING: 'This challenge has already been used. Request a new one.',
@@ -165,6 +195,13 @@ export default async function handler(req, res) {
     // show the actionable hint for THIS specific code.
     return apiError(res, 409, code, friendly)
   }
+
+  // SECURITY-7: Log successful link creation.
+  logWalletLinkEvent('WALLET_LINK_SUCCESS', {
+    challengeId,
+    solanaWallet: challenge.solanaWallet,
+    evmWallet: challenge.evmWallet,
+  })
 
   return json(res, 200, {
     success: true,

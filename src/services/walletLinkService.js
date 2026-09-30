@@ -1026,7 +1026,7 @@ export async function signLinkMessageWithMetaMask({ address, message }) {
       const accounts = await provider.request({ method: 'eth_accounts' })
       const available = Array.isArray(accounts) ? accounts.map((item) => normalizeEvmAddress(item)) : []
       if (!available.includes(expectedAddress)) {
-        const err = new Error('MetaMask is connected to a different EVM wallet than the one being linked. Switch MetaMask to the correct wallet and try again.')
+        const err = new Error('Wallet changed. The MetaMask account is different from the wallet you started linking. Switch back to the original wallet and restart linking.')
         err.code = 'WRONG_EVM_WALLET'
         throw err
       }
@@ -1069,7 +1069,7 @@ export async function signLinkMessageWithMetaMask({ address, message }) {
     }
     if (recovered && recovered !== expectedAddress) {
       const err = new Error(
-        `Wrong MetaMask wallet selected. MetaMask approved a different wallet (${shortEvmForError(recovered)}) than the one you selected on Ronin Swap (${shortEvmForError(expectedAddress)}). Switch MetaMask to the correct wallet and try again.`
+        `Wallet changed. The MetaMask account (${shortEvmForError(recovered)}) is different from the wallet you started linking (${shortEvmForError(expectedAddress)}). Switch back to the original wallet and restart linking.`
       )
       err.code = 'WRONG_EVM_WALLET'
       err.recoveredAddress = recovered

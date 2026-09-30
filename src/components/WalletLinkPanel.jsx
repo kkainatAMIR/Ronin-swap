@@ -315,7 +315,7 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             // that account BEFORE creating a challenge.
             if (phaseExpectedEvmWallet && !sameEvmAddress(evm, phaseExpectedEvmWallet)) {
               const err = new Error(
-                `Wrong MetaMask wallet selected. MetaMask is connected to ${shortAddr(evm)}, but you selected ${shortAddr(phaseExpectedEvmWallet)} on Ronin Swap. Switch MetaMask to the correct wallet and try again.`
+                `Wallet changed. The MetaMask account (${shortAddr(evm)}) is different from the wallet you started linking (${shortAddr(phaseExpectedEvmWallet)}). Switch back to the original wallet and restart linking.`
               )
               err.code = 'WRONG_EVM_WALLET'
               throw err
@@ -351,7 +351,7 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
               // for a different wallet).
               if (!sameEvmAddress(challenge.evmWallet, evm)) {
                 const err = new Error(
-                  `Wrong MetaMask wallet selected. MetaMask is connected to ${shortAddr(evm)}, but the link challenge was created for ${shortAddr(challenge.evmWallet)}. Switch MetaMask to the correct wallet and try again.`
+                  `Wallet changed. The MetaMask account (${shortAddr(evm)}) is different from the wallet you started linking (${shortAddr(challenge.evmWallet)}). Switch back to the original wallet and restart linking.`
                 )
                 err.code = 'WRONG_EVM_WALLET'
                 throw err
@@ -1080,7 +1080,7 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
       // check and the actual personal_sign call (a known mobile race).
       if (evm !== EVM_REDIRECTING_TO_METAMASK_MOBILE && expectedEvmWallet && !sameEvmAddress(evm, expectedEvmWallet)) {
         const err = new Error(
-          `Wrong MetaMask wallet selected. MetaMask is connected to ${shortAddr(evm)}, but you selected ${shortAddr(expectedEvmWallet)} on Ronin Swap. Switch MetaMask to the correct wallet and try again.`
+          `Wallet changed. The MetaMask account (${shortAddr(evm)}) is different from the wallet you started linking (${shortAddr(expectedEvmWallet)}). Switch back to the original wallet and restart linking.`
         )
         err.code = 'WRONG_EVM_WALLET'
         throw err

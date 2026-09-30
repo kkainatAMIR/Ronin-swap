@@ -37,12 +37,28 @@ import {
   canonicalSolanaAddress,
   canonicalEvmAddress,
   isWalletLinkStoreConfigured,
+  validateWalletLinkOrigin,
+  logWalletLinkEvent,
 } from '../../api/_lib/walletLinkAuth.mjs'
 import crypto from 'node:crypto'
 
+// SECURITY-1: Strengthen the revoke message with domain/URI binding,
+// same as the link message. This prevents a signed revoke message
+// from being replayed against a different domain.
 function buildRevokeMessage({ solanaWallet, evmWallet, nonce, issuedAt, expiresAt }) {
+  // Read the domain from the env var (same as buildLinkMessage in
+  // walletLinkAuth.mjs). We duplicate it here rather than importing
+  // the internal constant — keeping the revoke handler self-contained.
+  const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
+  const domain = String(runtimeEnv.WALLET_LINK_ALLOWED_ORIGIN || 'https://ronin-swap6.vercel.app')
+    .replace(/^https?:\/\//, '').replace(/\/$/, '')
+  const uri = `https://${domain}`
   return [
     'RoninSwap Wallet Link Revocation',
+    '',
+    `Domain: ${domain}`,
+    `URI: ${uri}`,
+    'Purpose: Revoke EVM wallet link from RoninSwap Solana reward identity',
     '',
     `Solana wallet: ${solanaWallet}`,
     `EVM wallet: ${evmWallet.toLowerCase()}`,
@@ -53,11 +69,16 @@ function buildRevokeMessage({ solanaWallet, evmWallet, nonce, issuedAt, expiresA
     'Purpose: revoke the verified link between these wallets. After revocation, Samurai Points earned by this EVM wallet will no longer be aggregated into the Solana reward identity.',
     '',
     'This signature does not authorize transactions or token transfers.',
+    'This signature does not authorize token transfers.',
   ].join('\n')
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
+  // SECURITY-4: Origin/Host validation — wallet-link endpoints only.
+  if (!validateWalletLinkOrigin(req)) {
+    return apiError(res, 403, 'ORIGIN_NOT_ALLOWED', 'This request origin is not allowed for wallet-link operations.')
+  }
   if (!(await rateLimitPersistent(req, 'wallet_link_revoke', 10, 60_000))) {
     return apiError(res, 429, 'RATE_LIMITED', 'Too many revoke attempts. Try again shortly.')
   }
@@ -124,6 +145,11 @@ export default async function handler(req, res) {
       solanaWallet: solanaCanonical,
       evmWallet: evmCanonical,
     })
+    // SECURITY-7: Log successful unlink.
+    logWalletLinkEvent('WALLET_UNLINK_SUCCESS', {
+      solanaWallet: solanaCanonical,
+      evmWallet: evmCanonical,
+    })
     return json(res, 200, {
       success: true,
       link: result,
@@ -134,6 +160,8 @@ export default async function handler(req, res) {
     })
   } catch (error) {
     const code = error?.code || error?.message || 'UNLINK_FAILED'
+    // SECURITY-7: Log unlink failure (safe identifiers only).
+    logWalletLinkEvent('WALLET_UNLINK_FAILED', { solanaWallet: solanaCanonical, evmWallet: evmCanonical, code })
     const friendly = {
       LINK_NOT_FOUND: 'No active link found between these wallets.',
       WALLET_REQUIRED: 'A wallet address is required.',
