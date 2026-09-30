@@ -1,9 +1,14 @@
-import { SOL_INCINERATOR_BASE_URL, SOL_INCINERATOR_API_KEY, incineratorHeaders, json, parseBody, readUpstream } from '../../api/_lib/roninBackend.mjs'
+import { SOL_INCINERATOR_BASE_URL, incineratorHeaders, json, parseBody, readUpstream } from '../../api/_lib/roninBackend.mjs'
 import { validateBurnRequest } from '../../api/_lib/solanaValidation.mjs'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed.' })
-  if (!SOL_INCINERATOR_API_KEY) return json(res, 500, { error: 'Burn service is not configured on the server yet.' })
+  // FIXED: Removed the `if (!SOL_INCINERATOR_API_KEY)` guard that was
+  // blocking ALL burn preview requests when the API key was not set.
+  // The Sol Incinerator v2 API (https://v2.api.sol-incinerator.com)
+  // works WITHOUT an API key — the key is optional (used only for
+  // rate-limiting bypass). The incineratorHeaders() function already
+  // conditionally adds the x-api-key header only if the key is set.
   const parsed = validateBurnRequest(parseBody(req), res)
   if (!parsed) return
 
