@@ -3,8 +3,28 @@ import { getAddress } from 'ethers'
 export const ETHEREUM_CHAIN_ID = 1
 export const ETHEREUM_NATIVE = Object.freeze({ chainId: 1, type: 'native', address: null, symbol: 'ETH', name: 'Ether', decimals: 18, category: 'native', logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png', featured: true, verified: true })
 
+// Safe wrapper: ethers.getAddress() VALIDATES the EIP-55 checksum when
+// given a mixed-case address and THROWS if it's wrong. Many addresses
+// in the registry had bad checksums, causing a module-load-time crash
+// (Uncaught TypeError: bad address checksum).
+//
+// FIX: always call getAddress() with a LOWERCASE address. This makes
+// ethers COMPUTE the correct checksum instead of VALIDATING it — so
+// it never throws (as long as the address is 40 hex chars, which the
+// token() call sites guarantee).
+function safeChecksumAddress(address) {
+  try {
+    return getAddress(String(address).toLowerCase())
+  } catch {
+    // If the address is malformed (wrong length, non-hex), fall back
+    // to the lowercase version. The TrustWallet URL might 404, but
+    // TokenMark has other logo candidates (1inch, Robinhood CDN).
+    return String(address).toLowerCase()
+  }
+}
+
 function token(address, symbol, name, category = 'featured') {
-  return Object.freeze({ chainId: 1, type: 'erc20', address, symbol, name, decimals: null, category, logoURI: `https://tokens.1inch.io/1/${address.toLowerCase()}.png`, fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(address)}/logo.png`, featured: true, verified: true })
+  return Object.freeze({ chainId: 1, type: 'erc20', address, symbol, name, decimals: null, category, logoURI: `https://tokens.1inch.io/1/${address.toLowerCase()}.png`, fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${safeChecksumAddress(address)}/logo.png`, featured: true, verified: true })
 }
 
 export const ETHEREUM_FEATURED_TOKENS = Object.freeze([
@@ -19,15 +39,15 @@ export const ETHEREUM_FEATURED_TOKENS = Object.freeze([
   token('0xaaeE1A9723aAdb7afA2810263653A34bA2C21C7a', 'MOG', 'Mog Coin', 'meme'),
   token('0xcf0C122c6b73fF809C693DB761e7baEBE62b6a2E', 'FLOKI', 'FLOKI', 'meme'),
   token('0x514910771AF9Ca656af840dff83E8264EcF986CA', 'LINK', 'Chainlink'),
-  token('0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', 'UNI', 'Uniswap'),
+  token('0x1f9840a85d5aF5bf1D1762F925bDADc4201f984e', 'UNI', 'Uniswap'),
   token('0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2dDAE9', 'AAVE', 'Aave'),
   token('0x57e114B691Db790C35207b2e685D4A43181e6061', 'ENA', 'Ethena'),
   token('0x808507121B80C02388fAd14726482e061B8da827', 'PENDLE', 'Pendle'),
   token('0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32', 'LDO', 'Lido DAO'),
   token('0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3', 'ONDO', 'Ondo'),
   token('0x812Ba41e071C7b7fA4eBcfb62df5F45f6fA853Ee', 'NEIRO', 'Neiro', 'meme'),
-  token('0x594daad7D77592A2B97b725a7aD59D7E188B5BfA', 'APU', 'Apu Apustaja', 'meme'),
-  token('0x72e4f9F808c49A2a61dE9c5896298920DC4eEEa9', 'BITCOIN', 'Bitcoin', 'meme'),
+  token('0x594DaaD7D77592a2B97b725A7AD59D7E188b5BfA', 'APU', 'Apu Apustaja', 'meme'),
+  token('0x72e4f9F808C49A2a61dE9c5896298920DC4eEEa9', 'BITCOIN', 'Bitcoin', 'meme'),
   token('0xD533a949740bb3306d119CC777fa900bA034cd52', 'CRV', 'Curve DAO Token'),
 ])
 

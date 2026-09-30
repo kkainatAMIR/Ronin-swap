@@ -217,7 +217,7 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
           decimals: token.decimals || 18,
           category: 'wallet',
           logoURI: token.logoURI || (token.address ? `https://tokens.1inch.io/1/${token.address.toLowerCase()}.png` : null),
-          fallbackLogoURI: token.address ? `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(token.address)}/logo.png` : null,
+          fallbackLogoURI: token.address ? (() => { try { return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(token.address.toLowerCase())}/logo.png` } catch { return null } })() : null,
           featured: false,
           verified: false,
           trust: 'wallet',
@@ -846,7 +846,7 @@ function toEthereumPanelToken(trending) {
       : 18,
     category: 'trending',
     logoURI: trending.logoURI || null,
-    fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(address)}/logo.png`,
+    fallbackLogoURI: (() => { try { return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(String(address).toLowerCase())}/logo.png` } catch { return null } })(),
     featured: false,
     verified: false,
   }
@@ -1516,24 +1516,10 @@ function TokenMark({ token, size = 25 }) {
     if (token?.fallbackLogoURI) list.push(token.fallbackLogoURI)
     const addr = String(token?.address || '').toLowerCase()
     if (/^0x[0-9a-f]{40}$/.test(addr)) {
-      // FIXED: 1inch V2 token logo API requires the chain ID in the
-      // path — the old URL `https://tokens.1inch.io/${addr}.png`
-      // returned 404 because it was missing the chain ID segment.
-      // For Ethereum mainnet, the chain ID is 1.
       list.push(`https://tokens.1inch.io/1/${addr}.png`)
-      // TrustWallet assets — the address must be checksummed (mixed case)
-      // because TrustWallet's GitHub repo uses EIP-55 checksummed filenames.
       list.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(addr)}/logo.png`)
-      // Also try the `main` branch (some repos have migrated from `master`).
       list.push(`https://raw.githubusercontent.com/trustwallet/assets/main/blockchains/ethereum/assets/${getAddress(addr)}/logo.png`)
-      // Robinhood CDN — may have logos for tokens traded on Robinhood Chain.
       list.push(`https://cdn.robinhood.com/ncw_assets/logos/${addr}.png`)
-      // DexScreener logo URL — DexScreener's CDN hosts token logos at a
-      // predictable URL pattern. This covers tokens not in TrustWallet's
-      // repo or 1inch's CDN (e.g., new meme tokens).
-      // Format: https://assets.dexscreener.com/ethereum/${addr}/${addr}.png
-      // (DexScreener sometimes uses a different pattern, but this is a
-      // best-effort additional candidate.)
     }
     // De-duplicate (DexScreener + 1inch sometimes return the same URL)
     return [...new Set(list)]
