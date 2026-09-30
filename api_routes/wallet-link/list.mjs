@@ -30,10 +30,15 @@ import {
   canonicalSolanaAddress,
   canonicalEvmAddress,
   isWalletLinkStoreConfigured,
+  validateWalletLinkOrigin,
 } from '../../api/_lib/walletLinkAuth.mjs'
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
+  // SECURITY-4: Origin/Host validation — wallet-link endpoints only.
+  if (!validateWalletLinkOrigin(req)) {
+    return apiError(res, 403, 'ORIGIN_NOT_ALLOWED', 'This request origin is not allowed for wallet-link operations.')
+  }
   if (!(await rateLimitPersistent(req, 'wallet_link_list', 60))) {
     return apiError(res, 429, 'RATE_LIMITED', 'Too many requests. Try again shortly.')
   }
