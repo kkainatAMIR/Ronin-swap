@@ -387,7 +387,7 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       <SectionHeading
         eyebrow="REWARD ACCOUNTING"
         title="Your reward balance"
-        text={`Earned points convert to ${rewardAsset} at ${rate.toLocaleString('en-US')} points per ${rewardAsset}. You pay the network fee when claiming.`}
+        text="Claim your earned Samurai Points for rewards. You pay the network fee when claiming."
       />
 
       <div className="profile-rewards-status-row">
@@ -498,7 +498,7 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       </div>
 
       <p className="profile-rewards-fee-note">
-        <Icon name="info" size={12} /> You pay the Solana network fee (~0.000005 SOL). Make sure your wallet has enough SOL for gas.
+        <Icon name="info" size={12} /> You pay the network fee when claiming. Make sure your wallet has enough for gas.
       </p>
 
       {error && <div className="profile-rewards-error-text"><Icon name="info" size={14} /> {error}</div>}
@@ -515,8 +515,7 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
               <strong>Claim paid!</strong>
             )}
             <small>
-              {Number(lastClaim.claim?.points_claimed || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} points →{' '}
-              {formatRewardAmount(lastClaim.claim?.reward_amount, lastClaim.claim?.reward_asset)} ({lastClaim.claim?.status || 'COMPLETED'})
+              {Number(lastClaim.claim?.points_claimed || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} points claimed ({lastClaim.claim?.status || 'COMPLETED'})
             </small>
             {lastClaim.claim_tx_signature && (
               <small className="profile-rewards-tx-sig">
