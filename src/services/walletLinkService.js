@@ -363,6 +363,219 @@ export function isMobileWalletLinkSessionExpired() {
   return Date.now() - state.savedAt > MOBILE_WL_SESSION_TTL_MS
 }
 
+// =====================================================================
+// MODULE-LEVEL EVM SIGNING LOCK — prevents -32002 "personal_sign
+// already pending for origin" on mobile.
+// =====================================================================
+// PROBLEM:
+//   On mobile, the wallet-link flow spans MetaMask Mobile's in-app
+//   browser. When the user approves the personal_sign popup, the
+//   React component may remount or lifecycle events (focus /
+//   pageshow / visibilitychange) may fire, causing the auto-resume
+//   useEffect to re-enter Phase 2 and call personal_sign AGAIN while
+//   the first request is still pending in MetaMask. MetaMask rejects
+//   the second call with:
+//     -32002 "Request of type 'personal_sign' already pending for
+//             origin https://ronin-swap6.vercel.app"
+//
+// FIX:
+//   A module-level Map keyed by challengeId (preferred) or attemptId
+//   (fallback when challengeId isn't yet known). The lock SURVIVES
+//   React component remounts within the same JS context — a fresh
+//   component instance gets a fresh useRef, but this Map persists in
+//   the module scope until the page is reloaded.
+//
+//   The lock has a TTL of 5 minutes (matching the backend challenge
+//   TTL). If the previous holder crashed without releasing, the lock
+//   auto-expires and a new acquisition is allowed.
+//
+//   The lock is acquired BEFORE calling provider.request({ method:
+//   'personal_sign' }) and released in a finally block AFTER the
+//   signing promise settles (success OR rejection). It is NOT
+//   released on visibility/focus/pageshow events.
+// =====================================================================
+
+const EVM_SIGN_LOCK_TTL_MS = 5 * 60_000  // matches backend CHALLENGE_TTL_MS
+const evmSignLocks = new Map()  // key -> { acquiredAt }
+
+// Try to acquire the EVM signing lock for the given key.
+// Returns true if acquired, false if already held (within TTL).
+//
+// If the existing lock is older than the TTL, it's treated as stale
+// (the previous holder crashed without releasing) and overwritten.
+export function acquireEvmSignLock(key) {
+  if (!key) return false
+  const existing = evmSignLocks.get(key)
+  if (existing) {
+    // If the lock is still within the TTL, it's genuinely held —
+    // do NOT fire another personal_sign.
+    if (Date.now() - existing.acquiredAt < EVM_SIGN_LOCK_TTL_MS) {
+      return false
+    }
+    // Stale lock (older than TTL) — the previous holder crashed.
+    // Overwrite it so the user can retry.
+  }
+  evmSignLocks.set(key, { acquiredAt: Date.now() })
+  return true
+}
+
+// Release the EVM signing lock. Should be called in a finally block
+// after the personal_sign promise settles (success OR rejection).
+export function releaseEvmSignLock(key) {
+  if (!key) return
+  evmSignLocks.delete(key)
+}
+
+// Check whether the EVM signing lock is currently held for the given
+// key. Does NOT acquire. Used by the resume logic to detect whether
+// a personal_sign is already in flight for this attempt.
+export function isEvmSignLockHeld(key) {
+  if (!key) return false
+  const existing = evmSignLocks.get(key)
+  if (!existing) return false
+  // Stale locks (older than TTL) are treated as not held.
+  if (Date.now() - existing.acquiredAt >= EVM_SIGN_LOCK_TTL_MS) {
+    evmSignLocks.delete(key)
+    return false
+  }
+  return true
+}
+
+// =====================================================================
+// MODULE-LEVEL RESUME SINGLE-FLIGHT LOCK
+// =====================================================================
+// Prevents multiple lifecycle events (visibilitychange / pageshow /
+// focus) from independently starting another wallet-link resume
+// operation. Keyed by attemptId.
+//
+// This is SEPARATE from the EVM sign lock — the resume lock prevents
+// concurrent resume LISTENER invocations, while the EVM sign lock
+// prevents concurrent personal_sign CALLS. Both are needed.
+//
+// TTL: 30 seconds. Resume operations are short — if a resume takes
+// longer than 30s, something is wrong and the lock auto-expires.
+// =====================================================================
+
+const RESUME_LOCK_TTL_MS = 30_000
+const resumeLocks = new Map()  // attemptId -> { acquiredAt }
+
+export function acquireResumeLock(attemptId) {
+  if (!attemptId) return false
+  const existing = resumeLocks.get(attemptId)
+  if (existing) {
+    if (Date.now() - existing.acquiredAt < RESUME_LOCK_TTL_MS) {
+      return false
+    }
+    // Stale lock — overwrite.
+  }
+  resumeLocks.set(attemptId, { acquiredAt: Date.now() })
+  return true
+}
+
+export function releaseResumeLock(attemptId) {
+  if (!attemptId) return
+  resumeLocks.delete(attemptId)
+}
+
+// Clear ALL locks (EVM sign + resume) for the given attemptId.
+// Called by resetFlow() when the user explicitly cancels/restarts,
+// so a fresh attempt isn't blocked by stale locks from a previous
+// attempt that crashed without releasing.
+//
+// NOTE: the EVM sign lock is keyed by challengeId, not attemptId.
+// We iterate the Map and clear any lock whose key contains the
+// attemptId (we key EVM sign locks as `${attemptId}:${challengeId}`
+// so this prefix-match works).
+export function clearAllLocksForAttempt(attemptId) {
+  if (!attemptId) return
+  // Clear resume lock (keyed by attemptId directly).
+  resumeLocks.delete(attemptId)
+  // Clear EVM sign locks (keyed by `${attemptId}:${challengeId}` or
+  // just challengeId). We iterate and clear any key that starts with
+  // the attemptId prefix.
+  for (const key of evmSignLocks.keys()) {
+    if (typeof key === 'string' && key.startsWith(`${attemptId}:`)) {
+      evmSignLocks.delete(key)
+    }
+  }
+}
+
+// =====================================================================
+// PERSISTED CHALLENGE HELPER — saves the challenge fields to the
+// persisted mobile state WITHOUT changing the phase. This bridges
+// the gap between createWalletLinkChallenge and signLinkMessageWithMetaMask.
+// =====================================================================
+// Without this, a React remount between challenge creation and the
+// personal_sign call would re-fire Phase 2, create a NEW challenge,
+// and try to sign again → -32002.
+//
+// With this, the challenge fields are persisted immediately after
+// creation. A remount reads them back and REUSES the existing
+// challenge (no new createWalletLinkChallenge call, no new
+// personal_sign if the lock is held).
+// =====================================================================
+export function persistChallengeForAttempt(attemptId, challenge) {
+  if (!attemptId || !challenge || !challenge.challengeId) return
+  const prev = readMobileWalletLinkState()
+  if (!prev || prev.attemptId !== attemptId) return
+  // Save the challenge fields WITHOUT changing the phase — phase
+  // stays at '1' until openPhantomForSolanaSign transitions it to '2'.
+  saveMobileWalletLinkState({
+    ...prev,
+    challengeId: challenge.challengeId,
+    evmWallet: challenge.evmWallet,
+    messageEvm: challenge.messageEvm,
+    messageSolana: challenge.messageSolana,
+  })
+}
+
+// Read the persisted challenge fields for the given attemptId.
+// Returns { challengeId, evmWallet, messageEvm, messageSolana } if
+// a challenge was persisted, or null if no challenge exists yet.
+export function getPersistedChallengeForAttempt(attemptId) {
+  if (!attemptId) return null
+  const state = readMobileWalletLinkState()
+  if (!state || state.attemptId !== attemptId) return null
+  if (!state.challengeId || !state.evmWallet || !state.messageSolana) return null
+  return {
+    challengeId: state.challengeId,
+    evmWallet: state.evmWallet,
+    messageEvm: state.messageEvm || '',
+    messageSolana: state.messageSolana,
+  }
+}
+
+// =====================================================================
+// METAMASK -32002 "personal_sign already pending" ERROR DETECTION
+// =====================================================================
+// MetaMask returns error code -32002 when there's already a pending
+// personal_sign request for this origin. This can happen when:
+//   (A) Our current wallet-link attempt already has a personal_sign
+//       in progress (should be prevented by the EVM sign lock, but
+//       could still happen if the lock was bypassed or stale).
+//   (B) MetaMask has an unrelated/stale pending request from a
+//       previous wallet-link attempt or another dapp.
+//
+// In BOTH cases, we must NOT auto-retry (that would make the race
+// worse). We show a clear error instructing the user to finish or
+// cancel the existing MetaMask request.
+// =====================================================================
+export const METAMASK_PENDING_REQUEST_CODE = -32002
+
+export function isMetamaskPendingRequestError(error) {
+  if (!error) return false
+  // MetaMask returns error.code as -32002 (or 32002 in some versions).
+  const code = Number(error.code)
+  if (code === -32002 || code === 32002) return true
+  // Some MetaMask versions wrap the code in error.data.originalError.code
+  // or error.error.code. Check those too.
+  const innerCode = Number(error?.data?.originalError?.code ?? error?.error?.code ?? error?.data?.code)
+  if (innerCode === -32002 || innerCode === 32002) return true
+  // Fallback: check the error message for the -32002 string.
+  const message = String(error.message || error || '')
+  return message.includes('-32002') || message.includes('already pending')
+}
+
 function normalizeEvmAddress(address) {
   return typeof address === 'string' ? address.trim().toLowerCase() : ''
 }
