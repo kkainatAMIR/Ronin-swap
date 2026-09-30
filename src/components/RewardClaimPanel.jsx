@@ -467,6 +467,10 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       )}
       {/* End verified-identity UX states ------------------------------ */}
 
+      {/* SOL rewards balance grid HIDDEN per user request.
+          The EARNED/CLAIMED/CLAIMABLE POINTS stats + "≈ X SOL" text
+          are no longer shown. The claim button below remains functional
+          so users can still claim their rewards.
       <div className="profile-rewards-grid">
         <div className="profile-rewards-stat">
           <span className="profile-data-label">EARNED POINTS</span>
@@ -484,6 +488,7 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
           <small>≈ {formatRewardAmount(estimatedReward, rewardAsset)}</small>
         </div>
       </div>
+      */}
 
       <div className="profile-rewards-action-row">
         <Button
