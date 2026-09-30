@@ -323,7 +323,7 @@ export default function Profile() {
           <section className="profile-header-section">
             <div className="profile-header-mark"><div className="profile-avatar">侍</div><span className="profile-mark-line" /></div>
             <div className="profile-header-copy"><span className="eyebrow">MY SAMURAI IDENTITY</span><h1>SAMURAI PROFILE</h1><p className="profile-wallet-address">{displayWalletAddress || '—'}</p><button className="profile-copy-button" onClick={() => navigator.clipboard?.writeText(displayWalletAddress)}><Icon name="copy" size={13} /> Copy wallet address</button></div>
-            <div className="profile-header-rank"><span className="profile-data-label">CURRENT RANK</span><div className="profile-current-rank">{currentRank?.image && <img src={currentRank.image} alt="" />}<strong>{currentRank?.name || 'UNRANKED'}</strong></div><small>{profile?.balance != null ? `${formatCompact(profile.balance)} RONIN` : 'RONIN balance unavailable'}</small></div>
+            <div className="profile-header-rank"><span className="profile-data-label">CURRENT RANK</span><div className="profile-current-rank">{currentRank?.image && <img src={currentRank.image} alt="" />}<strong>{currentRank?.name || 'UNRANKED'}</strong></div></div>
           </section>
           <div className="profile-wallet-connect-actions">
             <div className="profile-wallet-connect-status">
@@ -349,7 +349,8 @@ export default function Profile() {
       {noStats && <div className="profile-notice"><Icon name="info" size={16} /> No Samurai activity yet. Make your first verified swap to begin your journey.</div>}
 
       <section className="profile-stats-grid">
-        <StatCard stat={{ icon: 'coins', label: 'RONIN BALANCE', value: profile?.balance == null ? '—' : formatCompact(profile.balance), detail: walletDataState === 'error' ? 'Balance unavailable' : (trackedWalletCount > 1 ? `Solana mainnet · ${trackedWalletCount} wallets` : 'Solana mainnet') }} />
+        {/* RONIN BALANCE card hidden per user request — balance data
+            is still fetched (refreshWalletData) but not displayed. */}
         <StatCard stat={{ icon: 'award', label: 'SAMURAI POINTS', value: formatNumber(points), detail: trackedWalletCount > 1 ? `Aggregated across ${trackedWalletCount} wallets` : 'Lifetime awarded points' }} />
         <StatCard stat={{ icon: 'chart', label: 'TOTAL VOLUME', value: volume ? `$${formatCompact(volume)}` : '$0', detail: 'Qualifying swap volume' }} />
         <StatCard stat={{ icon: 'swapVertical', label: 'TOTAL SWAPS', value: formatNumber(swaps), detail: 'Qualifying swaps' }} />
