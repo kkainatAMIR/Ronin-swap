@@ -481,7 +481,7 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
         <div className="profile-rewards-stat profile-rewards-stat-highlight">
           <span className="profile-data-label">CLAIMABLE POINTS</span>
           <strong>{claimable.toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
-          <small>≈ {formatRewardAmount(estimatedReward, rewardAsset)}</small>
+          {/* SOL amount hidden per user request — keeping the claimable points number visible */}
         </div>
       </div>
 
