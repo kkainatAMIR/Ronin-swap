@@ -24,7 +24,11 @@ function safeChecksumAddress(address) {
 }
 
 function token(address, symbol, name, category = 'featured') {
-  return Object.freeze({ chainId: 1, type: 'erc20', address, symbol, name, decimals: null, category, logoURI: `https://tokens.1inch.io/1/${address.toLowerCase()}.png`, fallbackLogoURI: `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${safeChecksumAddress(address)}/logo.png`, featured: true, verified: true })
+  const checksummed = safeChecksumAddress(address)
+  return Object.freeze({ chainId: 1, type: 'erc20', address, symbol, name, decimals: null, category,
+    logoURI: `https://tokens.1inch.io/1/${address.toLowerCase()}.png`,
+    fallbackLogoURI: `https://cdn.jsdelivr.net/gh/trustwallet/assets@master/blockchains/ethereum/assets/${checksummed}/logo.png`,
+    featured: true, verified: true })
 }
 
 export const ETHEREUM_FEATURED_TOKENS = Object.freeze([
