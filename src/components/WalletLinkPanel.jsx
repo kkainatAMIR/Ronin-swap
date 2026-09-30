@@ -23,6 +23,20 @@ import {
   isMobileWalletLinkSessionExpired,
   clearMobileWalletLinkParams,
   clearMobileWalletLinkState,
+  // SINGLE-FLIGHT LOCKS (module-level — survive React remounts)
+  acquireEvmSignLock,
+  releaseEvmSignLock,
+  isEvmSignLockHeld,
+  acquireResumeLock,
+  releaseResumeLock,
+  clearAllLocksForAttempt,
+  // PERSISTED CHALLENGE HELPERS (bridge the gap between
+  // createWalletLinkChallenge and signLinkMessageWithMetaMask so a
+  // remount reuses the existing challenge instead of creating a new one)
+  persistChallengeForAttempt,
+  getPersistedChallengeForAttempt,
+  // METAMASK -32002 ERROR DETECTION
+  isMetamaskPendingRequestError,
   EVM_REDIRECTING_TO_METAMASK_MOBILE,
 } from '../services/walletLinkService'
 
@@ -280,6 +294,14 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
         setError('')
         setErrorCode('')
         ;(async () => {
+          // SINGLE-FLIGHT GUARD: if a resume operation is already being
+          // processed for this attempt, do NOT start another one. This
+          // prevents focus/pageshow/visibilitychange/React remount from
+          // each independently re-entering Phase 2.
+          if (!acquireResumeLock(phaseAttemptId)) {
+            logInfo('[WalletLinkMobile] resume lock already held — skipping Phase 2 start', { attemptId: phaseAttemptId })
+            return
+          }
           try {
             logInfo('[WalletLinkMobile] eth_requestAccounts started', { attemptId: phaseAttemptId })
             const evm = await ensureMetaMaskAccount()
@@ -303,78 +325,210 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
               attemptId: phaseAttemptId,
             })
             setEvmAddress(evm)
-            logInfo('[WalletLinkMobile] challenge creation started', { attemptId: phaseAttemptId })
-            const challenge = await createWalletLinkChallenge({
-              solanaWallet: phaseSolanaWallet,
-              evmWallet: evm,
-            })
-            logInfo('[WalletLinkMobile] challenge created', {
-              challengeId: challenge.challengeId,
-              attemptId: phaseAttemptId,
-            })
+
+            // STEP 3 (REQUIRED FIX) — DO NOT CREATE A SECOND CHALLENGE
+            // FOR THE SAME MOBILE ATTEMPT.
+            //
+            // If the persisted mobile state already has a challengeId for
+            // this attemptId (because a previous Phase 2 run created one
+            // but was interrupted before personal_sign completed), REUSE
+            // it. This prevents: challenge A → personal_sign A → [remount]
+            // → challenge B → personal_sign B → -32002.
+            //
+            // The persisted challenge carries: challengeId, evmWallet,
+            // messageEvm, messageSolana. We reconstruct the challenge
+            // object from the persisted state so the downstream code
+            // (signLinkMessageWithMetaMask + openPhantomForSolanaSign)
+            // works unchanged.
+            let challenge = getPersistedChallengeForAttempt(phaseAttemptId)
+            if (challenge) {
+              // Verify the persisted challenge's evmWallet matches the
+              // currently-connected MetaMask account. If the user
+              // switched MetaMask accounts between the original
+              // challenge creation and this resume, the persisted
+              // challenge is for the WRONG wallet — abort with
+              // WRONG_EVM_WALLET (do NOT silently reuse a challenge
+              // for a different wallet).
+              if (!sameEvmAddress(challenge.evmWallet, evm)) {
+                const err = new Error(
+                  `Wrong MetaMask wallet selected. MetaMask is connected to ${shortAddr(evm)}, but the link challenge was created for ${shortAddr(challenge.evmWallet)}. Switch MetaMask to the correct wallet and try again.`
+                )
+                err.code = 'WRONG_EVM_WALLET'
+                throw err
+              }
+              logInfo('[WalletLinkMobile] reusing persisted challenge', {
+                challengeId: challenge.challengeId,
+                attemptId: phaseAttemptId,
+              })
+            } else {
+              // No persisted challenge — create a new one.
+              logInfo('[WalletLinkMobile] challenge creation started', { attemptId: phaseAttemptId })
+              challenge = await createWalletLinkChallenge({
+                solanaWallet: phaseSolanaWallet,
+                evmWallet: evm,
+              })
+              // PERSIST the challenge IMMEDIATELY — before personal_sign.
+              // This bridges the gap so a React remount between here and
+              // the personal_sign call reuses this challenge instead of
+              // creating a new one (which would cause -32002).
+              persistChallengeForAttempt(phaseAttemptId, challenge)
+              logInfo('[WalletLinkMobile] challenge created + persisted', {
+                challengeId: challenge.challengeId,
+                attemptId: phaseAttemptId,
+              })
+            }
+
             setActiveLink({
-              solanaWallet: challenge.solanaWallet,
+              solanaWallet: challenge.solanaWallet || phaseSolanaWallet,
               evmWallet: challenge.evmWallet,
               challengeId: challenge.challengeId,
               messageEvm: challenge.messageEvm,
               messageSolana: challenge.messageSolana,
             })
-            // Sign with MetaMask (personal_sign). Same as desktop.
-            // The post-sign signer-recovery check inside
-            // signLinkMessageWithMetaMask (in walletLinkService.js)
-            // catches the case where MetaMask signed with a different
-            // account than the one we passed (a known mobile race
-            // when the user switches accounts mid-flow).
-            setStep(STEP_SIGNING_EVM)
-            logInfo('[WalletLinkMobile] personal_sign started', { attemptId: phaseAttemptId })
-            const evmSig = await signLinkMessageWithMetaMask({
-              address: challenge.evmWallet,
-              message: challenge.messageEvm,
-            })
-            logInfo('[WalletLinkMobile] personal_sign completed', {
-              sigLen: evmSig?.length,
-              attemptId: phaseAttemptId,
-            })
-            // Mark Phase 1 (EVM signature) as completed in the persisted
-            // state. This makes the resume logic idempotent — if the
-            // user manually goes back to MetaMask after this point, the
-            // auto-resume will see that Phase 1 is already done and
-            // immediately re-trigger the Phantom handoff instead of
-            // creating a duplicate challenge + signature.
-            markMobileWalletLinkPhaseCompleted('1')
-            // EVM signature obtained. On desktop, we'd continue to
-            // signSolana. On mobile, window.solana is NOT available
-            // inside MetaMask Mobile's browser — we need to deep-link
-            // BACK to Phantom so the user can sign the Solana message.
-            setStep(STEP_RETURNING_TO_PHANTOM)
-            logInfo('[WalletLinkMobile] Phase 2 deep-link generation started', { attemptId: phaseAttemptId })
-            // STEP 7 — single authoritative handoff path.
-            //   openPhantomForSolanaSign returns { ok, universalLink,
-            //   customSchemeLink } — we no longer call
-            //   buildPhantomForSolanaSignUrl separately (the previous
-            //   double-call was the "racing deeplink" behavior the
-            //   user wants cleaned up). The returned universalLink is
-            //   used for the manual fallback button; the custom scheme
-            //   is fired only by the controlled 1500ms fallback timer
-            //   inside openPhantomForSolanaSign (no racing here).
-            const phantomResult = openPhantomForSolanaSign({
-              challengeId: challenge.challengeId,
-              evmWallet: challenge.evmWallet,
-              evmSignature: evmSig,
-              messageSolana: challenge.messageSolana,
-            })
-            if (!phantomResult?.ok) {
-              console.error('[WalletLinkMobile] Phantom handoff failed — openPhantomForSolanaSign returned no result', { attemptId: phaseAttemptId })
+
+            // STEP 1 (REQUIRED FIX) — REAL SINGLE-FLIGHT EVM SIGNING LOCK.
+            //
+            // The lock is MODULE-LEVEL (survives React remounts) and keyed
+            // by `${attemptId}:${challengeId}` so clearAllLocksForAttempt
+            // can release it when the user cancels/restarts.
+            //
+            // If the lock is already held, it means another Phase 2 run
+            // (from a remount or lifecycle event) is already in the
+            // middle of calling personal_sign for THIS challenge. We must
+            // NOT fire another personal_sign — MetaMask would reject it
+            // with -32002 "Request of type 'personal_sign already pending".
+            //
+            // The lock is released in the `finally` block below, AFTER
+            // the personal_sign promise settles (success OR rejection).
+            // It is NOT released on visibility/focus/pageshow events.
+            const evmSignLockKey = `${phaseAttemptId}:${challenge.challengeId}`
+            if (!acquireEvmSignLock(evmSignLockKey)) {
+              // STEP 13 (A) — OUR current wallet-link attempt already has
+              // a personal_sign in progress. Do NOT fire another one.
+              logInfo('[WalletLinkMobile] EVM sign lock already held — personal_sign already in flight', {
+                challengeId: challenge.challengeId,
+                attemptId: phaseAttemptId,
+              })
+              // Show a waiting state — the existing personal_sign popup
+              // is still showing in MetaMask. The user should approve it
+              // (or cancel it) in MetaMask.
+              setStep(STEP_SIGNING_EVM)
+              setError('A MetaMask signature request is already pending. Please approve or cancel the existing MetaMask request, then the flow will continue automatically.')
+              setErrorCode('METAMASK_SIGN_IN_FLIGHT')
+              // Do NOT set STEP_ERROR — the flow is still alive in the
+              // other Phase 2 run that holds the lock. Just show the
+              // waiting message and let the other run complete.
+              return
+            }
+
+            // STEP 2 (REQUIRED FIX) — WRAP ONLY THE ACTUAL EVM SIGN REQUEST.
+            // The lock is now held. Call personal_sign. Release the lock
+            // in the finally block after the promise settles.
+            try {
+              setStep(STEP_SIGNING_EVM)
+              logInfo('[WalletLinkMobile] personal_sign started', { attemptId: phaseAttemptId, challengeId: challenge.challengeId })
+
+              // STEP 4 — MAKE PHASE 2 RESUME IDEMPOTENT.
+              // If the persisted state already has an evmSignature for
+              // this challenge (EVM signing already completed in a
+              // previous run), do NOT call personal_sign again. Skip
+              // straight to the Phantom handoff.
+              const persistedNow = getMobileWalletLinkPersistedState()
+              if (persistedNow && persistedNow.attemptId === phaseAttemptId &&
+                  persistedNow.challengeId === challenge.challengeId &&
+                  persistedNow.evmSignature) {
+                logInfo('[WalletLinkMobile] EVM signature already persisted — skipping personal_sign', {
+                  challengeId: challenge.challengeId,
+                  attemptId: phaseAttemptId,
+                })
+                // Jump straight to the Phantom handoff with the
+                // persisted EVM signature.
+                markMobileWalletLinkPhaseCompleted('1')
+                setStep(STEP_RETURNING_TO_PHANTOM)
+                const phantomResult = openPhantomForSolanaSign({
+                  challengeId: challenge.challengeId,
+                  evmWallet: challenge.evmWallet,
+                  evmSignature: persistedNow.evmSignature,
+                  messageSolana: challenge.messageSolana,
+                })
+                if (!phantomResult?.ok) {
+                  console.error('[WalletLinkMobile] Phantom handoff failed — openPhantomForSolanaSign returned no result', { attemptId: phaseAttemptId })
+                  clearMobileWalletLinkParams()
+                  setError('Phantom handoff could not be started. Please try again.')
+                  setErrorCode('PHANTOM_HANDOFF_FAILED')
+                  setStep(STEP_ERROR)
+                } else {
+                  setPhantomFallbackUrl(phantomResult.universalLink || '')
+                }
+                return
+              }
+
+              const evmSig = await signLinkMessageWithMetaMask({
+                address: challenge.evmWallet,
+                message: challenge.messageEvm,
+              })
+              logInfo('[WalletLinkMobile] personal_sign completed', {
+                sigLen: evmSig?.length,
+                attemptId: phaseAttemptId,
+              })
+              // Mark Phase 1 (EVM signature) as completed in the persisted
+              // state. This makes the resume logic idempotent — if the
+              // user manually goes back to MetaMask after this point, the
+              // auto-resume will see that Phase 1 is already done and
+              // immediately re-trigger the Phantom handoff instead of
+              // creating a duplicate challenge + signature.
+              markMobileWalletLinkPhaseCompleted('1')
+              // EVM signature obtained. On desktop, we'd continue to
+              // signSolana. On mobile, window.solana is NOT available
+              // inside MetaMask Mobile's browser — we need to deep-link
+              // BACK to Phantom so the user can sign the Solana message.
+              setStep(STEP_RETURNING_TO_PHANTOM)
+              logInfo('[WalletLinkMobile] Phase 2 deep-link generation started', { attemptId: phaseAttemptId })
+              // STEP 7 — single authoritative handoff path.
+              const phantomResult = openPhantomForSolanaSign({
+                challengeId: challenge.challengeId,
+                evmWallet: challenge.evmWallet,
+                evmSignature: evmSig,
+                messageSolana: challenge.messageSolana,
+              })
+              if (!phantomResult?.ok) {
+                console.error('[WalletLinkMobile] Phantom handoff failed — openPhantomForSolanaSign returned no result', { attemptId: phaseAttemptId })
+                clearMobileWalletLinkParams()
+                setError('Phantom handoff could not be started. Please try again.')
+                setErrorCode('PHANTOM_HANDOFF_FAILED')
+                setStep(STEP_ERROR)
+                return
+              }
+              // Store the universal link for the manual fallback button.
+              setPhantomFallbackUrl(phantomResult.universalLink || '')
+              logInfo('[WalletLinkMobile] navigation to Phantom started', { attemptId: phaseAttemptId })
+            } finally {
+              // RELEASE THE EVM SIGN LOCK — only after the personal_sign
+              // promise has settled (success OR rejection). This is the
+              // ONLY place the lock is released (aside from TTL expiry
+              // and explicit clearAllLocksForAttempt on cancel).
+              releaseEvmSignLock(evmSignLockKey)
+            }
+          } catch (e) {
+            // STEP 13 (B) — HANDLE AN EXTERNAL/STALE PENDING REQUEST.
+            // If MetaMask returned -32002, it means there's already a
+            // pending personal_sign for this origin. This could be:
+            //   (A) Our own previous personal_sign (should be prevented
+            //       by the EVM sign lock, but could still happen if the
+            //       lock was bypassed or stale).
+            //   (B) A stale pending request from a previous attempt or
+            //       another dapp.
+            // In BOTH cases, do NOT auto-retry (that would make the race
+            // worse). Show a clear error instructing the user to finish
+            // or cancel the existing MetaMask request.
+            if (isMetamaskPendingRequestError(e)) {
+              console.error('[WalletLinkMobile] MetaMask -32002: personal_sign already pending', { attemptId: phaseAttemptId, message: e?.message })
               clearMobileWalletLinkParams()
-              setError('Phantom handoff could not be started. Please try again.')
-              setErrorCode('PHANTOM_HANDOFF_FAILED')
+              setError('A MetaMask signature request is already pending. Please finish or cancel the existing MetaMask request, then try again.')
+              setErrorCode('METAMASK_PENDING_REQUEST')
               setStep(STEP_ERROR)
               return
             }
-            // Store the universal link for the manual fallback button.
-            setPhantomFallbackUrl(phantomResult.universalLink || '')
-            logInfo('[WalletLinkMobile] navigation to Phantom started', { attemptId: phaseAttemptId })
-          } catch (e) {
             const msg = e?.message || 'Mobile EVM signing failed.'
             console.error('[WalletLinkMobile] Phase 2 failed', { message: msg, code: e?.code, attemptId: phaseAttemptId })
             clearMobileWalletLinkParams()
@@ -384,6 +538,10 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             setError(msg)
             setErrorCode(String(e?.code || 'MOBILE_EVM_FAILED'))
             setStep(STEP_ERROR)
+          } finally {
+            // RELEASE THE RESUME LOCK — only after the entire Phase 2
+            // operation has settled (success OR rejection).
+            releaseResumeLock(phaseAttemptId)
           }
         })()
       }
@@ -735,86 +893,107 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
           return
         }
 
-        // Determine which provider is available in the current
-        // browser context. This is what tells us whether we're
-        // inside MetaMask Mobile's in-app browser (window.ethereum
-        // injected) or Phantom's in-app browser (window.solana
-        // injected).
-        const hasMetaMaskNow = Boolean(
-          (window.ethereum?.isMetaMask && !window.ethereum?.isPhantom) ||
-          (Array.isArray(window.ethereum?.providers) &&
-            window.ethereum.providers.some((p) => p?.isMetaMask && !p?.isPhantom))
-        )
-        const hasPhantomNow = Boolean(getPhantomProvider())
-
-        // CASE 1: We're inside MetaMask Mobile's browser, and Phase 1
-        // (EVM signature) is already completed. We need to re-trigger
-        // the Phantom handoff (because the user manually came back to
-        // MetaMask instead of going to Phantom after signing).
-        if (hasMetaMaskNow && !hasPhantomNow && persisted.phase === '2' &&
-            persisted.challengeId && persisted.evmWallet &&
-            persisted.evmSignature && persisted.messageSolana) {
-          logInfo('[WalletLinkMobile] resume: re-triggering Phantom handoff from persisted Phase 2 state', {
-            challengeId: persisted.challengeId,
-            attemptId: persisted.attemptId,
-          })
-          mobileResumeStartedRef.current = true
-          setStep(STEP_RETURNING_TO_PHANTOM)
-          setEvmAddress(persisted.evmWallet)
-          const phantomResult = openPhantomForSolanaSign({
-            challengeId: persisted.challengeId,
-            evmWallet: persisted.evmWallet,
-            evmSignature: persisted.evmSignature,
-            messageSolana: persisted.messageSolana,
-          })
-          if (phantomResult?.universalLink) {
-            setPhantomFallbackUrl(phantomResult.universalLink)
-          }
+        // STEP 6 (REQUIRED FIX) — MAKE RESUME SINGLE-FLIGHT.
+        // Acquire a MODULE-LEVEL resume lock (keyed by attemptId) so
+        // that multiple lifecycle events (focus/pageshow/
+        // visibilitychange) firing in rapid succession do NOT each
+        // independently start another wallet-link resume operation.
+        // The lock survives React remounts within the same JS context.
+        // It is released when the resume logic completes (below in
+        // the finally of this setTimeout). TTL: 30s — if a resume
+        // takes longer than 30s, the lock auto-expires and a new
+        // resume is allowed.
+        if (!acquireResumeLock(persisted.attemptId)) {
+          logInfo('[WalletLinkMobile] resume lock already held — skipping resume listener', { attemptId: persisted.attemptId })
           return
         }
+        try {
+          // Determine which provider is available in the current
+          // browser context. This is what tells us whether we're
+          // inside MetaMask Mobile's in-app browser (window.ethereum
+          // injected) or Phantom's in-app browser (window.solana
+          // injected).
+          const hasMetaMaskNow = Boolean(
+            (window.ethereum?.isMetaMask && !window.ethereum?.isPhantom) ||
+            (Array.isArray(window.ethereum?.providers) &&
+              window.ethereum.providers.some((p) => p?.isMetaMask && !p?.isPhantom))
+          )
+          const hasPhantomNow = Boolean(getPhantomProvider())
 
-        // CASE 2: We're inside Phantom's browser, and Phase 2 is
-        // persisted (challengeId + evmSignature etc.). The auto-resume
-        // useEffect should have fired on mount, but if the user came
-        // back via manual back navigation while the component was still
-        // mounted, the useEffect's guard (mobileResumeStartedRef.current)
-        // might be stale. Reset the guard so the auto-resume useEffect
-        // can re-fire on the NEXT React render cycle.
-        //
-        // We do NOT directly invoke the Phase 3 logic here because it
-        // has heavy state-setup (setStep, setActiveLink, clearMobileWalletLinkParams,
-        // etc.) that's tightly coupled to the closure in the
-        // auto-resume useEffect. Instead, we reset the guard and let
-        // the next render cycle's auto-resume handle it.
-        if (hasPhantomNow && persisted.phase === '2' &&
-            persisted.challengeId && persisted.evmWallet &&
-            persisted.evmSignature && persisted.messageSolana) {
-          logInfo('[WalletLinkMobile] resume: Phantom available + Phase 2 persisted — resetting guard for auto-resume', {
-            challengeId: persisted.challengeId,
-            attemptId: persisted.attemptId,
-          })
-          // Only reset if the guard was previously set (otherwise we
-          // might double-fire on the first mount).
-          if (mobileResumeStartedRef.current) {
-            mobileResumeStartedRef.current = false
+          // CASE 1: We're inside MetaMask Mobile's browser, and Phase 1
+          // (EVM signature) is already completed. We need to re-trigger
+          // the Phantom handoff (because the user manually came back to
+          // MetaMask instead of going to Phantom after signing).
+          if (hasMetaMaskNow && !hasPhantomNow && persisted.phase === '2' &&
+              persisted.challengeId && persisted.evmWallet &&
+              persisted.evmSignature && persisted.messageSolana) {
+            logInfo('[WalletLinkMobile] resume: re-triggering Phantom handoff from persisted Phase 2 state', {
+              challengeId: persisted.challengeId,
+              attemptId: persisted.attemptId,
+            })
+            mobileResumeStartedRef.current = true
+            setStep(STEP_RETURNING_TO_PHANTOM)
+            setEvmAddress(persisted.evmWallet)
+            const phantomResult = openPhantomForSolanaSign({
+              challengeId: persisted.challengeId,
+              evmWallet: persisted.evmWallet,
+              evmSignature: persisted.evmSignature,
+              messageSolana: persisted.messageSolana,
+            })
+            if (phantomResult?.universalLink) {
+              setPhantomFallbackUrl(phantomResult.universalLink)
+            }
+            return
           }
-          return
-        }
 
-        // CASE 3: We're inside Phantom's browser, and Phase 1 is
-        // persisted (only solanaWallet, no challengeId). This means
-        // the user came back to Phantom BEFORE MetaMask signed —
-        // they should re-trigger the MetaMask handoff from Phase 1.
-        // But Phantom doesn't have window.ethereum, so we can't
-        // EVM-sign here. Show a clear message: "Return to MetaMask
-        // to continue" or "Cancel and try again".
-        if (hasPhantomNow && persisted.phase === '1' && persisted.solanaWallet) {
-          logInfo('[WalletLinkMobile] resume: Phantom available but Phase 1 only persisted — needs MetaMask', {
-            attemptId: persisted.attemptId,
-          })
-          // Don't take action — the user can use the "Cancel" button
-          // to reset and try again, or open MetaMask Mobile manually.
-          return
+          // CASE 2: We're inside Phantom's browser, and Phase 2 is
+          // persisted (challengeId + evmSignature etc.). The auto-resume
+          // useEffect should have fired on mount, but if the user came
+          // back via manual back navigation while the component was still
+          // mounted, the useEffect's guard (mobileResumeStartedRef.current)
+          // might be stale. Reset the guard so the auto-resume useEffect
+          // can re-fire on the NEXT React render cycle.
+          //
+          // We do NOT directly invoke the Phase 3 logic here because it
+          // has heavy state-setup (setStep, setActiveLink, clearMobileWalletLinkParams,
+          // etc.) that's tightly coupled to the closure in the
+          // auto-resume useEffect. Instead, we reset the guard and let
+          // the next render cycle's auto-resume handle it.
+          if (hasPhantomNow && persisted.phase === '2' &&
+              persisted.challengeId && persisted.evmWallet &&
+              persisted.evmSignature && persisted.messageSolana) {
+            logInfo('[WalletLinkMobile] resume: Phantom available + Phase 2 persisted — resetting guard for auto-resume', {
+              challengeId: persisted.challengeId,
+              attemptId: persisted.attemptId,
+            })
+            // Only reset if the guard was previously set (otherwise we
+            // might double-fire on the first mount).
+            if (mobileResumeStartedRef.current) {
+              mobileResumeStartedRef.current = false
+            }
+            return
+          }
+
+          // CASE 3: We're inside Phantom's browser, and Phase 1 is
+          // persisted (only solanaWallet, no challengeId). This means
+          // the user came back to Phantom BEFORE MetaMask signed —
+          // they should re-trigger the MetaMask handoff from Phase 1.
+          // But Phantom doesn't have window.ethereum, so we can't
+          // EVM-sign here. Show a clear message: "Return to MetaMask
+          // to continue" or "Cancel and try again".
+          if (hasPhantomNow && persisted.phase === '1' && persisted.solanaWallet) {
+            logInfo('[WalletLinkMobile] resume: Phantom available but Phase 1 only persisted — needs MetaMask', {
+              attemptId: persisted.attemptId,
+            })
+            // Don't take action — the user can use the "Cancel" button
+            // to reset and try again, or open MetaMask Mobile manually.
+            return
+          }
+        } finally {
+          // RELEASE THE RESUME LOCK — only after the resume logic has
+          // completed. This allows the NEXT lifecycle event (if any) to
+          // acquire the lock and run the resume check again.
+          releaseResumeLock(persisted.attemptId)
         }
       }, 100)
     }
@@ -1078,6 +1257,27 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
     // Reset the mobile resume guard so a new flow can start after
     // a failure or manual cancel.
     mobileResumeStartedRef.current = false
+    // STEP F (REQUIRED FIX) — A FRESH ATTEMPT MUST RECEIVE A NEW
+    // attemptId/challenge. The old lock/state must not permanently
+    // block the new attempt after the previous operation has
+    // actually settled/cancelled.
+    //
+    // Read the current attemptId from the persisted state (if any)
+    // and clear ALL module-level locks (EVM sign + resume) for that
+    // attempt. This ensures that:
+    //   - If the previous personal_sign was rejected by the user, the
+    //     EVM sign lock is released (even though the try/finally in
+    //     startPhase2 already released it — this is a belt-and-
+    //     suspenders check for the case where the previous run
+    //     crashed before reaching the finally block).
+    //   - The resume lock is released so the next lifecycle event
+    //     can acquire it.
+    //   - A fresh attempt (with a new attemptId) is NOT blocked by
+    //     stale locks from the previous attempt.
+    const prevPersisted = getMobileWalletLinkPersistedState()
+    if (prevPersisted?.attemptId) {
+      clearAllLocksForAttempt(prevPersisted.attemptId)
+    }
     clearMobileWalletLinkState()
     setStep(STEP_IDLE)
     setError('')
@@ -1426,7 +1626,9 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
                     ? 'Linking session expired'
                     : errorCode === 'EVM_REJECTED' || errorCode === 'SOLANA_REJECTED'
                       ? 'Linking cancelled'
-                      : 'Wallet linking could not be completed'}
+                      : errorCode === 'METAMASK_PENDING_REQUEST' || errorCode === 'METAMASK_SIGN_IN_FLIGHT'
+                        ? 'MetaMask signature already pending'
+                        : 'Wallet linking could not be completed'}
             </strong>
             <p>{error || 'Please try again.'}</p>
             {errorCode && errorCode !== 'VERIFY_FAILED' && (
@@ -1510,6 +1712,20 @@ export default function WalletLinkPanel({ onLinkedChange, expectedEvmWallet }) {
             {errorCode === 'PHANTOM_HANDOFF_FAILED' && (
               <div className="ronin-wallet-link-hint">
                 <small>The Phantom handoff could not be started. Click <strong>Try again</strong>, or open Phantom manually and return to Ronin Swap.</small>
+              </div>
+            )}
+            {errorCode === 'METAMASK_PENDING_REQUEST' && (
+              <div className="ronin-wallet-link-hint">
+                <small>
+                  MetaMask already has a pending signature request for this site. Open MetaMask, finish or cancel the existing request, then click <strong>Try again</strong>. The link was NOT created — no duplicate signature was sent.
+                </small>
+              </div>
+            )}
+            {errorCode === 'METAMASK_SIGN_IN_FLIGHT' && (
+              <div className="ronin-wallet-link-hint">
+                <small>
+                  A MetaMask signature request is already in progress for this wallet-link attempt. Approve or cancel it in MetaMask — the flow will continue automatically. No duplicate signature was sent.
+                </small>
               </div>
             )}
           </div>
