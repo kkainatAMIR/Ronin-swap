@@ -2780,8 +2780,6 @@ export default function Swap() {
         </div>
       </section>
 
-      <UnifiedSwapHistory solanaWallet={wallet?.address} />
-
       {/* ---------- BENEFITS ---------- */}
       <section className="swap-benefits-section">
         <div className="swap-benefits-card">
@@ -2856,6 +2854,9 @@ export default function Swap() {
           <div className="swap-quick-pairs">{RONIN_QUICK_PAIRS.map((pair) => <button type="button" key={pair.label} onClick={() => choosePair(pair)}>{pair.label}</button>)}</div>
         </div>
       </section>
+
+      {/* ---------- SWAP HISTORY (moved above RONIN PVP ARENA) ---------- */}
+      <UnifiedSwapHistory solanaWallet={wallet?.address} />
 
       <section className="swap-reference-promos" aria-label="Ronin features">
         <article className="swap-reference-promo"><img src="/images/game-landscape.jpg" alt="Ronin PVP Arena" /><div><h3>⚔ RONIN PVP ARENA</h3><span>COMING SOON</span><p>Stake. Fight. Win. Burn.<br />Samurai vs Samurai.</p></div></article>
