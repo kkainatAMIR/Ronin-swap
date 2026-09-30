@@ -217,7 +217,7 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
           decimals: token.decimals || 18,
           category: 'wallet',
           logoURI: token.logoURI || (token.address ? `https://tokens.1inch.io/1/${token.address.toLowerCase()}.png` : null),
-          fallbackLogoURI: token.address ? (() => { try { return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(token.address.toLowerCase())}/logo.png` } catch { return null } })() : null,
+          fallbackLogoURI: token.address ? (() => { try { return `https://cdn.jsdelivr.net/gh/trustwallet/assets@master/blockchains/ethereum/assets/${getAddress(token.address.toLowerCase())}/logo.png` } catch { return null } })() : null,
           featured: false,
           verified: false,
           trust: 'wallet',
@@ -1516,9 +1516,17 @@ function TokenMark({ token, size = 25 }) {
     if (token?.fallbackLogoURI) list.push(token.fallbackLogoURI)
     const addr = String(token?.address || '').toLowerCase()
     if (/^0x[0-9a-f]{40}$/.test(addr)) {
+      // 1inch V2 token logo API — chain ID 1 for Ethereum mainnet.
       list.push(`https://tokens.1inch.io/1/${addr}.png`)
+      // TrustWallet assets (raw GitHub) — checksummed address required.
       list.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${getAddress(addr)}/logo.png`)
+      // TrustWallet main branch fallback.
       list.push(`https://raw.githubusercontent.com/trustwallet/assets/main/blockchains/ethereum/assets/${getAddress(addr)}/logo.png`)
+      // jsDelivr CDN — FASTER mirror of TrustWallet's GitHub assets repo.
+      // raw.githubusercontent.com can be slow/rate-limited; jsDelivr has
+      // global edge nodes and serves the same files.
+      list.push(`https://cdn.jsdelivr.net/gh/trustwallet/assets@master/blockchains/ethereum/assets/${getAddress(addr)}/logo.png`)
+      // Robinhood CDN.
       list.push(`https://cdn.robinhood.com/ncw_assets/logos/${addr}.png`)
     }
     // De-duplicate (DexScreener + 1inch sometimes return the same URL)
