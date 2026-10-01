@@ -1,205 +1,345 @@
 # $RONIN — The Masterless Samurai
 
-A responsive, samurai-inspired frontend for the RONIN ecosystem, built with React and Vite.
+<p align="center">
+  <strong>RUGGED. BUT WE RISE.</strong>
+</p>
 
-## Repository structure
+<p align="center">
+  A non-custodial, multi-chain Web3 ecosystem built around $RONIN, swaps, Samurai Points, rewards, and the next generation of the Ronin experience.
+</p>
 
+<p align="center">
+  <a href="https://ronin-swap6.vercel.app">Live App</a> •
+  <a href="https://github.com/kkainatAMIR/Ronin-swap">GitHub</a>
+</p>
+
+---
+
+## ⚔️ What is Ronin?
+
+**Ronin** is a Web3 ecosystem designed around the $RONIN community, combining a non-custodial swap experience with Samurai Points, rewards, burn tracking, tokenomics, and an expanding NFT/game ecosystem.
+
+The project is built around one simple principle:
+
+> **RUGGED. BUT WE RISE.**
+
+Users remain in control of their wallets and transactions. The application never asks for seed phrases or private keys.
+
+---
+
+## ✨ Ecosystem
+
+| Surface               | Purpose                                                  |
+| --------------------- | -------------------------------------------------------- |
+| 🔄 **Swap**           | Non-custodial token swapping across supported networks   |
+| 🏆 **Samurai Points** | Points earned from verified swap activity                |
+| 💰 **Rewards**        | Claim eligible Samurai Points rewards on Solana          |
+| 🔥 **Burn**           | Track $RONIN burn activity and ecosystem statistics      |
+| 🎮 **Game**           | Game ecosystem surface prepared for future functionality |
+| 🖼️ **NFT**           | NFT ecosystem surface prepared for the next phase        |
+| 📊 **Tokenomics**     | $RONIN supply and ecosystem information                  |
+| 🛡️ **Transparency**  | Public-facing ecosystem and contract information         |
+
+---
+
+## ⛓️ Supported Networks
+
+Ronin uses a chain-aware architecture supporting:
+
+* **Solana** — Jupiter-powered swaps and Solana rewards
+* **Ethereum** — EVM wallet and swap infrastructure
+* **Robinhood Chain** — EVM support through the multi-chain routing layer
+
+The application uses wallet signatures for user-authorized transactions.
+
+**Private keys and seed phrases are never requested or handled by the application.**
+
+---
+
+## 🔄 Non-Custodial Swaps
+
+The swap experience is designed so users remain in control of their assets.
+
+### Solana
+
+* Jupiter-powered swaps
+* Phantom-compatible wallet flow
+* Live quotes and transaction status
+* $RONIN support
+
+### Ethereum
+
+* EVM wallet support
+* MetaMask-compatible flow
+* 0x-based routing
+
+### Robinhood Chain
+
+* EVM-compatible wallet flow
+* Chain ID `4663`
+* LI.FI routing foundation
+
+Every transaction requiring authorization must be approved by the user's wallet.
+
+---
+
+## 🏆 Samurai Points
+
+**Samurai Points** are the rewards accounting layer of the Ronin ecosystem.
+
+Points are based on **verified executed swap volume**, rather than simply connecting a wallet or opening the application.
+
+The rewards system is designed around:
+
+* Verified swap activity
+* Unified wallet/account accounting
+* Configurable reward rules
+* Cross-chain activity support
+* On-chain Solana reward settlement
+
+---
+
+## 💰 Solana Rewards
+
+The Ronin rewards system includes a Solana **Anchor program** for on-chain reward settlement.
+
+The program is located under:
+
+```text
+program/programs/ronin_rewards/
 ```
+
+Deployment, initialization, testing, and verification scripts are available under:
+
+```text
+program/scripts/
+```
+
+For the detailed Solana program documentation:
+
+**[View the Solana Rewards Program Guide](program/README.md)**
+
+---
+
+## 🔥 $RONIN
+
+$RONIN is the core token of the ecosystem.
+
+### Solana Mint
+
+```text
+2JVEVXoRsskapZ8T56MjMNJq6Dk3feEUYSRmzkkipump
+```
+
+The application uses the configured token registry and live blockchain data where applicable.
+
+Always verify the token mint before making a transaction.
+
+---
+
+## 🛡️ Security Principles
+
+Ronin follows a non-custodial architecture.
+
+* 🔐 **No seed phrases requested**
+* 🔑 **No private keys handled by the app**
+* ✍️ **Transactions require user wallet approval**
+* 🌐 **Blockchain data is read from RPC/indexer infrastructure**
+* ⚙️ **Server credentials remain server-side**
+* 🚫 **No fake transaction success states**
+
+Users should always verify transaction details in their wallet before approving a transaction.
+
+---
+
+## 🏗️ Tech Stack
+
+### Frontend
+
+* React
+* Vite
+* JavaScript
+* Responsive Web3 UI
+
+### Blockchain
+
+* Solana
+* Anchor
+* Ethereum / EVM
+* Robinhood Chain
+
+### Web3 Infrastructure
+
+* Jupiter
+* 0x
+* LI.FI
+* Phantom
+* MetaMask
+* Helius / Solana RPC
+
+### Backend & Data
+
+* Vercel Serverless Functions
+* Supabase
+* Node.js
+
+---
+
+## 📁 Project Structure
+
+```text
 Ronin-swap/
-├── api/                    ← Vercel serverless functions (website backend)
-├── src/                    ← React frontend (Vite)
-├── supabase/migrations/    ← Database migrations (Samurai Points + reward accounting)
-├── program/                ← Solana Anchor program: ronin_rewards (NEW)
-│   ├── programs/ronin_rewards/src/lib.rs    ← The actual on-chain program
-│   ├── tests/ronin_rewards.ts              ← Test suite (manual SHA-256)
-│   └── scripts/
-│       ├── deploy-mainnet.sh               ← Mainnet deployment script
-│       ├── extract-keypair.js               ← Extract program keypair from Solana Playground
-│       ├── initialize-mainnet.sh            ← One-time initialize() call
-│       └── verify-program.mjs               ← Read-only on-chain verification
-├── scripts/                ← Website test scripts (reward accounting, security, etc.)
-└── docs/                   ← Existing project docs
+├── api/                         # Serverless API handlers
+├── src/                         # React/Vite frontend
+├── supabase/migrations/         # Database migrations
+├── program/                     # Solana Anchor rewards program
+│   ├── programs/ronin_rewards/  # On-chain program
+│   ├── tests/                   # Anchor tests
+│   └── scripts/                 # Deployment & verification scripts
+├── scripts/                     # Application test / utility scripts
+├── docs/                        # Project documentation
+├── public/                      # Static assets and artwork
+├── .env.example                 # Environment variable template
+└── README.md                    # Project documentation
 ```
 
-See [`program/README.md`](program/README.md) for the complete Solana program deployment guide.
+---
 
-## Run locally
+## 🚀 Run Locally
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/kkainatAMIR/Ronin-swap.git
+cd Ronin-swap
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install
-cp .env.example .env   # fill in your Helius RPC + (optional) Jupiter API key
-npm run dev            # frontend + local /api handlers, on http://localhost:5173
 ```
 
-The **Buy RONIN** panel talks to the same server-side API handlers used by
-Vercel. Plain Vite development now mounts the handlers locally, so `/api/*`
-requests are not mistaken for frontend modules. `npm run dev:all` remains
-available when using an authenticated Vercel CLI environment.
+### 3. Configure environment variables
 
-Buy RONIN retains its existing keyless Jupiter fallback if the API proxy is
-temporarily unavailable.
+```bash
+cp .env.example .env
+```
 
-Production output can be checked with:
+Add the required RPC and API configuration to your local environment.
+
+**Never commit real credentials, private keys, or seed phrases.**
+
+### 4. Start development
+
+```bash
+npm run dev
+```
+
+The application will be available at:
+
+```text
+http://localhost:5173
+```
+
+### 5. Build for production
 
 ```bash
 npm run build
+```
+
+Preview the production build with:
+
+```bash
 npm run preview
 ```
 
-## Notes
+---
 
-- Navigation is hash-based so all eight ecosystem surfaces work in a static deploy: Home, Yield, Burn, Game, NFT, Rank, Tokenomics, and Transparency.
-- The wallet layer connects to `window.solana` when a browser wallet is available, reads the supplied RONIN mint (`2JVEVXoRsskapZ8T56MjMNJq6Dk3feEUYSRmzkkipump`) from Solana mainnet RPC, polls the balance every 30 seconds, and includes an explicitly labelled demo profile for UI review.
-- The Home and Burn dashboards consume the shared `/api/ronin/stats` response. Its accumulated burn value is global on-chain data: the backend exhausts Helius SPL burn history and adds the configured dead/burn-wallet balance. It never uses the connected wallet balance or transaction history; if the global read fails, the UI shows an unavailable state rather than a fallback number.
-- Rank is automatically calculated from the live $RONIN holding thresholds in `src/data.js` (100K Ashigaru, 500K Samurai, 2M Hatamoto, 5M Karo, 10M Daimyo, 25M Shogun, 50M Ronin Legend); Gashira stays TBA until its threshold is supplied. Each rank record also contains its portrait image, duties, subtitle, requirements, and unlocks. NFT, XP, yield, and game fields remain separate indexer boundaries until their programs are available.
-- The rank experience is automatic and read-only (option 1): connect the wallet, read holdings, and show the rank—there is no buy or claim transaction.
-- Yield, Burn, and NFT actions do not fake transactions. They are UI-ready boundaries that surface a clear preview/pending state until official programs and addresses are configured.
-- The $RONIN mint is configured in the transparency registry. Other program addresses remain intentionally marked as unpublished placeholders in `src/data.js`.
-- Set `VITE_SOLANA_RPC_URL` to a dedicated Solana RPC endpoint for production rate limits; the default uses Solana's public mainnet endpoint with PublicNode as a fallback. A provider that returns HTTP 403 should be replaced with a valid HTTPS RPC URL.
-- Visual artwork is stored in `public/images/` and can be replaced without changing the page components.
+## ☁️ Deployment
 
-## Buy RONIN
+The frontend is designed for deployment on **Vercel**.
 
-The homepage **BUY $RONIN** button opens an in-page swap panel (SOL → RONIN)
-powered by Jupiter's current Swap API — no redirect to jup.ag.
+Recommended production setup:
 
-- `src/components/BuyRonin.jsx` — the swap UI and state machine (idle, quote
-  loading, review, Phantom confirmation, processing, success/failure).
-- `src/services/jupiterService.js` — talks to `/api/jupiter/*` (proxied to
-  the backend) with a same-origin, keyless Jupiter fallback if the backend
-  isn't running.
-- `api/` — Vercel Serverless Functions that attach backend credentials only on
-  the server, so keys are never bundled into the frontend. `/api/solana/rpc`
-  also proxies wallet RPC reads server-side when a browser RPC provider blocks
-  cross-origin requests.
-- Everything shown (SOL balance, quote, rate, price impact, minimum
-  received, transaction signature, Solscan link) is live data — there is no
-  mock/fake data anywhere in this flow.
-- A wallet signature is only ever requested when the user presses
-  **CONFIRM BUY**; connecting the wallet or opening the panel never triggers
-  a signature prompt.
+1. Import the repository into Vercel.
+2. Use the Vite framework preset.
+3. Use `npm run build` as the build command.
+4. Use `dist` as the output directory.
+5. Configure the required environment variables.
+6. Never commit `.env.local` or production credentials.
 
-Environment variables (see `.env.example`):
+---
 
-```env
-VITE_SOLANA_RPC_URL=...        # optional browser RPC fallback/transaction confirmation
-VITE_RONIN_MINT_ADDRESS=...    # optional frontend override for the $RONIN mint
-SOLANA_RPC_URL=...             # server-only RPC for /api/solana/rpc; never use VITE_ for secrets
-HELIUS_API_KEY=...             # server-only credential
-RONIN_MINT_ADDRESS=...         # server-only mint configuration
-RONIN_BURN_ADDRESS=...         # optional dead/burn wallet; defaults to the published RONIN burn wallet
-JUPITER_API_KEY=...             # required for Swap V2 /order + /execute
-JUPITER_BASE_URL=https://api.jup.ag
-JUPITER_REFERRAL_ACCOUNT=Cx98B695q8Dvum68sUdyopp8Gxh4fhZv1QhmE1mgpu47
-JUPITER_REFERRAL_FEE_BPS=50
-SOL_INCINERATOR_API_KEY=...    # server-only
-SOL_INCINERATOR_BASE_URL=https://v2.api.sol-incinerator.com
-RONIN_SHIELD_TREASURY_ADDRESS=... # server-only public treasury address for optional native SOL support
-VITE_ROBINHOOD_RPC_URL=...       # public RPC URL used by MetaMask add/switch support
-VITE_ROBINHOOD_EXPLORER_URL=...  # optional public block explorer URL
-VITE_ROBINHOOD_NETWORK_NAME=Robinhood Chain
-LIFI_BASE_URL=https://li.quest/v1
-LIFI_INTEGRATOR=RoninSamurai
-LIFI_API_KEY=...                  # server-only; optional for higher LI.FI limits
-```
+## 📚 Documentation
 
-## Multi-chain swap foundation
+Detailed implementation documentation is intentionally separated from the main README.
 
-The swap architecture is chain-aware through `src/config/chains.js` and
-`src/services/providerRouter.js`:
+| Documentation                            | Description                                 |
+| ---------------------------------------- | ------------------------------------------- |
+| [`program/README.md`](program/README.md) | Solana rewards program and deployment guide |
+| `docs/`                                  | Project-specific technical documentation    |
+| `.env.example`                           | Environment variable reference              |
 
-- Solana-only routes keep the existing Jupiter implementation.
-- Ethereum-only routes keep the existing 0x/MetaMask implementation.
-- Routes involving Robinhood Chain select LI.FI.
-- Base and Arbitrum metadata are reserved for future EVM support.
+---
 
-Robinhood Chain is configured as EVM chain `4663` with ETH gas and MetaMask.
-Its candidate symbols are listed in `src/config/robinhoodRegistry.js`, but no
-addresses are guessed: every candidate remains unverified and disabled until
-confirmed from live LI.FI/Robinhood sources. LI.FI configuration is exposed
-server-side at `/api/lifi/config`; quotes and execution are intentionally not
-enabled in this foundation release.
+## 🗺️ Roadmap
 
-RONIN Shield support is optional and uses a standard native SOL transfer signed
-by the connected wallet. The treasury address is displayed before approval;
-private keys and seed phrases are never requested or handled. The public SOL
-total is calculated from native transfers received by the configured treasury.
+### Phase 1 — Core Ecosystem
 
-## Jupiter Swap V2 referral fees
+* [x] $RONIN frontend
+* [x] Non-custodial swap foundation
+* [x] Solana integration
+* [x] Multi-chain architecture
+* [x] Samurai Points foundation
+* [x] Solana rewards program
 
-The RUIN / SELL panel uses Jupiter Swap V2 (`/swap/v2/order` + `/execute`) and
-passes the RoninSamurai.com referral account and 50 bps referral fee on every
-eligible order:
+### Phase 2 — Ecosystem Expansion
 
-```
-referralAccount = Cx98B695q8Dvum68sUdyopp8Gxh4fhZv1QhmE1mgpu47
-referralFee     = 50
-```
+* [x] NFT ecosystem foundation
+* [ ] NFT functionality expansion
+* [ ] Game ecosystem
+* [ ] Additional reward mechanics
+* [ ] Further multi-chain expansion
 
-- `api/jupiter/order.mjs` proxies `GET /api/jup/ag/swap/v2/order`, always
-  adding those two params. It returns `referralAccount`, `feeMint`, `feeBps`,
-  `platformFee`, and the assembled `transaction` when `taker` is supplied.
-- `api/jupiter/execute.mjs` proxies `POST /api/jup/ag/swap/v2/execute` for the
-  managed-landing step. Its totals are used to verify the fee was actually
-  collected and in which mint.
-- The Buy modal shows a live REFERRAL FEE APPLIED / NOT VERIFIED badge and
-  displays `feeBps`, `platformFee.feeBps`, `feeMint`, and (after a successful
-  execute) the calculated fee amount and mint.
+### Phase 3 — The Ronin Ecosystem
 
-**Important:** Jupiter Swap V2 `/order` rejects a `referralAccount` unless the
-account (and its V2 referral fee accounts) were initialized under the Jupiter
-Swap V2 / Ultra Referral Project:
+* [ ] Expanded NFT ecosystem
+* [ ] Game integrations
+* [ ] Additional community features
+* [ ] Further ecosystem utilities
 
-```
-DkiqsTrw1u1bYFumumC7sCG2S8K25qc2vemJFHyW2wJc
-```
+> Roadmap items are subject to development and may change as the ecosystem evolves.
 
-The older Swap/Trigger referral project is
-`45ruCyfdRkWpRNGEqWzjCiXRHkZs8WXCLQ67Pnpye7Hp` and is **not** accepted by
-`/swap/v2/order`. The provided account
-`3PwKEvN2UURHW6q4sEL8ZzgzGyzNWeLVs8gqcCdFMV7x` is a named account
-(`RoninSamurai`) under that legacy project, so `/swap/v2/order` returns
-“Please check that referralAccount is initialized … for project
-DkiqsTrw…”. A correct Swap V2 setup must be created under the Dkiqs project.
+---
 
-For the `RoninSamurai` name under Dkiqs, the derived addresses are:
+## ⚠️ Disclaimer
 
-| Item | Address |
-| --- | --- |
-| Swap V2 referral account | `Cx98B695q8Dvum68sUdyopp8Gxh4fhZv1QhmE1mgpu47` |
-| SOL V2 fee account (ATA) | `91ouzTGLfFUnQVzD64QPHe6MJf6bSGrcimHJk5AuqLXh` |
-| USDC V2 fee account (ATA) | `A3dnQZk52dXsJjmpqKpmsLaNbwuVfDpnzYuzGNMfZpVV` |
-| USDT V2 fee account (ATA) | `4XkY4izexFFuiGEFJjCHdxXPJpE7x9tngUM2HwX8ARpm` |
-| RONIN V2 fee account (ATA) | `4jRAjepVA5GvFxPaz3CA3C1zH6Fis9G6Cr8wjPM9z6q7` |
+Ronin is a software project and ecosystem interface. Blockchain transactions involve financial and technical risks.
 
-### RONIN referral token account
+Always verify token addresses, network selections, transaction details, and wallet prompts before signing.
 
-RONIN is not shown in the referral dashboard yet, so the V2 fee account must be
-created on-chain. `scripts/referral-init-ronin.mjs` uses Jupiter's Referral
-SDK (`initializeReferralAccountWithName` and
-`initializeReferralTokenAccountV2`) to build (and, only if you explicitly
-supply a keyfile on your own machine, send) the initialization transactions:
+**Never share your seed phrase or private key with anyone.**
 
-```bash
-npm run referral:init-ronin -- \
-  --payer YOUR_PAYER_PUBLIC_KEY \
-  --name RoninSamurai \
-  --create-referral-account
-```
+---
 
-Run with `--dry-run` (the default when no `--keyfile` is passed) to print the
-unsigned transactions. The transactions create the Dkiqs referral account and
-the V2 ATA fee accounts for RONIN, SOL, USDC and USDT (override with
-`--mints`). Never paste or share a seed phrase or private key in this
-repository or in chat.
+## 🤝 Contributing
 
-## Vercel deployment
+Contributions, testing, security feedback, and technical discussion are welcome.
 
-Import the GitHub repository into Vercel. Use the Vite framework preset,
-`npm run build` as the build command, and `dist` as the output directory.
-Add the server-only variables above in Vercel Project Settings for the
-Production, Preview, and Development environments as needed. Never commit
-`.env.local` or real credentials.
-#   r o n i n P - 2 
+Please open an issue or pull request with enough context to reproduce a problem or understand the proposed change.
+
+---
+
+## 📜 License
+
+See the repository for the applicable license and project terms.
+
+---
+
+<p align="center">
+  <strong>$RONIN — RUGGED. BUT WE RISE.</strong>
+</p>
+
  
  
