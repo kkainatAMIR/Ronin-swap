@@ -1480,17 +1480,28 @@
 
   /* Hero is handled by the mobile overlay block above (fluid clamps). */
 
-  .swap-widget { padding: 18px 15px 15px; border-radius: 12px; }
+  /* --- MOBILE SWAP WIDGET COMPACTNESS ---
+     Reduce excessive vertical spacing so the swap popup tightly
+     wraps its actual content — no large empty areas below or
+     between elements. Desktop (>560px) is completely unaffected. */
+  .swap-widget { padding: 16px 14px 14px; border-radius: 12px; margin-bottom: clamp(16px, 5vw, 24px); }
+  .swap-widget-head { margin-bottom: 10px; }
   .swap-widget-head h3 { font-size: 17px; }
+  .swap-widget-tabs { margin-bottom: 10px; }
   .swap-contract-status { max-width: 100%; overflow-wrap: anywhere; }
-  .swap-field { padding: 12px 12px 10px; }
+  .swap-field { padding: 10px 10px 8px; }
+  .swap-field-label { margin-bottom: 5px; }
+  .swap-field-foot { margin-top: 5px; }
   .swap-field-input { font-size: 23px; }
   .swap-token-select { font-size: 12px; padding: 6px 9px 6px 6px; }
   .swap-token-select .swap-token-dot { width: 22px; height: 22px; font-size: 11px; }
   .swap-token-picker-backdrop { align-items: end; padding: 8px; }
   .swap-token-picker { max-height: min(620px, calc(100vh - 16px)); padding: 16px; border-radius: 12px 12px 8px 8px; }
   .swap-token-picker-head strong { font-size: 18px; }
-  .swap-cta { padding: 14px; font-size: 11.5px; }
+  .swap-cta { padding: 13px; font-size: 11.5px; margin-top: 10px; }
+  .swap-quote-box { margin-top: 10px; padding: 10px 12px; }
+  .swap-flip-row { margin: -9px 0; }
+  .evm-swap-panel { gap: 10px; }
 
   /* One column of feature cards — proper reflow, not a shrink. */
   .swap-benefits-card { grid-template-columns: 1fr; }
