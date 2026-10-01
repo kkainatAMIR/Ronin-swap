@@ -2734,12 +2734,12 @@ export default function Swap() {
               <div className="swap-reference-chain-list"><span><TokenMark token={fromToken} size={22} /> Solana</span><span><span className="swap-reference-chain-gem">◆</span> Ethereum</span><span><span className="swap-reference-chain-gem">↗</span> Robinhood Chain</span></div>
               <p>One platform. Three chains. More opportunities.</p>
             </section>
-            <section className="swap-reference-card swap-reference-points">
+            <section className="swap-reference-card swap-reference-points swap-reference-desktop-only">
               <div className="swap-reference-card-title"><span className="swap-reference-icon">♜</span><strong>SAMURAI POINTS</strong></div>
               <div className="swap-reference-points-body"><div><small>Earn points per qualifying swap.</small><b>YOUR JOURNEY</b></div><ul><li>Earn Points Per Swap</li><li>Leaderboard &amp; Seasons</li><li>Future Airdrops</li><li>More Utilities Coming</li></ul></div>
               <a className="swap-reference-outline-button" href="#profile">VIEW POINTS &amp; REWARDS</a>
             </section>
-            <section className="swap-reference-card swap-reference-clan"><div className="swap-reference-card-title"><span className="swap-reference-icon">♨</span><strong>EVERY SWAP FUELS THE CLAN</strong></div><p>A portion of platform fees supports LP, buy &amp; burns, validator development and future utilities.</p><a href="#tokenomics" className="swap-reference-card-link">VIEW TOKENOMICS →</a></section>
+            <section className="swap-reference-card swap-reference-clan swap-reference-desktop-only"><div className="swap-reference-card-title"><span className="swap-reference-icon">♨</span><strong>EVERY SWAP FUELS THE CLAN</strong></div><p>A portion of platform fees supports LP, buy &amp; burns, validator development and future utilities.</p><a href="#tokenomics" className="swap-reference-card-link">VIEW TOKENOMICS →</a></section>
             <section className="swap-reference-card swap-reference-live"><div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>LIVE ECOSYSTEM STATS</strong><span className="swap-reference-live-dot">● Live</span></div><div className="swap-reference-live-grid">{ecosystemStats.slice(0, 4).map((stat) => <div key={stat.label}><small>{stat.label}</small><b>{stat.value}</b><em>{stat.note || 'Live data'}</em></div>)}</div></section>
           </aside>
         </div>
@@ -2851,6 +2851,18 @@ export default function Swap() {
 
       {/* ---------- SWAP HISTORY (moved above RONIN PVP ARENA) ---------- */}
       <UnifiedSwapHistory solanaWallet={wallet?.address} />
+
+      {/* Mobile-only: the Samurai Points journey + Every Swap Fuels the Clan
+          cards are lifted out of the hero aside and placed right above the
+          PVP promos on small screens (see .swap-reference-mobile-cards). */}
+      <div className="swap-reference-mobile-cards" aria-label="Samurai points and clan highlights">
+        <section className="swap-reference-card swap-reference-points">
+          <div className="swap-reference-card-title"><span className="swap-reference-icon">♜</span><strong>SAMURAI POINTS</strong></div>
+          <div className="swap-reference-points-body"><div><small>Earn points per qualifying swap.</small><b>YOUR JOURNEY</b></div><ul><li>Earn Points Per Swap</li><li>Leaderboard &amp; Seasons</li><li>Future Airdrops</li><li>More Utilities Coming</li></ul></div>
+          <a className="swap-reference-outline-button" href="#profile">VIEW POINTS &amp; REWARDS</a>
+        </section>
+        <section className="swap-reference-card swap-reference-clan"><div className="swap-reference-card-title"><span className="swap-reference-icon">♨</span><strong>EVERY SWAP FUELS THE CLAN</strong></div><p>A portion of platform fees supports LP, buy &amp; burns, validator development and future utilities.</p><a href="#tokenomics" className="swap-reference-card-link">VIEW TOKENOMICS →</a></section>
+      </div>
 
       <section className="swap-reference-promos" aria-label="Ronin features">
         <article className="swap-reference-promo"><img src="/images/game-landscape.jpg" alt="Ronin PVP Arena" /><div><h3>⚔ RONIN PVP ARENA</h3><span>COMING SOON</span><p>Stake. Fight. Win. Burn.<br />Samurai vs Samurai.</p></div></article>

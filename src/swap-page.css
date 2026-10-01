@@ -647,11 +647,12 @@
   min-height: 0;
   transition: min-height 200ms ease;
 }
-/* On mobile, reserve enough space for the success result to prevent
-   the page from jumping down when the result mounts. */
+/* On mobile the slot collapses fully while empty so there is no dead
+   gap between the swap button and the quote box; the result box simply
+   pushes content down when it mounts. */
 @media (max-width: 768px) {
   .swap-result-slot {
-    min-height: 220px;
+    min-height: 0;
   }
 }
 
@@ -1692,4 +1693,26 @@
   .app-route-swap .swap-field-input { font-size: 18px; }
   .app-route-swap .swap-token-select { padding-inline: 4px; font-size: 9px; }
   .app-route-swap .swap-token-select .swap-token-dot { width: 18px; height: 18px; }
+}
+
+/* ---------------- MOBILE-ONLY RELOCATED CARDS ----------------
+   The "SAMURAI POINTS / YOUR JOURNEY" and "EVERY SWAP FUELS THE CLAN"
+   cards live in the hero sidebar on desktop. On mobile (<=900px) they
+   are hidden there and a duplicate pair renders right above the
+   RONIN PVP ARENA promos section instead. Desktop is untouched. */
+.swap-reference-mobile-cards { display: none; }
+
+@media (max-width: 900px) {
+  .app-route-swap .swap-reference-desktop-only { display: none; }
+  .swap-reference-mobile-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: min(100% - 48px, 1280px);
+    margin: 0 auto 14px;
+  }
+}
+
+@media (max-width: 600px) {
+  .swap-reference-mobile-cards { width: min(100% - 28px, 560px); }
 }
