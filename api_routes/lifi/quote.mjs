@@ -55,6 +55,7 @@ function normalizeQuote(body, request, feeContext) {
     volumeUsd: estimate.fromAmountUSD == null ? null : Number(estimate.fromAmountUSD),
     minimumReceived: estimate.toAmountMin || null,
     priceImpact: estimate.priceImpact ?? null,
+    slippage: Number(request.slippage),
     gasCost: estimate.gasCosts || [],
     fees: estimate.feeCosts || [],
     executionDuration: estimate.executionDuration || null,

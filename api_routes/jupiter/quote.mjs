@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     const upstream = await fetchJupiter(`/swap/v1/quote?${params}`, { headers: { Accept: 'application/json' } })
     const body = await readUpstream(upstream)
     if (!upstream.ok) return apiError(res, upstream.status >= 500 ? 502 : upstream.status, 'JUPITER_API_ERROR', body?.error || body?.message || 'Jupiter quote request failed.')
-    return json(res, 200, body)
+    return json(res, 200, { ...body, provider: body?.provider || 'jupiter' })
   } catch (error) {
     console.error('quote proxy error', error)
     return apiError(res, error?.name === 'AbortError' ? 504 : 502, error?.name === 'AbortError' ? 'JUPITER_TIMEOUT' : 'JUPITER_NETWORK_ERROR', error?.name === 'AbortError' ? 'Jupiter did not respond in time.' : 'Unable to reach Jupiter right now.')

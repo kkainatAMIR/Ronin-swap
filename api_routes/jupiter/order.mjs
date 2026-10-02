@@ -108,7 +108,7 @@ export default async function handler(req, res) {
     if (!body?.inAmount || !body?.outAmount) {
       return apiError(res, 400, 'JUPITER_ORDER_ERROR', body?.errorMessage || body?.error || 'Jupiter could not prepare a quote for this swap.')
     }
-    return json(res, 200, body)
+    return json(res, 200, { ...body, provider: body?.provider || 'jupiter' })
   } catch (error) {
     console.error('order proxy error', error)
     return apiError(res, error?.name === 'AbortError' ? 504 : 502, error?.name === 'AbortError' ? 'JUPITER_TIMEOUT' : 'JUPITER_NETWORK_ERROR', error?.name === 'AbortError' ? 'Jupiter did not respond in time.' : 'Unable to reach Jupiter right now.')

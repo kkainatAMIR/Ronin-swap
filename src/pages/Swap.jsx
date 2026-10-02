@@ -12,6 +12,7 @@ import { Button, Sakura } from '../components/Layout'
 import ComingSoon from '../components/ComingSoon'
 import TokenImportRow from '../components/TokenImportRow'
 import { SWAP_ENABLED } from '../config/features'
+import { getChain, SUPPORTED_SWAP_CHAINS } from '../config/chains'
 import { FEATURED_TOKEN_SECTIONS, RONIN_QUICK_PAIRS, SOL_MINT, TOKEN_BY_MINT, TRUSTED_TOKENS } from '../config/tokenRegistry'
 import { RONIN_MINT } from '../data'
 import { getAddress } from 'ethers'
@@ -122,8 +123,18 @@ function hasUsablePointsRecord(payload) {
   return hasAnyPointsValue || hasQualifiedFlag
 }
 
-function solscanTxUrl(signature) {
-  return `https://solscan.io/tx/${signature}`
+function transactionExplorerUrl(network, hash) {
+  if (!hash) return ''
+  const explorer = getChain(network)?.explorer
+  if (!explorer) return ''
+  const baseUrl = explorer.endsWith('/') ? explorer : `${explorer}/`
+  return `${baseUrl}${baseUrl.endsWith('/tx/') ? '' : 'tx/'}${encodeURIComponent(hash)}`
+}
+
+function TransactionExplorerLink({ network, hash }) {
+  const href = transactionExplorerUrl(network, hash)
+  if (!href) return null
+  return <a className="swap-result-explorer-link" href={href} target="_blank" rel="noreferrer">View transaction on {getChain(network)?.name || 'network'} explorer</a>
 }
 
 function deserializeTransaction(payload) {
@@ -175,16 +186,193 @@ function formatUsd(num) {
   return `$${num.toFixed(2)}`
 }
 
-function JupiterMark({ size = 16 }) {
+function quoteProviderLabel(quote) {
+  const provider = String(quote?.provider || '').trim()
+  if (!provider) return ''
+  if (/^jupiter$/i.test(provider)) return 'Jupiter'
+  if (/^(lifi|li\.fi)$/i.test(provider)) return 'LI.FI'
+  if (/^(0x|zeroex)$/i.test(provider)) return '0x'
+  return provider
+}
+
+function feeUsdLabel(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount <= 0) return ''
+  return `$${amount.toLocaleString('en-US', { maximumFractionDigits: 4, minimumFractionDigits: 2 })} USD`
+}
+
+function formatRawFee(amount, decimals, symbol) {
+  if (amount == null || !/^\d+$/.test(String(amount))) return ''
+  try {
+    const formatted = formatTokenAmount(String(amount), Math.max(0, Number(decimals) || 0), 6)
+    return symbol ? `${formatted} ${symbol}` : formatted
+  } catch {
+    return ''
+  }
+}
+
+function quoteFeePresentation(fee, prices) {
+  const amountUsd = Number(fee?.amountUSD ?? fee?.amountUsd)
+  if (Number.isFinite(amountUsd) && amountUsd > 0) return { value: feeUsdLabel(amountUsd), usd: amountUsd }
+  const token = fee?.token || fee?.feeToken || {}
+  const rawAmount = fee?.amount ?? fee?.feeAmount
+  const tokenAmount = formatRawFee(rawAmount, token.decimals ?? fee?.decimals, token.symbol || fee?.symbol)
+  if (!tokenAmount) return null
+  let usd = null
+  try {
+    const raw = Number(rawAmount) / (10 ** Number(token.decimals ?? fee?.decimals))
+    const price = prices?.get(token.address || token.symbol)
+    if (Number.isFinite(raw) && Number.isFinite(price) && price > 0) usd = raw * price
+  } catch { /* leave the amount in the fee token */ }
+  return { value: tokenAmount, usd }
+}
+
+function QuoteRouteDisclosure({ network, quote, fromToken, toToken, prices }) {
+  if (!quote) return null
+  const provider = quoteProviderLabel(quote)
+  const rows = []
+  let totalUsd = 0
+  let hasTotal = false
+  let totalComplete = true
+
+  const slippageBps = network === 'robinhood'
+    ? Number(quote.slippage) * 10_000
+    : Number(quote.slippageBps)
+  if (Number.isFinite(slippageBps) && slippageBps >= 0) {
+    rows.push({ label: 'Slippage', value: `${(slippageBps / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%` })
+  }
+  const priceImpact = Number(quote.priceImpactPct ?? quote.priceImpact)
+  if (Number.isFinite(priceImpact) && priceImpact > 0) {
+    rows.push({ label: 'Price Impact', value: `${priceImpact.toLocaleString('en-US', { maximumFractionDigits: 4 })}%` })
+  }
+
+  if (network === 'solana') {
+    const networkLamports = quote.networkFeeLamports ?? quote.prioritizationFeeLamports
+    if (networkLamports != null && Number(networkLamports) > 0) {
+      rows.push({ label: 'Network/Gas Fee', value: `${formatTokenAmount(String(networkLamports), 9, 6)} SOL` })
+    } else {
+      rows.push({ label: 'Network/Gas Fee', value: 'Final fee shown by your wallet before signing' })
+    }
+    const platformFee = quote.platformFee
+    if (platformFee?.amount && Number(platformFee.amount) > 0) {
+      const feeMint = String(platformFee.mint || quote.feeMint || '')
+      const feeToken = [fromToken, toToken].find((token) => token?.mint === feeMint)
+      rows.push({ label: 'RONIN Platform Fee', value: formatRawFee(platformFee.amount, platformFee.decimals ?? feeToken?.decimals, feeToken?.symbol || shortMint(feeMint)) })
+    } else if (Number(quote.feeBps) > 0) {
+      rows.push({ label: 'RONIN Platform Fee', value: `${(Number(quote.feeBps) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}% of input` })
+    }
+  } else if (network === 'ethereum') {
+    let networkUsd = null
+    try {
+      const gas = quote.transaction?.gas
+      const gasPrice = quote.transaction?.gasPrice
+      if (gas && gasPrice && prices?.get('native')) {
+        const nativeFeeRaw = BigInt(gas) * BigInt(gasPrice)
+        const nativeFee = Number(nativeFeeRaw) / 1e18
+        networkUsd = nativeFee * Number(prices.get('native'))
+        rows.push({ label: 'Network/Gas Fee', value: `${formatEvmAmount(nativeFeeRaw.toString(), 18)} ETH${feeUsdLabel(networkUsd) ? ` · ${feeUsdLabel(networkUsd)}` : ''}` })
+      }
+    } catch { /* omit an estimate if the quote does not provide usable gas data */ }
+    if (networkUsd != null) { totalUsd += networkUsd; hasTotal = true } else totalComplete = false
+    if (networkUsd == null) rows.push({ label: 'Network/Gas Fee', value: 'Final fee shown by your wallet before signing' })
+
+    const feeBps = Number(quote.swapFeeBps)
+    if (Number.isFinite(feeBps) && feeBps > 0) {
+      let platformFeeValue = ''
+      let platformUsd = null
+      const actualFee = quote.integratorFee || quote.fees?.integratorFee
+      const actualFeePresentation = actualFee ? quoteFeePresentation(actualFee, prices) : null
+      if (actualFeePresentation) {
+        platformFeeValue = actualFeePresentation.value
+        platformUsd = actualFeePresentation.usd
+      } else {
+        platformFeeValue = `${(feeBps / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}% of input`
+        try {
+          const feeRaw = (BigInt(quote.sellAmount) * BigInt(Math.round(feeBps))) / 10_000n
+          const feeAmount = Number(feeRaw) / (10 ** Number(quote.sellDecimals ?? fromToken?.decimals ?? 18))
+          const tokenPrice = prices?.get(fromToken?.type === 'native' ? 'native' : fromToken?.address)
+          platformFeeValue = `${formatEvmAmount(feeRaw.toString(), Number(quote.sellDecimals ?? fromToken?.decimals ?? 18))} ${fromToken?.symbol || ''} (${(feeBps / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%)`
+          if (Number.isFinite(tokenPrice) && tokenPrice > 0) platformUsd = feeAmount * tokenPrice
+        } catch { /* show the configured rate if the quote amount cannot be represented */ }
+      }
+      rows.push({ label: 'RONIN Platform Fee', value: platformFeeValue })
+      if (platformUsd != null) { totalUsd += platformUsd; hasTotal = true } else totalComplete = false
+    }
+
+    const feeObject = quote.fees && typeof quote.fees === 'object' ? quote.fees : {}
+    const routeFeeEntries = ['zeroExFee', 'providerFee', 'routingFee', 'protocolFee']
+      .map((key) => feeObject[key] || quote[key])
+      .filter(Boolean)
+    for (const [index, fee] of routeFeeEntries.entries()) {
+      const presentation = quoteFeePresentation(fee, prices)
+      if (!presentation) { totalComplete = false; continue }
+      rows.push({ label: `Routing/Provider Fee${routeFeeEntries.length > 1 ? ` ${index + 1}` : ''}`, value: presentation.value })
+      if (presentation.usd != null) { totalUsd += presentation.usd; hasTotal = true } else totalComplete = false
+    }
+  } else if (network === 'robinhood') {
+    const gasCosts = Array.isArray(quote.gasCost) ? quote.gasCost : []
+    const fees = Array.isArray(quote.fees) ? quote.fees : []
+    const gasUsdValues = gasCosts.map((cost) => Number(cost?.amountUSD)).filter((value) => Number.isFinite(value) && value > 0)
+    const gasUsd = gasUsdValues.reduce((sum, value) => sum + value, 0)
+    if (gasUsd > 0) {
+      rows.push({ label: 'Network/Gas Fee', value: feeUsdLabel(gasUsd) })
+      totalUsd += gasUsd
+      hasTotal = true
+    } else {
+      const gasTokenLines = gasCosts.map((cost) => quoteFeePresentation(cost, prices)?.value).filter(Boolean)
+      rows.push({ label: 'Network/Gas Fee', value: gasTokenLines.join(', ') || 'Final fee shown by your wallet before signing' })
+      if (!gasTokenLines.length) totalComplete = false
+    }
+
+    const platformFeeCost = fees.find((cost) => {
+      const raw = cost?.feeSplit?.integratorFee
+      return raw != null && Number(raw) > 0
+    })
+    if (quote.integratorFeeApplied && platformFeeCost) {
+      const raw = platformFeeCost.feeSplit.integratorFee
+      const token = platformFeeCost.token || {}
+      const tokenAmount = formatRawFee(raw, token.decimals, token.symbol)
+      rows.push({ label: 'RONIN Platform Fee', value: tokenAmount || feeUsdLabel(platformFeeCost.amountUSD) || 'Included in the quoted route fees' })
+    }
+
+    const providerFeeCosts = fees.filter((cost) => !(Number(cost?.feeSplit?.integratorFee) > 0))
+    const providerFeeUsdValues = providerFeeCosts.map((cost) => Number(cost?.amountUSD)).filter((value) => Number.isFinite(value) && value > 0)
+    const providerFeeUsd = providerFeeUsdValues.reduce((sum, value) => sum + value, 0)
+    if (providerFeeUsd > 0) rows.push({ label: 'Routing/Provider Fee', value: feeUsdLabel(providerFeeUsd) })
+    else {
+      const providerFeeLines = providerFeeCosts.map((cost) => quoteFeePresentation(cost, prices)?.value).filter(Boolean)
+      if (providerFeeLines.length) rows.push({ label: 'Routing/Provider Fee', value: providerFeeLines.join(', ') })
+    }
+
+    const allCosts = [...gasCosts, ...fees]
+    const allUsdKnown = allCosts.length > 0 && allCosts.every((cost) => Number.isFinite(Number(cost?.amountUSD)))
+    if (allUsdKnown) {
+      totalUsd = allCosts.reduce((sum, cost) => sum + Math.max(0, Number(cost.amountUSD)), 0)
+      hasTotal = totalUsd > 0
+      totalComplete = true
+    } else {
+      totalComplete = false
+    }
+  }
+
+  if (!rows.some((row) => row.label === 'Routing/Provider Fee') && network !== 'robinhood') {
+    const providerFeeUsd = Number(quote.routingFeeUSD ?? quote.providerFeeUSD)
+    if (Number.isFinite(providerFeeUsd) && providerFeeUsd > 0) {
+      rows.push({ label: 'Routing/Provider Fee', value: feeUsdLabel(providerFeeUsd) })
+      totalUsd += providerFeeUsd
+      hasTotal = true
+    }
+  }
+
+  if (hasTotal && totalComplete) rows.push({ label: 'Estimated Total Fees', value: feeUsdLabel(totalUsd) })
+
   return (
-    <span className="jupiter-mark" style={{ width: size, height: size }} aria-hidden="true">
-      <svg viewBox="0 0 24 24" width={size} height={size}>
-        <circle cx="12" cy="12" r="12" fill="#0f1115" />
-        <path d="M4 14.5c2.6-2.2 5-2.2 7.6 0 2.6 2.2 5 2.2 7.6 0" stroke="#2ee6c5" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-        <path d="M4.6 10.4c2.6-2.2 5-2.2 7.6 0 2.6 2.2 5 2.2 7.6 0" stroke="#7de3ff" strokeWidth="1.6" fill="none" strokeLinecap="round" opacity=".85" />
-        <path d="M6 6.6c2.2-1.8 4.2-1.8 6.4 0 2.2 1.8 4.2 1.8 6.4 0" stroke="#c9f56b" strokeWidth="1.4" fill="none" strokeLinecap="round" opacity=".7" />
-      </svg>
-    </span>
+    <div className="swap-quote-disclosure">
+      <div className="swap-quote-provider">Route powered by <strong>{provider || 'Provider unavailable'}</strong></div>
+      {network === 'robinhood' && quote?.tool?.name && <div className="swap-quote-row"><span>Liquidity route</span><strong>{quote.tool.name}</strong></div>}
+      {rows.map((row) => <div className="swap-quote-row" key={row.label}><span>{row.label}</span><strong>{row.value}</strong></div>)}
+      <p>Fees shown are based on the current quote when supplied. Your wallet displays the final transaction fee before signing.</p>
+    </div>
   )
 }
 
@@ -339,32 +527,41 @@ function EthereumTokenSelector({ side, selected, other, walletTokens, onSelect, 
 // verified against any registry — they should double-check the
 // contract address before continuing.
 //
-// The banner is INFORMATIONAL ONLY — it does not block the swap. The
-// existing isWalletImpersonation() check (extended to also check
-// `trust === 'custom'`) already BLOCKS scam tokens that spoof a
-// curated symbol. This banner is for the much larger class of
-// legitimately-named but unverified tokens the user explicitly chose
-// to import.
+// Imported tokens remain explicitly unverified even when their display
+// metadata resembles a curated token. Acknowledgement is keyed to the
+// network and exact mint/contract address, never the displayed symbol.
 // =====================================================================
-function ImportedTokenSecurityBanner({ fromToken, toToken }) {
-  const importedFrom = fromToken?.trust === 'custom' ? fromToken : null
-  const importedTo = toToken?.trust === 'custom' ? toToken : null
-  if (!importedFrom && !importedTo) return null
-  const imported = importedFrom || importedTo
-  const label = importedFrom && importedTo
-    ? `${importedFrom.symbol || 'from'} + ${importedTo.symbol || 'to'}`
-    : (imported.symbol || 'the imported token')
+function getUnverifiedTokenAcknowledgementKey(network, fromToken, toToken) {
+  return [fromToken, toToken]
+    .filter((token) => token?.trust === 'custom')
+    .map((token) => {
+      const address = network === 'solana' ? token.mint : token.address
+      return `${network}:${String(address || '').toLowerCase()}`
+    })
+    .sort()
+    .join('|')
+}
+
+function ImportedTokenSecurityBanner({ network, fromToken, toToken, acknowledgementKey, acknowledgedKey, onAcknowledge }) {
+  const importedTokens = [fromToken, toToken].filter((token) => token?.trust === 'custom')
+  if (!importedTokens.length) return null
+  const networkName = network === 'solana' ? 'Solana' : network === 'ethereum' ? 'Ethereum' : 'Robinhood Chain'
+  const acknowledged = Boolean(acknowledgementKey) && acknowledgedKey === acknowledgementKey
   return (
     <div className="swap-imported-token-warning" role="alert">
-      <Icon name="info" size={14} />
       <div>
-        <strong>Unverified token: {label}</strong>
-        <small>
-          You're swapping an imported token that RoninSwap has NOT verified against any
-          registry. Double-check the contract address before continuing — imported tokens
-          can be scams with similar names. RoninSwap is not responsible for losses from
-          unverified tokens.
-        </small>
+        <strong><Icon name="info" size={14} /> UNVERIFIED TOKEN</strong>
+        {importedTokens.map((token) => (
+          <dl className="swap-imported-token-details" key={`${network}:${token.mint || token.address}`}>
+            <div><dt>Network</dt><dd>{networkName}</dd></div>
+            <div><dt>Token</dt><dd>{token.name || 'Unknown'} ({token.symbol || 'UNKNOWN'})</dd></div>
+            <div><dt>{network === 'solana' ? 'Mint address' : 'Contract address'}</dt><dd>{network === 'solana' ? token.mint : token.address}</dd></div>
+          </dl>
+        ))}
+        <label className="swap-imported-token-acknowledgement">
+          <input type="checkbox" checked={acknowledged} onChange={(event) => onAcknowledge?.(event.target.checked ? acknowledgementKey : '')} />
+          <span>I checked the network and exact mint/contract address. I understand this token is unverified.</span>
+        </label>
       </div>
     </div>
   )
@@ -412,11 +609,13 @@ function SwapCompletedBanner({ visible, subLabel, onDismiss }) {
 // Without this, the trending click handler on Ethereum/Robinhood was
 // a no-op (only Solana worked) — see handleTrendingTokenClick below.
 // =====================================================================
-const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
+const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUnverifiedTokenKey, onAcknowledgeUnverifiedToken }, ref) {
   const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [fromToken, setFromToken] = useState(ETHEREUM_SWAP_TOKENS[0])
   const [toToken, setToToken] = useState(ETHEREUM_SWAP_TOKENS[2])
+  const unverifiedTokenKey = getUnverifiedTokenAcknowledgementKey('ethereum', fromToken, toToken)
+  const importedTokensAcknowledged = !unverifiedTokenKey || acknowledgedUnverifiedTokenKey === unverifiedTokenKey
   const [amount, setAmount] = useState('')
   const [quote, setQuote] = useState(null)
   const [status, setStatus] = useState('idle')
@@ -447,6 +646,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
       if (token.address === fromToken.address && token.type === fromToken.type) return
       setToToken(token)
     }
+    onAcknowledgeUnverifiedToken?.('')
     setQuote(null)
     setStatus('idle')
     setMessage('')
@@ -534,8 +734,6 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
       setPrices(await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS))
     } catch (error) { setMessage(error.message) }
   }
-
-  const etherscanTxUrl = (hash) => `https://etherscan.io/tx/${hash}`
 
   const balanceLabel = (token) => {
     const entry = balances.get(token.address || 'native')
@@ -631,6 +829,10 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
   }
 
   const execute = async () => {
+    if (!importedTokensAcknowledged) {
+      setMessage('Review and acknowledge the unverified token warning before swapping.')
+      return
+    }
     if (executeInFlightRef.current) return
     executeInFlightRef.current = true
     try {
@@ -698,13 +900,21 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
 
   const busy = ['loading', 'approval_required', 'approval_pending', 'approval_confirmed', 'signing', 'pending'].includes(status)
   const statusMessage = { loading: 'Finding best route...', approval_required: 'Approval required. Review the exact allowance in MetaMask.', approval_pending: 'Approval pending...', approval_confirmed: 'Approval confirmed. Refreshing quote...', signing: 'Confirm the transaction in MetaMask.', pending: 'Transaction submitted. Waiting for confirmation...', confirmed: 'Swap confirmed.' }[status] || ''
-  const submit = () => { if (!account) return connect(); if (quote) return execute(); return requestQuote() }
+  const submit = () => {
+    if (!importedTokensAcknowledged) {
+      setMessage('Review and acknowledge the unverified token warning before swapping.')
+      return
+    }
+    if (!account) return connect()
+    if (quote) return execute()
+    return requestQuote()
+  }
   return (
     <div className="evm-swap-panel">
       <div className="swap-widget-head">
         <div>
           <h3>RONIN SWAP</h3>
-          <span className="swap-widget-powered">Powered by <b>0x</b> · Ethereum Mainnet</span>
+          <span className="swap-widget-powered">Route powered by <b>{quoteProviderLabel(quote) || 'supported providers'}</b> · Ethereum Mainnet</span>
         </div>
         <button type="button" className="swap-widget-gear" aria-label="Swap settings" disabled><Icon name="settings" size={18} /></button>
       </div>
@@ -734,14 +944,14 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quote ? formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6) : ''} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {account ? `${balanceLabel(toToken)} ${toToken.symbol}` : '--'}</span></div>
       </div>
-      <ImportedTokenSecurityBanner fromToken={fromToken} toToken={toToken} />
-      <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'signing' ? 'CONFIRM IN METAMASK...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
+      <ImportedTokenSecurityBanner network="ethereum" fromToken={fromToken} toToken={toToken} acknowledgementKey={unverifiedTokenKey} acknowledgedKey={acknowledgedUnverifiedTokenKey} onAcknowledge={onAcknowledgeUnverifiedToken} />
+      <button type="button" className="swap-cta" disabled={busy || !importedTokensAcknowledged} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'signing' ? 'CONFIRM IN METAMASK...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       <SwapCompletedBanner
         visible={showCompletedBanner}
         subLabel={txHash ? `Tx ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : 'Transaction confirmed on Ethereum.'}
         onDismiss={() => setShowCompletedBanner(false)}
       />
-      {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Ethereum Mainnet</strong></div><div className="swap-quote-row"><span>Route</span><strong>0x</strong></div><div className="swap-quote-row"><span>Gas estimate</span><strong>{quote.transaction?.gas ? `${quote.transaction.gas} gas` : '—'}</strong></div><div className="swap-quote-row"><span>Treasury fee</span><strong>{quote.swapFeeBps != null ? `${Number(quote.swapFeeBps) / 100}%` : '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.buyAmount ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</strong></div></div>}
+      {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Ethereum Mainnet</strong></div>{quote.route && <div className="swap-quote-row"><span>Route</span><strong>{typeof quote.route === 'string' ? quote.route : Array.isArray(quote.route) ? quote.route.map((step) => step?.name || step?.source || step?.fromToken?.symbol).filter(Boolean).join(' → ') : quote.route.name || quote.route.source || 'Route details available'}</strong></div>}<QuoteRouteDisclosure network="ethereum" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} /><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? `${formatEvmAmount(quote.minimumReceived, quote.buyDecimals || 6)} ${toToken.symbol}` : 'Not provided by route'}</strong></div></div>}
       <div className="swap-result-slot" aria-live="polite">
       {status === 'confirmed' && (() => {
         const points = completion?.points ?? completion?.pointsRecord ?? completion?.samuraiPoints ?? null
@@ -764,7 +974,9 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
             <h4>⚔️ SWAP COMPLETE</h4>
             <p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p>
             <p><strong>You Received:</strong> {quote ? `${formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6)} ${toToken.symbol}` : '—'}</p>
+            <p><strong>Network:</strong> {getChain('ethereum')?.name || 'Ethereum'}</p>
             <p><strong>Status:</strong> Confirmed</p>
+            {quote && <QuoteRouteDisclosure network="ethereum" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} />}
             <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}>
               <p style={{ margin: '0 0 4px', color: qualified ? 'var(--gold)' : 'var(--red-dark)' }}>
                 <strong>{qualified ? `+${pointsAwarded.toLocaleString()} Samurai Points` : hasPointsRecord ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong>
@@ -796,20 +1008,21 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel(_, ref) {
             </div>
             {txHash && (
               <>
-                <p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {`${txHash.slice(0, 5)}...${txHash.slice(-5)}`}</p>
+                <p style={{ margin: '8px 0 4px' }}><strong>Transaction hash:</strong> <code className="swap-result-hash">{txHash}</code></p>
                 <button type="button" className="swap-token-result" onClick={() => navigator.clipboard?.writeText?.(txHash) || null}>Copy Txn</button>
+                <TransactionExplorerLink network="ethereum" hash={txHash} />
               </>
             )}
           </div>
         )
       })()}
-      {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Ethereum swap could not be completed.'}</p><p>Review the wallet message and try again.</p></div>}
+      {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Ethereum swap could not be completed.'}</p><p>Review the wallet message and check the submitted transaction status before retrying.</p>{txHash && <TransactionExplorerLink network="ethereum" hash={txHash} />}</div>}
       </div>{/* /.swap-result-slot */}
       {statusMessage && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot">{statusMessage}</p>}
       {message && status !== 'confirmed' && status !== 'error' && <p className="swap-widget-foot" style={{ color: '#ba3c3c' }}>{message}</p>}
       {txHash && <p className="evm-success">Transaction: {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}
-      <p className="swap-widget-foot"><Icon name="shield" size={12} /> {status === 'confirmed' ? 'Swap confirmed on Ethereum Mainnet.' : 'Secure. Non-Custodial. Powered by 0x on Ethereum Mainnet.'}</p>
-      {pickerSide && <EthereumTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => pickerSide === 'from' ? setFromToken(token) : setToToken(token)} onClose={() => setPickerSide(null)} />}
+      <p className="swap-widget-foot"><Icon name="shield" size={12} /> {status === 'confirmed' ? 'Swap confirmed on Ethereum Mainnet.' : `Secure. Non-Custodial. Route powered by ${quoteProviderLabel(quote) || 'supported providers'} on Ethereum Mainnet.`}</p>
+      {pickerSide && <EthereumTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => selectToken(pickerSide, token)} onClose={() => setPickerSide(null)} />}
     </div>
   )
 })
@@ -1015,13 +1228,15 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
   )
 }
 
-const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
+const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledgedUnverifiedTokenKey, onAcknowledgeUnverifiedToken }, ref) {
   const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [sections, setSections] = useState({ all: [], tokens: [], memes: [], popular: [] })
   const [sectionsState, setSectionsState] = useState('loading')
   const [fromToken, setFromToken] = useState(ROBINHOOD_NATIVE_TOKEN)
   const [toToken, setToToken] = useState(ROBINHOOD_NATIVE_TOKEN)
+  const unverifiedTokenKey = getUnverifiedTokenAcknowledgementKey('robinhood', fromToken, toToken)
+  const importedTokensAcknowledged = !unverifiedTokenKey || acknowledgedUnverifiedTokenKey === unverifiedTokenKey
   const [pickerSide, setPickerSide] = useState(null)
   const [amount, setAmount] = useState('')
   const [quote, setQuote] = useState(null)
@@ -1053,6 +1268,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
       if (token.address === fromToken.address && token.type === fromToken.type) return
       setToToken(token)
     }
+    onAcknowledgeUnverifiedToken?.('')
     setQuote(null)
     setStatus('idle')
     setMessage('')
@@ -1283,6 +1499,10 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
   }
 
   const execute = async () => {
+    if (!importedTokensAcknowledged) {
+      setMessage('Review and acknowledge the unverified token warning before swapping.')
+      return
+    }
     if (executeInFlightRef.current) return
     executeInFlightRef.current = true
     try {
@@ -1364,14 +1584,22 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
 
   const busy = ['loading', 'approval_required', 'approval_pending', 'approval_confirmed', 'signing', 'pending'].includes(status)
   const quoteOutputAmount = quote?.expectedOutput ? formatTokenAmount(quote.expectedOutput, toToken.decimals || 18, 6) : ''
-  const submit = () => { if (!account) return connect(); if (quote) return execute(); return requestQuote() }
+  const submit = () => {
+    if (!importedTokensAcknowledged) {
+      setMessage('Review and acknowledge the unverified token warning before swapping.')
+      return
+    }
+    if (!account) return connect()
+    if (quote) return execute()
+    return requestQuote()
+  }
 
   return (
     <div className="evm-swap-panel">
       <div className="swap-widget-head">
         <div>
           <h3>RONIN SWAP</h3>
-          <span className="swap-widget-powered">Powered by <b>LI.FI</b> · Robinhood Chain</span>
+          <span className="swap-widget-powered">Route powered by <b>{quoteProviderLabel(quote) || 'supported providers'}</b> · Robinhood Chain</span>
         </div>
         <button type="button" className="swap-widget-gear" aria-label="Swap settings" disabled><Icon name="settings" size={18} /></button>
       </div>
@@ -1401,22 +1629,22 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel(_, ref) {
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quoteOutputAmount} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(toToken)} {toToken.symbol}</span></div>
       </div>
-      <ImportedTokenSecurityBanner fromToken={fromToken} toToken={toToken} />
-      <button type="button" className="swap-cta" disabled={busy} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
+      <ImportedTokenSecurityBanner network="robinhood" fromToken={fromToken} toToken={toToken} acknowledgementKey={unverifiedTokenKey} acknowledgedKey={acknowledgedUnverifiedTokenKey} onAcknowledge={onAcknowledgeUnverifiedToken} />
+      <button type="button" className="swap-cta" disabled={busy || !importedTokensAcknowledged} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       <SwapCompletedBanner
         visible={showCompletedBanner}
         subLabel={txHash ? `Tx ${txHash.slice(0, 10)}…${txHash.slice(-6)}` : 'Transaction confirmed on Robinhood Chain.'}
         onDismiss={() => setShowCompletedBanner(false)}
       />
-      {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {quoteOutputAmount || '0.00'} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Robinhood Chain</strong></div><div className="swap-quote-row"><span>Route</span><strong>{quote?.tool?.name || quote?.provider || 'LI.FI'}</strong></div><div className="swap-quote-row"><span>Quote ID</span><strong>{quote?.quoteId || '—'}</strong></div><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? formatTokenAmount(quote.minimumReceived, toToken.decimals || 18, 6) : '—'}</strong></div></div>}
+      {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {quoteOutputAmount || '0.00'} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Robinhood Chain</strong></div><QuoteRouteDisclosure network="robinhood" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} /><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? formatTokenAmount(quote.minimumReceived, toToken.decimals || 18, 6) : '—'}</strong></div></div>}
       <div className="swap-result-slot" aria-live="polite">
-      {status === 'confirmed' && <div className="swap-result-box swap-result-success"><h4>⚔️ SWAP COMPLETE</h4><p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p><p><strong>You Received:</strong> {quoteOutputAmount ? `${quoteOutputAmount} ${toToken.symbol}` : '—'}</p><p><strong>Status:</strong> Confirmed</p><div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}><p style={{ margin: '0 0 4px', color: completion?.points?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{completion?.points?.qualified ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || 0).toLocaleString()} Samurai Points` : completion?.points ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong></p>{completion?.points?.qualified && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}{completion?.points && !completion.points.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(completion.points.reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}</div>{txHash && <p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}</div>}
-      {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Robinhood swap could not be completed.'}</p></div>}
+      {status === 'confirmed' && <div className="swap-result-box swap-result-success"><h4>⚔️ SWAP COMPLETE</h4><p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p><p><strong>You Received:</strong> {quoteOutputAmount ? `${quoteOutputAmount} ${toToken.symbol}` : '—'}</p><p><strong>Network:</strong> {getChain('robinhood')?.name || 'Robinhood Chain'}</p><p><strong>Status:</strong> Confirmed</p>{quote && <QuoteRouteDisclosure network="robinhood" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} />}<div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}><p style={{ margin: '0 0 4px', color: completion?.points?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{completion?.points?.qualified ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || 0).toLocaleString()} Samurai Points` : completion?.points ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong></p>{completion?.points?.qualified && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}{completion?.points && !completion.points.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(completion.points.reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}</div>{txHash && <><p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {txHash}</p><TransactionExplorerLink network="robinhood" hash={txHash} /></>}</div>}
+      {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Robinhood swap could not be completed.'}</p><p>Check the submitted transaction status before retrying.</p>{txHash && <TransactionExplorerLink network="robinhood" hash={txHash} />}</div>}
       </div>{/* /.swap-result-slot */}
       {status !== 'confirmed' && status !== 'error' && message && <p className="swap-widget-foot">{message}</p>}
       {txHash && status !== 'confirmed' && <p className="evm-success">Transaction: {txHash.slice(0, 10)}...{txHash.slice(-8)}</p>}
-      <p className="swap-widget-foot"><Icon name="shield" size={12} /> Secure. Non-Custodial. Powered by LI.FI on Robinhood Chain.</p>
-      {pickerSide && <RobinhoodTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} sections={sections} walletTokens={walletTokens} onSelect={(token) => (pickerSide === 'from' ? setFromToken(token) : setToToken(token))} onClose={() => setPickerSide(null)} />}
+      <p className="swap-widget-foot"><Icon name="shield" size={12} /> Secure. Non-Custodial. Route powered by {quoteProviderLabel(quote) || 'supported providers'} on Robinhood Chain.</p>
+      {pickerSide && <RobinhoodTokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} sections={sections} walletTokens={walletTokens} onSelect={(token) => selectToken(pickerSide, token)} onClose={() => setPickerSide(null)} />}
     </div>
   )
 })
@@ -1737,8 +1965,15 @@ function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose 
   )
 }
 
+const SWAP_GUIDE_NETWORK_COPY = Object.freeze({
+  solana: 'Swap routes are sourced across supported Solana liquidity providers, including Jupiter routing where available.',
+  ethereum: 'Swap routes are sourced through supported Ethereum liquidity and routing providers. Your connected EVM wallet handles approvals and transaction signing.',
+  robinhood: 'Available routes are sourced through supported Robinhood Chain liquidity and routing providers. Your connected EVM wallet handles approvals and transaction signing.',
+})
+
 function SwapGuideModal({ network, onClose }) {
   const closeButtonRef = useRef(null)
+  const [expandedNetwork, setExpandedNetwork] = useState(network)
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -1754,6 +1989,8 @@ function SwapGuideModal({ network, onClose }) {
     }
   }, [onClose])
 
+  useEffect(() => setExpandedNetwork(network), [network])
+
   return createPortal(
     <div className="swap-guide-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="swap-guide-modal" role="dialog" aria-modal="true" aria-labelledby="swap-guide-title">
@@ -1762,23 +1999,44 @@ function SwapGuideModal({ network, onClose }) {
         </button>
         <span className="swap-guide-kicker"><Icon name="scroll" size={14} /> RONIN SWAP GUIDE</span>
         <h2 id="swap-guide-title">How to use swaps</h2>
-        <p className="swap-guide-intro">Choose a network, select the tokens, review the route, then approve the transaction in your wallet.</p>
+        <p className="swap-guide-intro">Choose Network → Choose Tokens → Review Route → Review Security and Fees → Approve Wallet → On-Chain Confirmation → Eligible Samurai Points</p>
 
         <div className="swap-guide-networks" aria-label="Network providers">
-          <p className={network === 'solana' ? 'active' : ''}><strong>Solana</strong><span>Jupiter routes swaps across Solana liquidity sources.</span></p>
-          <p className={network === 'ethereum' ? 'active' : ''}><strong>Ethereum</strong><span>0x provides Ethereum routes; MetaMask handles approvals and signing.</span></p>
-          <p className={network === 'robinhood' ? 'active' : ''}><strong>Robinhood Chain</strong><span>LI.FI finds routes on Robinhood Chain through MetaMask.</span></p>
+          {SUPPORTED_SWAP_CHAINS.map((chainKey) => {
+            const chain = getChain(chainKey)
+            if (!chain?.enabled) return null
+            return (
+              <section className={network === chainKey ? 'active' : ''} key={chainKey}>
+                <button type="button" aria-expanded={expandedNetwork === chainKey} onClick={() => setExpandedNetwork((current) => current === chainKey ? '' : chainKey)}><strong>{chain.name}</strong><Icon name="chevronDown" size={14} /></button>
+                <p className={expandedNetwork === chainKey ? 'expanded' : ''}>{SWAP_GUIDE_NETWORK_COPY[chainKey] || `Swap routes are sourced through supported ${chain.name} liquidity and routing providers. Review the live quote and your wallet before signing.`}</p>
+              </section>
+            )
+          })}
         </div>
 
         <div className="swap-guide-steps">
           <section><span>01</span><div><h3>Choose your pair</h3><p>Use the network tabs, then choose the token you pay and the token you receive. Use the direction control to flip the pair, or tap a featured, trending, or quick-pair shortcut.</p></div></section>
           <section><span>02</span><div><h3>Enter an amount</h3><p>Type an amount or use MAX to fill an available balance. Keep native tokens aside for network fees.</p></div></section>
-          <section><span>03</span><div><h3>Review the quote</h3><p>Solana shows rate, slippage, price impact, minimum received, and Jupiter fee. Ethereum shows its 0x route, gas estimate, and treasury fee; Robinhood shows the LI.FI route and minimum received. Review displayed fees before continuing.</p></div></section>
-          <section><span>04</span><div><h3>Approve in your wallet</h3><p>Confirm the transaction in your wallet. Token swaps on EVM networks may request a separate token approval first. Never approve a request you did not initiate.</p></div></section>
-          <section><span>05</span><div><h3>Track completion</h3><p>Wait for on-chain confirmation. The result shows transaction details; eligible swaps may also earn Samurai Points. Check Swap History for recorded activity.</p></div></section>
+          <section><span>03</span><div><h3>Review the quote</h3><p>Before swapping, review the exchange rate, price impact, slippage, minimum received, network fee, routing/provider fee and RONIN platform fee where applicable. The active routing provider should be displayed with the quote.</p></div></section>
+          <section><span>04</span><div><h3>Approve in your wallet</h3><p>Review the transaction carefully in your connected wallet before signing. EVM token swaps may require a separate token-spending approval before the swap transaction. Only approve spending requested by a swap you initiated. Verify the network, token, amount and requesting contract before signing.</p></div></section>
         </div>
 
-        <p className="swap-guide-safety"><Icon name="shield" size={15} /><span><strong>Stay in control.</strong> RoninSwap is non-custodial. Imported tokens are unverified; confirm their mint or contract address before swapping. Network fees still apply.</span></p>
+        <section className="swap-guide-security" aria-label="Security check">
+          <h3><Icon name="shield" size={16} /> SECURITY CHECK</h3>
+          <ul>{['Check network', 'Check token contract/mint', 'Check amount', 'Check price impact/slippage', 'Check all applicable fees', 'Check the wallet transaction', 'Then sign'].map((item) => <li key={item}><Icon name="check" size={13} />{item}</li>)}</ul>
+        </section>
+
+        <div className="swap-guide-steps swap-guide-final-steps">
+          <section><span>05</span><div><h3>Track completion</h3><p>Wait for on-chain confirmation. Once confirmed, show the transaction status, transaction hash/signature, network, tokens swapped, amounts and applicable fees. Eligible activity may also earn Samurai Points. Check your Samurai Profile for recorded activity and points.</p></div></section>
+        </div>
+
+        <section className="swap-guide-failure">
+          <h3>If a transaction fails</h3>
+          <p>Do not immediately repeat a transaction without checking its on-chain status. Refresh the transaction status first and confirm whether the previous transaction succeeded or failed.</p>
+          <p>Use the transaction explorer link in the swap result when one is available.</p>
+        </section>
+
+        <p className="swap-guide-safety"><Icon name="shield" size={15} /><span><strong>STAY IN CONTROL</strong><br />RONIN Swap is designed to be non-custodial — transactions are authorised from your connected wallet. Imported tokens may be unverified. Always confirm the correct network and mint/contract address before swapping. Never approve a transaction you did not initiate.</span></p>
       </section>
     </div>,
     document.body,
@@ -1789,6 +2047,7 @@ export default function Swap() {
   const { wallet, openWalletModal, liveStats, liveStatsState, addEvmWallet } = useWallet()
   const [network, setNetwork] = useState('solana')
   const [showSwapGuide, setShowSwapGuide] = useState(false)
+  const [acknowledgedUnverifiedTokenKey, setAcknowledgedUnverifiedTokenKey] = useState('')
   const [tab, setTab] = useState('swap')
   const [fromToken, setFromToken] = useState(TOKEN_BY_MINT[SOL_MINT])
   const [toToken, setToToken] = useState(TOKEN_BY_MINT[RONIN_MINT] || TRUSTED_TOKENS[1])
@@ -1851,6 +2110,8 @@ export default function Swap() {
   const [trendingRetry, setTrendingRetry] = useState(0)
   const swapInFlightRef = useRef(false)
   const paused = !SWAP_ENABLED
+  const unverifiedTokenKey = getUnverifiedTokenAcknowledgementKey('solana', fromToken, toToken)
+  const importedTokensAcknowledged = !unverifiedTokenKey || acknowledgedUnverifiedTokenKey === unverifiedTokenKey
   const quoteAmountRaw = rawAmountFromUi(amountInput, fromToken?.decimals || 9)
 
   useEffect(() => {
@@ -2085,6 +2346,7 @@ export default function Swap() {
       if (token.mint === fromToken.mint) return
       setToToken(token)
     }
+    setAcknowledgedUnverifiedTokenKey('')
     setQuote(null)
     setTxState('idle')
     setTxError('')
@@ -2093,6 +2355,7 @@ export default function Swap() {
   const flipTokens = () => {
     setFromToken(toToken)
     setToToken(fromToken)
+    setAcknowledgedUnverifiedTokenKey('')
     setQuote(null)
     setTxState('idle')
     setTxError('')
@@ -2104,6 +2367,7 @@ export default function Swap() {
     if (from && to) {
       setFromToken(from)
       setToToken(to)
+      setAcknowledgedUnverifiedTokenKey('')
       setQuote(null)
       setTxState('idle')
       setTxError('')
@@ -2192,6 +2456,7 @@ export default function Swap() {
 
   const validateSwapRequest = () => {
     if (!SWAP_ENABLED) return 'The swap flow is currently unavailable.'
+    if (!importedTokensAcknowledged) return 'Review and acknowledge the unverified token warning before swapping.'
     if (!wallet?.address || !isValidWalletAddress(wallet.address)) return 'Connect a valid wallet to continue.'
     if (!fromToken || !toToken) return 'Select a valid token pair.'
     if (fromToken.mint === toToken.mint) return 'Select two different tokens.'
@@ -2228,6 +2493,10 @@ export default function Swap() {
       event.stopPropagation()
     }
     if (!SWAP_ENABLED || swapInFlightRef.current) return false
+    if (!importedTokensAcknowledged) {
+      setTxError('Review and acknowledge the unverified token warning before swapping.')
+      return false
+    }
 
     if (!wallet?.address) {
       openWalletModal()
@@ -2333,6 +2602,11 @@ export default function Swap() {
 
   const executeSwap = async (preparedQuote = null) => {
     if (!SWAP_ENABLED || swapInFlightRef.current) return
+    if (!importedTokensAcknowledged) {
+      setTxState('error')
+      setTxError('Review and acknowledge the unverified token warning before swapping.')
+      return
+    }
     if (!wallet?.address) {
       openWalletModal()
       return
@@ -2565,7 +2839,7 @@ export default function Swap() {
               <span className="swap-hero-title-red">SWAP</span>
             </h1>
             <div className="swap-hero-powered">
-              <i aria-hidden="true" /> POWERED BY <JupiterMark size={18} /> <b>JUPITER</b> <i aria-hidden="true" />
+              <i aria-hidden="true" /> SUPPORTED ROUTING PROVIDERS <i aria-hidden="true" />
             </div>
 
             <h2 className="swap-hero-sub">
@@ -2586,16 +2860,16 @@ export default function Swap() {
           {/* ---------- SWAP WIDGET ---------- */}
           <div className="swap-widget">
             <div className="swap-widget-toolbar">
-              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => setNetwork('solana')}>Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => setNetwork('ethereum')}>Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => setNetwork('robinhood')}>Robinhood</button></div>
+              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('solana') }}>Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('ethereum') }}>Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('robinhood') }}>Robinhood</button></div>
               <button type="button" className="swap-help-trigger" onClick={() => setShowSwapGuide(true)} aria-label="How to use Ronin Swap" title="How to use Ronin Swap">
                 <Icon name="scroll" size={17} /><span>How to use</span>
               </button>
             </div>
-            {network === 'ethereum' ? <EthereumSwapPanel ref={ethereumPanelRef} /> : network === 'robinhood' ? <RobinhoodSwapPanel ref={robinhoodPanelRef} /> : <>
+            {network === 'ethereum' ? <EthereumSwapPanel ref={ethereumPanelRef} acknowledgedUnverifiedTokenKey={acknowledgedUnverifiedTokenKey} onAcknowledgeUnverifiedToken={setAcknowledgedUnverifiedTokenKey} /> : network === 'robinhood' ? <RobinhoodSwapPanel ref={robinhoodPanelRef} acknowledgedUnverifiedTokenKey={acknowledgedUnverifiedTokenKey} onAcknowledgeUnverifiedToken={setAcknowledgedUnverifiedTokenKey} /> : <>
             <div className="swap-widget-head">
               <div>
                 <h3>RONIN SWAP</h3>
-                <span className="swap-widget-powered">Powered by <JupiterMark size={15} /> <b>Jupiter</b></span>
+                <span className="swap-widget-powered">Route powered by {quoteProviderLabel(quote) === 'Jupiter' && <b>Jupiter</b>}{quoteProviderLabel(quote) !== 'Jupiter' && <b>{quoteProviderLabel(quote) || 'supported providers'}</b>}</span>
               </div>
               <button type="button" className="swap-widget-gear" onClick={handleSwapAction} aria-label="Swap settings" aria-disabled={paused ? 'true' : undefined} disabled={paused}>
                 <Icon name="settings" size={18} />
@@ -2683,7 +2957,7 @@ export default function Swap() {
               </div>
             </div>
 
-            <ImportedTokenSecurityBanner fromToken={fromToken} toToken={toToken} />
+            <ImportedTokenSecurityBanner network="solana" fromToken={fromToken} toToken={toToken} acknowledgementKey={unverifiedTokenKey} acknowledgedKey={acknowledgedUnverifiedTokenKey} onAcknowledge={setAcknowledgedUnverifiedTokenKey} />
             <button
               type="button"
               className="swap-cta"
@@ -2701,7 +2975,7 @@ export default function Swap() {
                   await executeSwap(preparedQuote)
                 }
               }}
-              disabled={paused || swapInFlightRef.current || txState === 'preparing' || txState === 'signing' || txState === 'submitted' || txState === 'confirming'}
+              disabled={paused || !importedTokensAcknowledged || swapInFlightRef.current || txState === 'preparing' || txState === 'signing' || txState === 'submitted' || txState === 'confirming'}
               aria-disabled={paused ? 'true' : undefined}
             >
               {txState === 'preparing' ? 'PREPARING SWAP...' : txState === 'signing' ? 'READY FOR WALLET APPROVAL...' : txState === 'submitted' ? 'SUBMITTED...' : txState === 'confirming' ? 'CONFIRMING...' : txState === 'success' ? 'SWAP COMPLETE' : txState === 'failed' ? 'TRY AGAIN' : txState === 'ready_to_sign' ? 'READY FOR WALLET APPROVAL' : !wallet?.address ? 'CONNECT WALLET TO SWAP' : 'SWAP'}
@@ -2725,7 +2999,9 @@ export default function Swap() {
                     <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem' }}>⚔️ SWAP COMPLETE</h4>
                     <p style={{ margin: '4px 0' }}><strong>You Paid:</strong> {amountInput || '0'} {fromToken.symbol}</p>
                     <p style={{ margin: '4px 0' }}><strong>You Received:</strong> {receivedAmount != null ? `${receivedAmount.toFixed(6)} ${toToken.symbol}` : '—'}</p>
+                    <p style={{ margin: '4px 0' }}><strong>Network:</strong> {getChain('solana')?.name || 'Solana'}</p>
                     <p style={{ margin: '4px 0' }}><strong>Status:</strong> Confirmed</p>
+                    {quote && <QuoteRouteDisclosure network="solana" quote={quote} fromToken={fromToken} toToken={toToken} />}
                     <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}>
                       <p style={{ margin: '0 0 4px', color: pointsResult?.success && pointsResult?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{pointsResult?.success && pointsResult?.qualified ? `+${Number(pointsResult.pointsAwarded || 0).toLocaleString()} Samurai Points` : pointsResult?.success ? '0 Samurai Points' : persistenceStatus === 'saving' ? 'Calculating Samurai Points...' : 'Samurai Points unavailable'}</strong></p>
                       {pointsResult?.success && pointsResult?.qualified && <><p style={{ margin: '4px 0', color: 'var(--ink)' }}>Season Points: {Number(pointsResult.walletSeasonPoints || 0).toLocaleString()}</p><p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(pointsResult.qualifyingVolumeUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p></>}
@@ -2734,13 +3010,11 @@ export default function Swap() {
                     </div>
                     {txSignature && (
                       <>
-                        <p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {shortSignature(txSignature, 5)}</p>
+                        <p style={{ margin: '8px 0 4px' }}><strong>Transaction signature:</strong> <code className="swap-result-hash">{txSignature}</code></p>
                         <button type="button" className="swap-token-result" onClick={() => navigator.clipboard?.writeText?.(txSignature)} style={{ marginTop: '6px' }}>
                           Copy Signature
                         </button>
-                        <a href={solscanTxUrl(txSignature)} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '8px', color: '#7de3ff' }}>
-                          VIEW ON SOLSCAN
-                        </a>
+                        <TransactionExplorerLink network="solana" hash={txSignature} />
                       </>
                     )}
                   </>
@@ -2748,6 +3022,8 @@ export default function Swap() {
                   <>
                     <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem' }}>SWAP FAILED</h4>
                     <p style={{ margin: '0' }}>{txError}</p>
+                    <p style={{ margin: '6px 0 0' }}>Check the transaction status before retrying.</p>
+                    {txSignature && <><p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {shortSignature(txSignature, 5)}</p><TransactionExplorerLink network="solana" hash={txSignature} /></>}
                   </>
                 )}
 
@@ -2776,13 +3052,11 @@ export default function Swap() {
                   setQuoteState('idle')
                 }} aria-label="Refresh quote" disabled={paused || !wallet?.address}><Icon name="refresh" size={13} /></button>
               </div>
-              <div className="swap-quote-row"><span>Slippage Tolerance <Icon name="info" size={12} /></span><strong>1% <Icon name="pencil" size={11} /></strong></div>
-              <div className="swap-quote-row"><span>Price Impact <Icon name="info" size={12} /></span><strong>{quote?.priceImpactPct ? Number(quote.priceImpactPct).toFixed(2) + '%' : '--'}</strong></div>
-              <div className="swap-quote-row"><span>Minimum Received <Icon name="info" size={12} /></span><strong>{quote?.otherAmountThreshold ? formatTokenAmount(quote.otherAmountThreshold, toToken.decimals || 6, 6) : '--'}</strong></div>
-              <div className="swap-quote-row"><span>Swap Fee (0.5%) <Icon name="info" size={12} /></span><strong>{quote?.platformFee ? formatTokenAmount(quote.platformFee.amount, quote.platformFee.decimals || 6, 6) : '--'}</strong></div>
+              <div className="swap-quote-row"><span>Minimum Received <Icon name="info" size={12} /></span><strong>{quote?.otherAmountThreshold ? `${formatTokenAmount(quote.otherAmountThreshold, toToken.decimals || 6, 6)} ${toToken.symbol}` : '--'}</strong></div>
+              <QuoteRouteDisclosure network="solana" quote={quote} fromToken={fromToken} toToken={toToken} />
             </div>
 
-            <p className="swap-widget-foot"><Icon name="shield" size={12} /> {txState === 'ready_to_sign' ? 'Unsigned swap prepared — ready for wallet approval.' : txState === 'signing' ? 'READY FOR WALLET APPROVAL' : txState === 'submitted' ? 'Transaction submitted to Jupiter.' : txState === 'confirming' ? 'Waiting for on-chain confirmation.' : 'Secure. Non-Custodial. Powered by Jupiter Aggregator.'}</p>
+            <p className="swap-widget-foot"><Icon name="shield" size={12} /> {txState === 'ready_to_sign' ? 'Unsigned swap prepared — ready for wallet approval.' : txState === 'signing' ? 'READY FOR WALLET APPROVAL' : txState === 'submitted' ? `Transaction submitted to ${quoteProviderLabel(quote) || 'the routing provider'}.` : txState === 'confirming' ? 'Waiting for on-chain confirmation.' : `Secure. Non-Custodial. Route powered by ${quoteProviderLabel(quote) || 'supported providers'}.`}</p>
             </>}
           </div>
 
@@ -2940,7 +3214,7 @@ export default function Swap() {
           <div className="swap-purpose-torii" aria-hidden="true">⛩</div>
         </div>
       </section>
-      {pickerSide && <TokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => selectToken(pickerSide, token)} onClose={() => setPickerSide(null)} />}
+      {pickerSide && <TokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => { setAcknowledgedUnverifiedTokenKey(''); selectToken(pickerSide, token) }} onClose={() => setPickerSide(null)} />}
       {showSwapGuide && <SwapGuideModal network={network} onClose={() => setShowSwapGuide(false)} />}
     </div>
   )

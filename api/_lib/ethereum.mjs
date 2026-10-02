@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
 const NATIVE = 'native'
-const DEFAULT_TREASURY = '0xDbD2f56Eb43CE4fe8DF7322742DDdCB9F48064a9'
+const DEFAULT_TREASURY = '0xAbAaE77C9c4dA60C6612BB90Da4f2452052B8853'
 const SUPPORTED = new Set([
   '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
   '0xdac17f958d2ee523a2206206994597c13d831ec7', '0x2260fac5e5542a773aa44fbcedf7c193bc2c599',

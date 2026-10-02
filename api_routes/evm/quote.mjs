@@ -58,8 +58,12 @@ export default async function handler(req, res) {
     const allowanceTarget = result.permit2?.allowanceTarget || result.allowanceTarget || null
     if (!isEthereumAddress(transaction.to) || (allowanceTarget && !isEthereumAddress(allowanceTarget)) || allowanceTarget?.toLowerCase() === normalizedSellToken.toLowerCase()) return apiError(res, 502, 'INVALID_ROUTE_TARGET', 'The routing provider returned an invalid transaction target.')
     const expiresAt = result.expiration ? Date.parse(result.expiration) : Date.now() + 5 * 60_000
+    const minimumReceived = result.minBuyAmount || null
+    const derivedSlippageBps = minimumReceived && BigInt(result.buyAmount) > 0n
+      ? Math.max(0, Number(((BigInt(result.buyAmount) - BigInt(minimumReceived)) * 10_000n) / BigInt(result.buyAmount)))
+      : null
     const proof = createQuoteProof({ chainId: 1, wallet: requestTaker, sellToken: sellToken === 'native' ? 'native' : normalizedSellToken.toLowerCase(), buyToken: buyToken === 'native' ? 'native' : normalizedBuyToken.toLowerCase(), sellAmount: String(sellAmount), buyAmount: String(result.buyAmount), to: transaction.to.toLowerCase(), data: transaction.data, value: String(transaction.value), volumeUsd: volumeUsd == null ? null : Number(volumeUsd), sellDecimals: sellToken === 'native' ? 18 : await tokenDecimals(normalizedSellToken), buyDecimals: buyToken === 'native' ? 18 : await tokenDecimals(normalizedBuyToken) }, expiresAt)
-    return json(res, 200, { chainId: 1, provider: '0x', buyAmount: result.buyAmount, sellAmount: result.sellAmount, volumeUsd, quoteProof: proof.proof, expiresAt: proof.expiresAt, price: result.price || null, liquidityAvailable: true, transaction, allowanceTarget, route: result.route || null, swapFeeBps: fee.bps, swapFeeRecipient: fee.recipient, integratorFee: result.fees?.integratorFee || null })
+    return json(res, 200, { chainId: 1, provider: '0x', buyAmount: result.buyAmount, sellAmount: result.sellAmount, minimumReceived, slippageBps: result.slippageBps ?? derivedSlippageBps, priceImpactPct: result.priceImpactPct ?? null, fees: result.fees || null, volumeUsd, quoteProof: proof.proof, expiresAt: proof.expiresAt, price: result.price || null, liquidityAvailable: true, transaction, allowanceTarget, route: result.route || null, swapFeeBps: fee.bps, swapFeeRecipient: fee.recipient, integratorFee: result.fees?.integratorFee || null })
   } catch (error) {
     console.error('0x quote request failed:', error?.name || 'Error', error?.message || 'Unknown error')
     return apiError(res, error?.name === 'TimeoutError' ? 504 : 502, 'ZEROX_NETWORK_ERROR', 'Ethereum routing is temporarily unavailable. Please try again.')

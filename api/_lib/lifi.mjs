@@ -10,7 +10,7 @@ export const LIFI_BASE_URL = String(runtimeEnv.LIFI_BASE_URL || 'https://li.ques
 export const LIFI_INTEGRATOR = String(runtimeEnv.LIFI_INTEGRATOR || 'RoninSamurai')
 export const LIFI_FEE_BPS = Number(runtimeEnv.LIFI_FEE_BPS || 50)
 export const LIFI_FEE_ENABLED = String(runtimeEnv.LIFI_FEE_ENABLED || '').toLowerCase() === 'true'
-const DEFAULT_FEE_RECEIVER_FALLBACK = '0xDbD2f56Eb43CE4fe8DF7322742DDdCB9F48064a9'
+const DEFAULT_FEE_RECEIVER_FALLBACK = '0xabaae77c9c4da60c6612bb90da4f2452052b8853'
 export const LIFI_FEE_RECEIVER = String(runtimeEnv.LIFI_FEE_RECEIVER || runtimeEnv.ETHEREUM_TREASURY_ADDRESS || DEFAULT_FEE_RECEIVER_FALLBACK).trim()
 export const LIFI_FEE_DECIMAL = (() => {
   const raw = Number.isFinite(LIFI_FEE_BPS) ? LIFI_FEE_BPS / 10_000 : 0

@@ -288,6 +288,7 @@ export async function getJupiterOrderV1Fallback({ inputMint, outputMint, amountL
     feeBps: null,
     feeMint: null,
     platformFee: null,
+    provider: quoteBody.provider || 'jupiter',
     // Fields needed by isQuoteCurrentForRequest() validation:
     inputMint: String(inputMint),
     outputMint: String(outputMint),

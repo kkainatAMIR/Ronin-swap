@@ -16,7 +16,7 @@ console.log('================= ENVIRONMENT (POST-FIX) =================')
 const env = process.env
 check('LIFI_INTEGRATOR=my-ronin-integra2', env.LIFI_INTEGRATOR === 'my-ronin-integra2', `got="${env.LIFI_INTEGRATOR}"`)
 check('LIFI_FEE_BPS="25"', env.LIFI_FEE_BPS === '25', `got="${env.LIFI_FEE_BPS}"`)
-check('LIFI_FEE_RECEIVER matches spec', (env.LIFI_FEE_RECEIVER || '').toLowerCase() === '0xdbd2f56eb43ce4fe8df7322742dddcbf9f48064a9', env.LIFI_FEE_RECEIVER)
+check('LIFI_FEE_RECEIVER matches spec', (env.LIFI_FEE_RECEIVER || '').toLowerCase() === '0xabaae77c9c4da60c6612bb90da4f2452052b8853', env.LIFI_FEE_RECEIVER)
 check('LIFI_FEE_ENABLED=true', env.LIFI_FEE_ENABLED === 'true')
 console.log('')
 
@@ -30,7 +30,7 @@ check('lifiFeeConfigIsValid() ok=true', validity.ok === true, JSON.stringify(val
 const fp = mod.buildLifiFeeQueryParams()
 check('buildLifiFeeQueryParams().integrator = my-ronin-integra2', fp.integrator === 'my-ronin-integra2', fp.integrator)
 check('buildLifiFeeQueryParams().fee = "0.0025" (25 BPS as decimal string)', fp.fee === '0.0025', fp.fee)
-check('buildLifiFeeQueryParams().feeRecipient = exact LI.FI portal wallet address', /^0x[0-9a-fA-F]{40}$/.test(fp.feeRecipient) && (fp.feeRecipient || '').toLowerCase() === '0xdbd2f56eb43ce4fe8df7322742dddcbf9f48064a9', fp.feeRecipient)
+check('buildLifiFeeQueryParams().feeRecipient = exact LI.FI portal wallet address', /^0x[0-9a-fA-F]{40}$/.test(fp.feeRecipient) && (fp.feeRecipient || '').toLowerCase() === '0xabaae77c9c4da60c6612bb90da4f2452052b8853', fp.feeRecipient)
 const summary = mod.lifiConfigSummary()
 check('summary.integrator = my-ronin-integra2', summary.integrator === 'my-ronin-integra2')
 check('summary.fee.valid = true', summary.fee?.valid === true)
