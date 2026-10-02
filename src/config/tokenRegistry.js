@@ -25,7 +25,7 @@ export const TRUSTED_TOKENS = Object.freeze([
   token({ mint: SOL_MINT, symbol: 'SOL', name: 'Solana', glyph: '◎', className: 'tok-sol', decimals: 9, section: ['popular'] }),
   token({ mint: USDC_MINT, symbol: 'USDC', name: 'USD Coin', glyph: '$', className: 'tok-usdc', decimals: 6, section: ['popular'] }),
   token({ mint: USDT_MINT, symbol: 'USDT', name: 'Tether USD', glyph: '₮', className: 'tok-usdt', decimals: 6, section: [] }),
-  token({ mint: RONIN_MINT, symbol: 'RONIN', name: 'RONIN', glyph: '❁', className: 'tok-ronin', decimals: 6, section: ['popular', 'ronin'] }),
+  token({ mint: RONIN_MINT, symbol: 'RONIN', name: 'RONIN', logoURI: '/ronin-icon.jpeg', glyph: '❁', className: 'tok-ronin', decimals: 6, section: ['popular', 'ronin'] }),
   token({ mint: 'pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn', symbol: 'PUMP', name: 'Pump', logoURI: '/images/tokens/pump.png', glyph: 'P', className: 'tok-pump', decimals: 6, section: ['popular'] }),
   token({ mint: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', symbol: 'JUP', name: 'Jupiter', logoURI: '/images/tokens/jup.png', glyph: 'J', className: 'tok-jup', decimals: 6, section: ['popular'] }),
   token({ mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', symbol: 'BONK', name: 'Bonk', logoURI: '/images/tokens/bonk.jpg', glyph: 'B', className: 'tok-bonk', decimals: 5, section: ['popular'] }),

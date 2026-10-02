@@ -1508,6 +1508,10 @@ function TokenMark({ token, size = 25 }) {
   // ALWAYS renders.
   // =====================================================================
   const candidateLogos = useMemo(() => {
+    const mint = String(token?.mint || token?.address || '')
+    if (mint === RONIN_MINT && TOKEN_BY_MINT[RONIN_MINT]?.logoURI) {
+      return [TOKEN_BY_MINT[RONIN_MINT].logoURI]
+    }
     const list = []
     if (token?.logoURI) list.push(token.logoURI)
     if (token?.logo) list.push(token.logo)
@@ -1531,7 +1535,7 @@ function TokenMark({ token, size = 25 }) {
     }
     // De-duplicate (DexScreener + 1inch sometimes return the same URL)
     return [...new Set(list)]
-  }, [token?.logoURI, token?.logo, token?.icon, token?.image, token?.fallbackLogoURI, token?.address])
+  }, [token?.logoURI, token?.logo, token?.icon, token?.image, token?.fallbackLogoURI, token?.mint, token?.address])
 
   // The URL that successfully loaded (null = still loading or all failed)
   const [resolvedUrl, setResolvedUrl] = useState(null)
@@ -1733,9 +1737,58 @@ function TokenSelector({ side, selected, other, walletTokens, onSelect, onClose 
   )
 }
 
+function SwapGuideModal({ network, onClose }) {
+  const closeButtonRef = useRef(null)
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    closeButtonRef.current?.focus()
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onClose])
+
+  return createPortal(
+    <div className="swap-guide-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="swap-guide-modal" role="dialog" aria-modal="true" aria-labelledby="swap-guide-title">
+        <button ref={closeButtonRef} type="button" className="swap-guide-close" onClick={onClose} aria-label="Close swap guide">
+          <Icon name="close" size={18} />
+        </button>
+        <span className="swap-guide-kicker"><Icon name="scroll" size={14} /> RONIN SWAP GUIDE</span>
+        <h2 id="swap-guide-title">How to use swaps</h2>
+        <p className="swap-guide-intro">Choose a network, select the tokens, review the route, then approve the transaction in your wallet.</p>
+
+        <div className="swap-guide-networks" aria-label="Network providers">
+          <p className={network === 'solana' ? 'active' : ''}><strong>Solana</strong><span>Jupiter routes swaps across Solana liquidity sources.</span></p>
+          <p className={network === 'ethereum' ? 'active' : ''}><strong>Ethereum</strong><span>0x provides Ethereum routes; MetaMask handles approvals and signing.</span></p>
+          <p className={network === 'robinhood' ? 'active' : ''}><strong>Robinhood Chain</strong><span>LI.FI finds routes on Robinhood Chain through MetaMask.</span></p>
+        </div>
+
+        <div className="swap-guide-steps">
+          <section><span>01</span><div><h3>Choose your pair</h3><p>Use the network tabs, then choose the token you pay and the token you receive. Use the direction control to flip the pair, or tap a featured, trending, or quick-pair shortcut.</p></div></section>
+          <section><span>02</span><div><h3>Enter an amount</h3><p>Type an amount or use MAX to fill an available balance. Keep native tokens aside for network fees.</p></div></section>
+          <section><span>03</span><div><h3>Review the quote</h3><p>Solana shows rate, slippage, price impact, minimum received, and Jupiter fee. Ethereum shows its 0x route, gas estimate, and treasury fee; Robinhood shows the LI.FI route and minimum received. Review displayed fees before continuing.</p></div></section>
+          <section><span>04</span><div><h3>Approve in your wallet</h3><p>Confirm the transaction in your wallet. Token swaps on EVM networks may request a separate token approval first. Never approve a request you did not initiate.</p></div></section>
+          <section><span>05</span><div><h3>Track completion</h3><p>Wait for on-chain confirmation. The result shows transaction details; eligible swaps may also earn Samurai Points. Check Swap History for recorded activity.</p></div></section>
+        </div>
+
+        <p className="swap-guide-safety"><Icon name="shield" size={15} /><span><strong>Stay in control.</strong> RoninSwap is non-custodial. Imported tokens are unverified; confirm their mint or contract address before swapping. Network fees still apply.</span></p>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
 export default function Swap() {
   const { wallet, openWalletModal, liveStats, liveStatsState, addEvmWallet } = useWallet()
   const [network, setNetwork] = useState('solana')
+  const [showSwapGuide, setShowSwapGuide] = useState(false)
   const [tab, setTab] = useState('swap')
   const [fromToken, setFromToken] = useState(TOKEN_BY_MINT[SOL_MINT])
   const [toToken, setToToken] = useState(TOKEN_BY_MINT[RONIN_MINT] || TRUSTED_TOKENS[1])
@@ -2532,7 +2585,12 @@ export default function Swap() {
 
           {/* ---------- SWAP WIDGET ---------- */}
           <div className="swap-widget">
-            <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => setNetwork('solana')}>Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => setNetwork('ethereum')}>Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => setNetwork('robinhood')}>Robinhood</button></div>
+            <div className="swap-widget-toolbar">
+              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => setNetwork('solana')}>Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => setNetwork('ethereum')}>Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => setNetwork('robinhood')}>Robinhood</button></div>
+              <button type="button" className="swap-help-trigger" onClick={() => setShowSwapGuide(true)} aria-label="How to use Ronin Swap" title="How to use Ronin Swap">
+                <Icon name="scroll" size={17} /><span>How to use</span>
+              </button>
+            </div>
             {network === 'ethereum' ? <EthereumSwapPanel ref={ethereumPanelRef} /> : network === 'robinhood' ? <RobinhoodSwapPanel ref={robinhoodPanelRef} /> : <>
             <div className="swap-widget-head">
               <div>
@@ -2740,7 +2798,6 @@ export default function Swap() {
               <a className="swap-reference-outline-button" href="#profile">VIEW POINTS &amp; REWARDS</a>
             </section>
             <section className="swap-reference-card swap-reference-clan swap-reference-desktop-only"><div className="swap-reference-card-title"><span className="swap-reference-icon">♨</span><strong>EVERY SWAP FUELS THE CLAN</strong></div><p>A portion of platform fees supports LP, buy &amp; burns, validator development and future utilities.</p><a href="#tokenomics" className="swap-reference-card-link">VIEW TOKENOMICS →</a></section>
-            <section className="swap-reference-card swap-reference-live"><div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>LIVE ECOSYSTEM STATS</strong><span className="swap-reference-live-dot">● Live</span></div><div className="swap-reference-live-grid">{ecosystemStats.slice(0, 4).map((stat) => <div key={stat.label}><small>{stat.label}</small><b>{stat.value}</b><em>{stat.note || 'Live data'}</em></div>)}</div></section>
           </aside>
         </div>
       </section>
@@ -2884,6 +2941,7 @@ export default function Swap() {
         </div>
       </section>
       {pickerSide && <TokenSelector side={pickerSide} selected={pickerSide === 'from' ? fromToken : toToken} other={pickerSide === 'from' ? toToken : fromToken} walletTokens={walletTokens} onSelect={(token) => selectToken(pickerSide, token)} onClose={() => setPickerSide(null)} />}
+      {showSwapGuide && <SwapGuideModal network={network} onClose={() => setShowSwapGuide(false)} />}
     </div>
   )
 }
