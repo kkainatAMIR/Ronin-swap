@@ -55,7 +55,7 @@ export function getPointsConfiguration() {
   }
 }
 
-export function getEffectivePointsConfiguration(savedSettings = null) {
+export function getEffectivePointsConfiguration(savedSettings = null, season = null) {
   const fallback = getPointsConfiguration()
   const saved = savedSettings || {}
   const hasSavedSettings = savedSettings != null
@@ -66,11 +66,15 @@ export function getEffectivePointsConfiguration(savedSettings = null) {
       ? parseBoolean(runtimeEnv.SAMURAI_POINTS_ENABLED, fallback.pointsEnabled)
       : Boolean(saved.points_enabled ?? fallback.pointsEnabled)
 
-  const minimumQualifyingSwapUsd = hasSavedSettings
+  const configuredMinimumQualifyingSwapUsd = hasSavedSettings
     ? Number(saved.minimum_qualifying_swap_usd ?? saved.minimum_qualifying_volume_usd ?? fallback.minimumQualifyingSwapUsd)
     : hasExplicitEnvValue('SAMURAI_MINIMUM_QUALIFYING_SWAP_USD') || hasExplicitEnvValue('SAMURAI_MINIMUM_QUALIFYING_SWAP')
       ? envNumber('SAMURAI_MINIMUM_QUALIFYING_SWAP_USD', envNumber('SAMURAI_MINIMUM_QUALIFYING_SWAP', saved.minimum_qualifying_swap_usd ?? saved.minimum_qualifying_volume_usd ?? fallback.minimumQualifyingSwapUsd))
       : Number(saved.minimum_qualifying_swap_usd ?? saved.minimum_qualifying_volume_usd ?? fallback.minimumQualifyingSwapUsd)
+  const seasonMinimum = Number(season?.minimum_qualifying_volume)
+  const minimumQualifyingSwapUsd = Number.isFinite(seasonMinimum) && seasonMinimum >= 0
+    ? seasonMinimum
+    : configuredMinimumQualifyingSwapUsd
 
   const pointsPerUsd = hasSavedSettings
     ? Number(saved.points_per_usd ?? fallback.pointsPerUsd)
@@ -145,6 +149,7 @@ export async function calculateSamuraiPoints(swap, configuration = getPointsConf
   const base = {
     qualified: false,
     qualifyingVolumeUsd: 0,
+    minimumQualifyingSwapUsd: configuration.minimumQualifyingSwapUsd,
     basePoints: 0,
     multiplier: 1,
     finalPoints: 0,

@@ -156,6 +156,17 @@ function hasUsablePointsRecord(payload) {
   return hasAnyPointsValue || hasQualifiedFlag
 }
 
+function pointsNotQualifiedLabel(reason) {
+  return reason === 'BELOW_MINIMUM' ? 'Not qualified — below minimum' : 'Not qualified'
+}
+
+function pointsMinimumLabel(points) {
+  if (points?.minimumQualifyingSwapUsd == null || points.minimumQualifyingSwapUsd === '') return null
+  const minimum = Number(points?.minimumQualifyingSwapUsd)
+  if (!Number.isFinite(minimum) || minimum < 0) return null
+  return `Minimum qualifying swap this season: $${minimum.toLocaleString(undefined, { maximumFractionDigits: 6 })} USD.`
+}
+
 function transactionExplorerUrl(network, hash) {
   if (!hash) return ''
   const explorer = getChain(network)?.explorer
@@ -1001,6 +1012,8 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
         const qualifyingVolumeUsd = Number(points?.qualifying_volume_usd ?? points?.qualifyingVolumeUsd ?? 0)
         const lifetimePoints = Number(points?.lifetime_points ?? points?.walletLifetimePoints ?? 0)
         const reason = points?.reason || points?.exclusionReason || points?.exclusion_reason || 'NOT_QUALIFIED'
+        const pointsLabel = pointsNotQualifiedLabel(reason)
+        const minimumLabel = reason === 'BELOW_MINIMUM' ? pointsMinimumLabel(points) : null
 
         return (
           <div className="swap-result-box swap-result-success">
@@ -1012,7 +1025,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
             {quote && <QuoteRouteDisclosure network="ethereum" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} />}
             <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}>
               <p style={{ margin: '0 0 4px', color: qualified ? 'var(--gold)' : 'var(--red-dark)' }}>
-                <strong>{qualified ? `+${pointsAwarded.toLocaleString()} Samurai Points` : hasPointsRecord ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong>
+                <strong>{qualified ? `+${pointsAwarded.toLocaleString()} Samurai Points` : hasPointsRecord ? pointsLabel : 'Samurai Points unavailable'}</strong>
               </p>
               {qualified && (
                 <>
@@ -1030,6 +1043,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
                   Reason: {String(reason).replaceAll('_', ' ')}
                 </p>
               )}
+              {minimumLabel && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>{minimumLabel}</p>}
               {!hasPointsRecord && (
                 <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>
                   Backend did not return a points record. This usually means
@@ -1538,6 +1552,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
     }
     if (executeInFlightRef.current) return
     executeInFlightRef.current = true
+    let transactionConfirmed = false
     try {
       setStatus('loading'); setMessage('Requesting a fresh LI.FI quote...'); setCompletion(null)
       const provider = getEthereumProvider()
@@ -1556,14 +1571,17 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
         const approvalHash = await approveLifiTransaction({ provider, approvalRequest, expectedChainId: 4663, wallet })
         setStatus('approval_pending')
         setMessage(`Approval submitted: ${approvalHash}`)
+        let approvalConfirmed = false
         for (let attempt = 0; attempt < 60; attempt += 1) {
           const receipt = await provider.request({ method: 'eth_getTransactionReceipt', params: [approvalHash] })
           if (receipt) {
             if (receipt.status !== '0x1') throw new Error('Token approval failed.')
+            approvalConfirmed = true
             break
           }
           await new Promise((resolve) => window.setTimeout(resolve, 2_000))
         }
+        if (!approvalConfirmed) throw new Error('Token approval confirmation timed out. The swap was not submitted.')
         setStatus('approval_confirmed')
         setMessage('Approval confirmed. Refreshing quote...')
       }
@@ -1581,6 +1599,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
         setMessage('Swap confirmed on-chain. LI.FI status was delayed, so the receipt was used to complete recording.')
       }
       if (!lifiStatusIsComplete(finalStatus)) throw new Error(finalStatus?.message || 'LI.FI has not confirmed a successful swap.')
+      transactionConfirmed = true
       setStatus('confirmed')
       setMessage('Swap confirmed. Recording swap and Samurai Points...')
       const completionResponse = await fetch('/api/lifi/complete', {
@@ -1606,9 +1625,11 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
     } catch (error) {
       const messageText = error?.message || 'Robinhood swap failed.'
       const timedOut = /timeout|aborted|AbortError/i.test(messageText)
-      setStatus(timedOut ? 'confirmed' : 'error')
-      setMessage(timedOut
-        ? 'Transaction confirmed on-chain, but the backend timed out while recording it. Please refresh or recheck the swap history.'
+      setStatus(transactionConfirmed ? 'confirmed' : 'error')
+      setMessage(transactionConfirmed
+        ? `Swap confirmed on Robinhood Chain, but recording the swap or Samurai Points failed: ${messageText}. Do not resubmit this transaction.`
+        : timedOut
+          ? 'Transaction confirmation timed out. Check its status in the explorer before retrying.'
         : /4001|rejected/i.test(messageText) ? 'Transaction cancelled in MetaMask.' : messageText)
     } finally {
       executeInFlightRef.current = false
@@ -1671,7 +1692,30 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
       />
       {quote && <div className="swap-quote-box"><div className="swap-quote-rate"><span>1 {fromToken.symbol} ≈ {quoteOutputAmount || '0.00'} {toToken.symbol}</span></div><div className="swap-quote-row"><span>Network</span><strong>Robinhood Chain</strong></div><QuoteRouteDisclosure network="robinhood" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} /><div className="swap-quote-row"><span>Minimum Received</span><strong>{quote.minimumReceived ? formatTokenAmount(quote.minimumReceived, toToken.decimals || 18, 6) : '—'}</strong></div></div>}
       <div className="swap-result-slot" aria-live="polite">
-      {status === 'confirmed' && <div className="swap-result-box swap-result-success"><h4>⚔️ SWAP COMPLETE</h4><p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p><p><strong>You Received:</strong> {quoteOutputAmount ? `${quoteOutputAmount} ${toToken.symbol}` : '—'}</p><p><strong>Network:</strong> {getChain('robinhood')?.name || 'Robinhood Chain'}</p><p><strong>Status:</strong> Confirmed</p>{quote && <QuoteRouteDisclosure network="robinhood" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} />}<div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}><p style={{ margin: '0 0 4px', color: completion?.points?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{completion?.points?.qualified ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || 0).toLocaleString()} Samurai Points` : completion?.points ? '0 Samurai Points' : 'Samurai Points unavailable'}</strong></p>{completion?.points?.qualified && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}{completion?.points && !completion.points.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(completion.points.reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}</div>{txHash && <><p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {txHash}</p><TransactionExplorerLink network="robinhood" hash={txHash} /></>}</div>}
+      {status === 'confirmed' && (
+        <div className="swap-result-box swap-result-success">
+          <h4>⚔️ SWAP COMPLETE</h4>
+          <p><strong>You Paid:</strong> {amount || '0'} {fromToken.symbol}</p>
+          <p><strong>You Received:</strong> {quoteOutputAmount ? `${quoteOutputAmount} ${toToken.symbol}` : '—'}</p>
+          <p><strong>Network:</strong> {getChain('robinhood')?.name || 'Robinhood Chain'}</p>
+          <p><strong>Status:</strong> Confirmed</p>
+          {quote && <QuoteRouteDisclosure network="robinhood" quote={quote} fromToken={fromToken} toToken={toToken} prices={prices} />}
+          <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}>
+            <p style={{ margin: '0 0 4px', color: completion?.points?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}>
+              <strong>{completion?.points?.qualified
+                ? `+${Number(completion.points.pointsAwarded || completion.points.points_awarded || 0).toLocaleString()} Samurai Points`
+                : completion?.points
+                  ? pointsNotQualifiedLabel(completion.points.reason || completion.points.exclusion_reason || 'NOT_QUALIFIED')
+                  : 'Samurai Points unavailable'}</strong>
+            </p>
+            {completion?.points?.qualified && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(completion.points.qualifyingVolumeUsd || completion.points.qualifying_volume_usd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p>}
+            {completion?.points && !completion.points.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {String(completion.points.reason || completion.points.exclusion_reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}
+            {completion?.points && (completion.points.reason || completion.points.exclusion_reason) === 'BELOW_MINIMUM' && pointsMinimumLabel(completion.points) && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>{pointsMinimumLabel(completion.points)}</p>}
+            {!completion && message && <p role="status" style={{ margin: '8px 0 0', color: 'var(--red-dark)' }}>{message}</p>}
+          </div>
+          {txHash && <><p style={{ margin: '8px 0 4px' }}><strong>Transaction:</strong> {txHash}</p><TransactionExplorerLink network="robinhood" hash={txHash} /></>}
+        </div>
+      )}
       {status === 'error' && <div className="swap-result-box swap-result-error"><h4>SWAP FAILED</h4><p>{message || 'The Robinhood swap could not be completed.'}</p><p>Check the submitted transaction status before retrying.</p>{txHash && <TransactionExplorerLink network="robinhood" hash={txHash} />}</div>}
       </div>{/* /.swap-result-slot */}
       {status !== 'confirmed' && status !== 'error' && message && <p className="swap-widget-foot">{message}</p>}
@@ -1848,6 +1892,14 @@ function TokenMark({ token, size = 25 }) {
       }
     }
   }, [candidateLogos.join('|')])
+
+  if (token?.mint === SOL_MINT) {
+    return (
+      <span className="swap-token-dot tok-sol-logo" aria-hidden="true" style={{ width: size, height: size }}>
+        <ChainLogo chain="solana" size={Math.round(size * 0.68)} />
+      </span>
+    )
+  }
 
   if (resolvedUrl) {
     return <img
@@ -2894,7 +2946,7 @@ export default function Swap() {
           {/* ---------- SWAP WIDGET ---------- */}
           <div className="swap-widget">
             <div className="swap-widget-toolbar">
-              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('solana') }}><ChainLogo chain="solana" size={15} />Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('ethereum') }}><ChainLogo chain="ethereum" size={15} />Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('robinhood') }}><ChainLogo chain="robinhood" size={15} />Robinhood</button></div>
+              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('solana') }}><ChainLogo chain="solana" size={18} />Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('ethereum') }}><ChainLogo chain="ethereum" size={15} />Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('robinhood') }}><ChainLogo chain="robinhood" size={15} />Robinhood Chain</button></div>
               <button type="button" className="swap-help-trigger" onClick={() => setShowSwapGuide(true)} aria-label="How to use Ronin Swap" title="How to use Ronin Swap">
                 <Icon name="scroll" size={17} /><span>How to use</span>
               </button>
@@ -3037,9 +3089,10 @@ export default function Swap() {
                     <p style={{ margin: '4px 0' }}><strong>Status:</strong> Confirmed</p>
                     {quote && <QuoteRouteDisclosure network="solana" quote={quote} fromToken={fromToken} toToken={toToken} />}
                     <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,.14)' }}>
-                      <p style={{ margin: '0 0 4px', color: pointsResult?.success && pointsResult?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{pointsResult?.success && pointsResult?.qualified ? `+${Number(pointsResult.pointsAwarded || 0).toLocaleString()} Samurai Points` : pointsResult?.success ? '0 Samurai Points' : persistenceStatus === 'saving' ? 'Calculating Samurai Points...' : 'Samurai Points unavailable'}</strong></p>
+                      <p style={{ margin: '0 0 4px', color: pointsResult?.success && pointsResult?.qualified ? 'var(--gold)' : 'var(--red-dark)' }}><strong>{pointsResult?.success && pointsResult?.qualified ? `+${Number(pointsResult.pointsAwarded || 0).toLocaleString()} Samurai Points` : pointsResult?.success ? pointsNotQualifiedLabel(pointsResult.reason) : persistenceStatus === 'saving' ? 'Calculating Samurai Points...' : 'Samurai Points unavailable'}</strong></p>
                       {pointsResult?.success && pointsResult?.qualified && <><p style={{ margin: '4px 0', color: 'var(--ink)' }}>Season Points: {Number(pointsResult.walletSeasonPoints || 0).toLocaleString()}</p><p style={{ margin: '4px 0', color: 'var(--ink)' }}>Qualifying Volume: ${Number(pointsResult.qualifyingVolumeUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })}</p></>}
                       {pointsResult?.success && !pointsResult?.qualified && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>Reason: {(pointsResult.reason || 'NOT_QUALIFIED').replaceAll('_', ' ')}</p>}
+                      {pointsResult?.success && pointsResult.reason === 'BELOW_MINIMUM' && pointsMinimumLabel(pointsResult) && <p style={{ margin: '4px 0', color: 'var(--ink)' }}>{pointsMinimumLabel(pointsResult)}</p>}
                       {pointsError && <p style={{ margin: '4px 0', color: 'var(--red-dark)' }}>{pointsError}</p>}
                     </div>
                     {txSignature && (

@@ -553,6 +553,8 @@
 }
 
 .tok-sol { background: linear-gradient(135deg, #9945ff, #14f195); }
+.tok-sol-logo { background: #17131f; }
+.tok-sol-logo .chain-logo-solana { display: block; flex: 0 0 auto; }
 .tok-usdc { background: #2775ca; }
 .tok-usdt { background: #26a17b; }
 .tok-bonk { background: #f5a623; }
@@ -1699,7 +1701,7 @@
 .app-route-swap .swap-reference-promo span { color: #b91c1c; font: 700 8px var(--mono); }
 .app-route-swap .swap-reference-promo p { margin: 8px 0 0; color: #625a54; font-size: 9px; line-height: 1.4; }
 
-@media (max-width: 900px) {
+@media (max-width: 560px) {
   .app-route-swap .swap-hero-bg { left: 0; opacity: .28; height: 360px; }
   .app-route-swap .swap-hero-scrim { background: linear-gradient(180deg,rgba(251,248,243,.28),rgba(251,248,243,.94) 88%); }
   .app-route-swap .swap-hero-inner { display: grid; grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 14px; width: min(100% - 32px,680px); padding: 22px 0 24px; }
@@ -1714,7 +1716,7 @@
   .app-route-swap .swap-widget { grid-row: 3; }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
   .app-route-swap .swap-hero-inner,.app-route-swap .swap-benefits-section,.app-route-swap .swap-stats-section,.app-route-swap .swap-tokens-section { width: min(100% - 28px,560px); }
   .app-route-swap .swap-hero-inner { width: min(100% - 24px,560px); gap: 12px; padding-top: 18px; padding-bottom: 20px; }
   .app-route-swap .swap-hero-bg { inset: 0 0 auto; left: 0; height: clamp(340px, 95vw, 410px); opacity: .4; }
@@ -1778,11 +1780,134 @@
   .swap-guide-networks p.expanded { display: block; }
 }
 
+@media (max-width: 900px) {
+  .app-route-swap .swap-widget-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .app-route-swap .swap-network-switch {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .app-route-swap .swap-network-switch > span {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding-left: 2px;
+  }
+
+  .app-route-swap .swap-network-switch button {
+    min-width: 0;
+    min-height: 36px;
+    gap: 3px;
+    padding: 6px 2px;
+    font-size: 8.5px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  .app-route-swap .swap-network-switch .chain-logo-solana {
+    width: 18px;
+    height: 18px;
+  }
+
+  .app-route-swap .swap-help-trigger,
+  .app-route-swap .swap-help-trigger span {
+    display: inline-flex;
+  }
+
+  .app-route-swap .swap-help-trigger {
+    width: 100%;
+    min-height: 36px;
+    padding-inline: 10px;
+  }
+}
+
 .app-route-swap .swap-network-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .app-route-swap .chain-logo { display: block; flex: 0 0 auto; }
 .app-route-swap .chain-logo-robinhood { color: #00c805; }
 .app-route-swap .swap-reference-chain-list .chain-logo-solana { width: 18px; height: 18px; }
 .app-route-swap .swap-reference-chain-list .chain-logo-ethereum { width: 18px; height: 18px; }
+
+/* Keep token controls and actions inside the swap card at every card width. */
+.app-route-swap .evm-swap-panel,
+.app-route-swap .evm-swap-panel > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-route-swap .evm-swap-panel {
+  width: 100%;
+}
+
+.app-route-swap .swap-widget-toolbar,
+.app-route-swap .swap-network-switch {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-route-swap .swap-widget-toolbar,
+.app-route-swap .swap-network-switch {
+  flex-wrap: wrap;
+}
+
+.app-route-swap .swap-network-switch span,
+.app-route-swap .swap-network-switch button {
+  min-width: 0;
+}
+
+.app-route-swap .swap-network-switch button {
+  flex: 1 1 auto;
+  white-space: normal;
+}
+
+.app-route-swap .evm-swap-panel .swap-widget-head > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-route-swap .swap-widget-powered {
+  max-width: 100%;
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+
+.app-route-swap .swap-field,
+.app-route-swap .swap-field-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-route-swap .swap-field-input {
+  flex: 1 1 0;
+  width: auto;
+}
+
+.app-route-swap .swap-token-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 58%;
+}
+
+.app-route-swap .swap-token-select strong {
+  min-width: 0;
+  max-width: clamp(2rem, 22vw, 9rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-route-swap .swap-cta {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
 .app-route-swap .swap-reference-chain-list .chain-logo-robinhood { width: 17px; height: 17px; }
 .app-route-swap .swap-trending-swipe-cue { display: none; }
 

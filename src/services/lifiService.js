@@ -21,11 +21,22 @@ function toGasValue(value) {
 }
 
 export function getLifiApprovalRequest(quote) {
-  const approval = quote?.action?.approval || quote?.approval || quote?.transactionRequest?.approval || quote?.transactionRequest?.approvalRequest || null
-  const to = approval?.to || approval?.address || approval?.spender || approval?.contractAddress || quote?.transactionRequest?.approveTo || quote?.transactionRequest?.approvalAddress || quote?.transactionRequest?.approvalTo || null
-  const data = approval?.data || approval?.txData || approval?.callData || quote?.transactionRequest?.approvalData || quote?.transactionRequest?.data && quote?.transactionRequest?.data.startsWith('0x095ea7b3') ? quote.transactionRequest.data : null
+  const transactionRequest = quote?.transactionRequest || {}
+  const approval = quote?.action?.approval || quote?.approval || transactionRequest.approval || transactionRequest.approvalRequest || null
+  const to = approval?.to || approval?.address || approval?.spender || approval?.contractAddress || transactionRequest.approveTo || transactionRequest.approvalAddress || transactionRequest.approvalTo || null
+  const transactionData = typeof transactionRequest.data === 'string' ? transactionRequest.data.trim() : ''
+  const data = approval?.data
+    || approval?.txData
+    || approval?.callData
+    || transactionRequest.approvalData
+    || (transactionData.toLowerCase().startsWith('0x095ea7b3') ? transactionData : null)
   if (!to || !data || !ADDRESS_PATTERN.test(String(to))) return null
-  return { to, data: String(data).trim(), value: normalizeHex(approval?.value ?? '0x0'), gas: toGasValue(approval?.gasLimit ?? approval?.gas ?? quote?.transactionRequest?.gasLimit ?? quote?.transactionRequest?.gas) }
+  return {
+    to,
+    data: String(data).trim(),
+    value: normalizeHex(approval?.value ?? transactionRequest.approvalValue ?? '0x0'),
+    gas: toGasValue(approval?.gasLimit ?? approval?.gas ?? transactionRequest.approvalGasLimit),
+  }
 }
 
 export async function getLifiQuote(request) {

@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
     const season = await getSeasonForTimestamp(swap.timestamp)
     const savedSettings = await getAdminSettings().catch(() => null)
-    const configuration = getEffectivePointsConfiguration(savedSettings)
+    const configuration = getEffectivePointsConfiguration(savedSettings, season)
     const calculation = await calculateSamuraiPoints(swap, configuration)
     const result = await awardSamuraiPoints({ signature, ...calculation, seasonId: season?.id || null })
     if (!result) return apiError(res, 502, 'POINTS_DATABASE_ERROR', 'The points result was not returned by the database.')
@@ -51,6 +51,7 @@ export default async function handler(req, res) {
       signature: result.signature,
       wallet: result.wallet_address,
       qualified: result.eligibility_status === 'qualified',
+      minimumQualifyingSwapUsd: calculation.minimumQualifyingSwapUsd,
       qualifyingVolumeUsd: Number(result.qualifying_volume_usd || 0),
       pointsAwarded: Number(result.points_awarded || 0),
       basePoints: Number(result.base_points || 0),
