@@ -101,3 +101,5 @@
 .profile-rewards-tx-link:hover{color:#fff;border-bottom-style:solid}
 @media (max-width:800px){.profile-rewards-panel{padding:24px}.profile-rewards-grid{grid-template-columns:1fr;gap:10px}.profile-rewards-stat strong{font-size:28px}.profile-reclaims-list li{grid-template-columns:1fr;gap:6px;text-align:left}.profile-rewards-claim-meta{align-items:flex-start;flex-direction:row;gap:10px}}
 @media (max-width:450px){.profile-rewards-panel{padding:20px}.profile-rewards-panel .section-title{font-size:26px}.profile-rewards-action-row .btn{width:100%}}
+
+.profile-empty-state .profile-wallet-connect-buttons{width:min(100%,440px);flex:0 1 auto}

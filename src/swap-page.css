@@ -1776,6 +1776,44 @@
   .swap-guide-networks button[aria-expanded="true"] svg { transform: rotate(180deg); }
   .swap-guide-networks p { display: none; }
   .swap-guide-networks p.expanded { display: block; }
+}
+
+.app-route-swap .swap-network-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.app-route-swap .chain-logo { display: block; flex: 0 0 auto; }
+.app-route-swap .chain-logo-robinhood { color: #00c805; }
+.app-route-swap .swap-reference-chain-list .chain-logo-solana { width: 18px; height: 18px; }
+.app-route-swap .swap-reference-chain-list .chain-logo-ethereum { width: 18px; height: 18px; }
+.app-route-swap .swap-reference-chain-list .chain-logo-robinhood { width: 17px; height: 17px; }
+.app-route-swap .swap-trending-swipe-cue { display: none; }
+
+@media (max-width: 768px) {
+  .app-route-swap .swap-trending-section .swap-tokens-head { flex-direction: row; align-items: center; gap: 8px; }
+  .app-route-swap .swap-trending-section .swap-tokens-head > div { min-width: 0; }
+  .app-route-swap .swap-trending-swipe-cue {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    padding: 7px 8px;
+    border: 1px solid #d9a29f;
+    border-radius: 999px;
+    background: #fff;
+    color: #8e211d;
+    font: 700 8px var(--mono);
+    letter-spacing: .04em;
+    cursor: pointer;
+    animation: trending-swipe-nudge 1.8s ease-in-out infinite;
+  }
+  .app-route-swap .swap-trending-swipe-cue:focus-visible { outline: 2px solid #b91c1c; outline-offset: 2px; }
+}
+
+@keyframes trending-swipe-nudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-route-swap .swap-trending-swipe-cue { animation: none; }
   .swap-guide-steps { grid-template-columns: 1fr; }
   .swap-guide-security ul { grid-template-columns: 1fr; }
 }

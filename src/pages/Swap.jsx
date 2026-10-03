@@ -3,7 +3,7 @@ import { approveLifiTransaction, getLifiApprovalRequest, getLifiQuote, getLifiSt
 import { getRobinhoodTokenSections, getRobinhoodTrending, getRobinhoodTokenPrices } from '../services/robinhoodTokenService'
 import { getLiveTrendingTokens } from '../services/liveTrendingService'
 import { getEvmWalletTokensForSelector } from '../services/evmWalletTokens'
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Transaction, VersionedTransaction } from '@solana/web3.js'
 import { useWallet, getSolanaProvider } from '../context/WalletContext'
@@ -48,6 +48,39 @@ function formatTokenAmount(rawAmount, decimals, maxFraction = 6) {
   const fractionString = fraction.toString().padStart(Number(decimals), '0').slice(0, maxFraction)
   const trimmed = fractionString.replace(/0+$/, '')
   return trimmed ? `${whole.toString()}.${trimmed}` : whole.toString()
+}
+
+function ChainLogo({ chain, size = 18 }) {
+  const gradientId = useId().replaceAll(':', '')
+
+  if (chain === 'solana') {
+    return (
+      <svg className={`chain-logo chain-logo-${chain}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+        <defs>
+          <linearGradient id={`solana-logo-gradient-${gradientId}`} x1="0" x2="1" y1="1" y2="0">
+            <stop offset="0" stopColor="#9945FF" />
+            <stop offset="1" stopColor="#14F195" />
+          </linearGradient>
+        </defs>
+        <path fill={`url(#solana-logo-gradient-${gradientId})`} d="m23.8764 18.0313-3.962 4.1393a.9201.9201 0 0 1-.306.2106.9407.9407 0 0 1-.367.0742H.4599a.4689.4689 0 0 1-.2522-.0733.4513.4513 0 0 1-.1696-.1962.4375.4375 0 0 1-.0314-.2545.4438.4438 0 0 1 .117-.2298l3.9649-4.1393a.92.92 0 0 1 .3052-.2102.9407.9407 0 0 1 .3658-.0746H23.54a.4692.4692 0 0 1 .2523.0734.4531.4531 0 0 1 .1697.196.438.438 0 0 1 .0313.2547.4442.4442 0 0 1-.1169.2297zm-3.962-8.3355a.9202.9202 0 0 0-.306-.2106.941.941 0 0 0-.367-.0742H.4599a.4687.4687 0 0 0-.2522.0734.4513.4513 0 0 0-.1696.1961.4376.4376 0 0 0-.0314.2546.444.444 0 0 0 .117.2297l3.9649 4.1394a.9204.9204 0 0 0 .3052.2102c.1154.049.24.0744.3658.0746H23.54a.469.469 0 0 0 .2523-.0734.453.453 0 0 0 .1697-.1961.4382.4382 0 0 0 .0313-.2546.4444.4444 0 0 0-.1169-.2297zM.46 6.7225h18.7815a.9411.9411 0 0 0 .367-.0742.9202.9202 0 0 0 .306-.2106l3.962-4.1394a.4442.4442 0 0 0 .117-.2297.4378.4378 0 0 0-.0314-.2546.453.453 0 0 0-.1697-.196.469.469 0 0 0-.2523-.0734H4.7596a.941.941 0 0 0-.3658.0745.9203.9203 0 0 0-.3052.2102L.1246 5.9687a.4438.4438 0 0 0-.1169.2295.4375.4375 0 0 0 .0312.2544.4512.4512 0 0 0 .1692.196.4689.4689 0 0 0 .2518.0739z" />
+      </svg>
+    )
+  }
+
+  if (chain === 'ethereum') {
+    return (
+      <svg className={`chain-logo chain-logo-${chain}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#62688F" d="m11.944 17.97L4.58 13.62 11.943 24l7.37-10.38-7.372 4.35h.003z" />
+        <path fill="#8C8C8C" d="M12.056 0 4.69 12.223l7.365 4.354 7.365-4.35L12.056 0z" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg className={`chain-logo chain-logo-${chain}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M2.84 24h.53c.096 0 .192-.048.224-.128C7.591 13.696 11.94 8.656 14.67 5.638c.112-.128.064-.225-.096-.225h-4.88a.55.55 0 0 0-.45.225L5.746 9.972c-.514.642-.642 1.236-.642 2.086v4.43c-1.14 3.194-1.862 5.361-2.392 7.32-.032.125.016.192.129.192M20.447.646c-.754-.802-4.157-.834-5.73-.224a3 3 0 0 0-.786.465 41 41 0 0 0-3.323 3.178c-.112.113-.064.225.097.225h5.409c.497 0 .786.289.786.786v6.1c0 .16.128.208.225.064l3.258-4.254c.53-.69.69-.898.835-1.861.192-1.413.08-3.58-.77-4.479m-6.982 16.18 2.231-3.676a.7.7 0 0 0 .064-.29V6.73c0-.16-.112-.225-.224-.097-3.355 3.74-5.971 7.672-8.395 12.407-.06.12.016.225.16.177l5.009-1.54c.565-.174.882-.402 1.155-.852" />
+    </svg>
+  )
 }
 
 function isQuoteCurrent(quote, fromToken, toToken, rawAmount) {
@@ -2066,6 +2099,7 @@ export default function Swap() {
   // =====================================================================
   const ethereumPanelRef = useRef(null)
   const robinhoodPanelRef = useRef(null)
+  const trendingTokensRowRef = useRef(null)
 
   // Unified trending-token click handler. Dispatches to the right
   // panel based on `network`. Each panel exposes `selectTrendingToken`
@@ -2860,7 +2894,7 @@ export default function Swap() {
           {/* ---------- SWAP WIDGET ---------- */}
           <div className="swap-widget">
             <div className="swap-widget-toolbar">
-              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('solana') }}>Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('ethereum') }}>Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('robinhood') }}>Robinhood</button></div>
+              <div className="swap-network-switch" role="tablist" aria-label="Swap network"><span>NETWORK</span><button type="button" className={network === 'solana' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('solana') }}><ChainLogo chain="solana" size={15} />Solana</button><button type="button" className={network === 'ethereum' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('ethereum') }}><ChainLogo chain="ethereum" size={15} />Ethereum</button><button type="button" className={network === 'robinhood' ? 'active' : ''} onClick={() => { setAcknowledgedUnverifiedTokenKey(''); setNetwork('robinhood') }}><ChainLogo chain="robinhood" size={15} />Robinhood</button></div>
               <button type="button" className="swap-help-trigger" onClick={() => setShowSwapGuide(true)} aria-label="How to use Ronin Swap" title="How to use Ronin Swap">
                 <Icon name="scroll" size={17} /><span>How to use</span>
               </button>
@@ -3063,7 +3097,7 @@ export default function Swap() {
           <aside className="swap-reference-side" aria-label="Ronin ecosystem highlights">
             <section className="swap-reference-card swap-reference-chains">
               <div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>SUPPORTED CHAINS</strong><span className="swap-reference-new">NEW</span></div>
-              <div className="swap-reference-chain-list"><span><TokenMark token={fromToken} size={22} /> Solana</span><span><span className="swap-reference-chain-gem">◆</span> Ethereum</span><span><span className="swap-reference-chain-gem">↗</span> Robinhood Chain</span></div>
+              <div className="swap-reference-chain-list"><span><ChainLogo chain="solana" size={18} /> Solana</span><span><ChainLogo chain="ethereum" size={18} /> Ethereum</span><span><ChainLogo chain="robinhood" size={18} /> Robinhood Chain</span></div>
               <p>One platform. Three chains. More opportunities.</p>
             </section>
             <section className="swap-reference-card swap-reference-points swap-reference-desktop-only">
@@ -3083,8 +3117,11 @@ export default function Swap() {
               <h3>TRENDING ON {network === 'ethereum' ? 'ETHEREUM' : network === 'robinhood' ? 'ROBINHOOD' : 'SOLANA'}</h3>
               <span className="swap-tokens-note">Live market activity · refreshes every 45 seconds.</span>
             </div>
+            <button type="button" className="swap-trending-swipe-cue" onClick={() => trendingTokensRowRef.current?.scrollBy({ left: Math.max(160, trendingTokensRowRef.current.clientWidth * 0.75), behavior: 'smooth' })} aria-label="Show more trending tokens">
+              <span>SWIPE TO EXPLORE</span><Icon name="chevronRight" size={13} />
+            </button>
           </div>
-          <div className="swap-tokens-row">
+          <div className="swap-tokens-row" ref={trendingTokensRowRef}>
             {trendingState.state === 'loading' && <p className="swap-token-empty-state">Loading live trending data...</p>}
             {trendingState.state === 'error' && <p className="swap-token-empty-state">Trending data temporarily unavailable.</p>}
             {trendingState.state === 'empty' && <p className="swap-token-empty-state">No live trending tokens are available for this chain right now.</p>}
