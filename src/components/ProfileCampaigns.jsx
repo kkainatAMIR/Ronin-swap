@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { formatNumber } from '../data'
 import { getCampaignOverview } from '../services/campaignService'
 import { Button, SectionHeading, Tag } from './Layout'
@@ -75,7 +76,7 @@ function CampaignDetailsDialog({ campaign, closeButtonRef, onClose }) {
   const chainId = Number(campaign.chainId)
   const chain = chainNames[chainId] || (campaign.chainId ? `Chain ${campaign.chainId}` : 'All chains')
 
-  return (
+  return createPortal((
     <div className="modal-backdrop profile-campaign-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose()
     }}>
@@ -118,7 +119,7 @@ function CampaignDetailsDialog({ campaign, closeButtonRef, onClose }) {
         </div>
       </section>
     </div>
-  )
+  ), document.body)
 }
 
 function ClaimWindowCard({ season }) {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Button, SectionHeading, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
 import { getSolanaProvider, useWallet } from '../context/WalletContext'
@@ -54,7 +55,7 @@ function SeasonRewardDialog({ seasonReward, network, claimDisabled, onClaim, onC
 
   const campaigns = Array.isArray(participation.campaigns) ? participation.campaigns : []
 
-  return (
+  return createPortal((
     <div
       className="profile-season-dialog-backdrop"
       role="presentation"
@@ -137,7 +138,7 @@ function SeasonRewardDialog({ seasonReward, network, claimDisabled, onClaim, onC
         </div>
       </section>
     </div>
-  )
+  ), document.body)
 }
 
 // RewardClaimPanel — shows the user's earned / claimed / claimable Samurai
