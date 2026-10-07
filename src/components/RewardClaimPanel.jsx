@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Button, SectionHeading, Tag } from '../components/Layout'
 import Icon from '../components/Icon'
 import { getSolanaProvider, useWallet } from '../context/WalletContext'
-import { confirmRewardClaim, cancelRewardClaim, claimReward, formatRewardAmount, getRewardBalance, prepareRewardClaim, recordRewardClaimSubmission, solanaTxExplorerUrl } from '../services/rewardsService'
+import { confirmRewardClaim, cancelRewardClaim, claimReward, formatRewardAmount, getRewardBalance, prepareRewardClaim, recordRewardClaimSubmission, recordRewardClaimBroadcastAttempt, recordRewardClaimBroadcastAcknowledgment, recordRewardClaimBroadcastOutcome, solanaTxExplorerUrl } from '../services/rewardsService'
 import WalletLinkPanel from './WalletLinkPanel'
 import { sendSignedSolanaTransaction } from '../services/roninService'
 import { Transaction } from '@solana/web3.js'
@@ -54,7 +55,7 @@ function SeasonRewardDialog({ seasonReward, network, claimDisabled, onClaim, onC
 
   const campaigns = Array.isArray(participation.campaigns) ? participation.campaigns : []
 
-  return (
+  return createPortal((
     <div
       className="profile-season-dialog-backdrop"
       role="presentation"
@@ -137,7 +138,7 @@ function SeasonRewardDialog({ seasonReward, network, claimDisabled, onClaim, onC
         </div>
       </section>
     </div>
-  )
+  ), document.body)
 }
 
 // RewardClaimPanel — shows the user's earned / claimed / claimable Samurai
@@ -310,6 +311,10 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
     let claimId = null
     let claimSignature = null
     let signaturePersisted = false
+    let broadcastAttemptRecorded = false
+    let broadcastResponseMatched = false
+    let broadcastAcknowledged = false
+    let broadcastRejectionResult = null
     let submittedSignature = null
     setError('')
 
@@ -380,12 +385,17 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
 
       // --- STEP 3: submit the already-persisted transaction ---
       setState('submitting')
+      await recordRewardClaimBroadcastAttempt(claimId, claimSignature, effectiveWallet)
+      broadcastAttemptRecorded = true
       console.info('[RewardClaimPanel] STEP 3: sendSignedSolanaTransaction')
       const signature = await sendSignedSolanaTransaction(signedBytes)
       submittedSignature = signature
       if (signature !== claimSignature) {
         throw new Error('Solana RPC returned a signature that does not match the persisted signed transaction.')
       }
+      broadcastResponseMatched = true
+      await recordRewardClaimBroadcastAcknowledgment(claimId, claimSignature, effectiveWallet)
+      broadcastAcknowledged = true
       console.info('[RewardClaimPanel] STEP 3 done: submitted', { signature })
 
       // --- STEP 4: backend verifies the exact persisted signature ---
@@ -413,9 +423,34 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       setActiveClaimId(null)
       setState('idle')
     } catch (e) {
+      if (claimSignature && broadcastAttemptRecorded && !broadcastAcknowledged) {
+        try {
+          if (e?.code === 'SOLANA_RPC_REJECTED') {
+            broadcastRejectionResult = await recordRewardClaimBroadcastOutcome(
+              claimId,
+              claimSignature,
+              effectiveWallet,
+              'rejected',
+            )
+          } else if (broadcastResponseMatched) {
+            await recordRewardClaimBroadcastAcknowledgment(claimId, claimSignature, effectiveWallet)
+            broadcastAcknowledged = true
+          } else {
+            await recordRewardClaimBroadcastOutcome(claimId, claimSignature, effectiveWallet, 'unknown')
+          }
+        } catch (stateError) {
+          console.error('[RewardClaimPanel] failed to persist broadcast outcome', {
+            claimId,
+            code: stateError?.code,
+            message: stateError?.message,
+          })
+        }
+      }
       console.error('[RewardClaimPanel] claim flow FAILED', {
         claimId,
         signaturePersisted,
+        broadcastAttemptRecorded,
+        broadcastAcknowledged,
         transactionSubmitted: Boolean(submittedSignature),
         message: e?.message,
         code: e?.code,
@@ -423,13 +458,19 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       if (claimSignature) {
         setLastClaim({
           claim_tx_signature: claimSignature,
-          claim: { claim_id: claimId, status: 'PENDING_PAYOUT' },
-          pending_confirmation: true,
+          claim: broadcastRejectionResult?.claim || { claim_id: claimId, status: 'PENDING_PAYOUT' },
+          pending_confirmation: broadcastRejectionResult?.claim?.status !== 'FAILED',
           message: !signaturePersisted
             ? 'Signature recording did not return success, so this transaction was not broadcast. Do not broadcast it manually; refresh and recover the same claim before taking further action.'
+            : !broadcastAttemptRecorded
+              ? 'The signed transaction is recorded, but the broadcast-attempt state could not be recorded, so no transaction was sent. Retry safely or contact support.'
             : submittedSignature
               ? 'The signed transaction was submitted, but confirmation failed. Retry confirmation for this same transaction; do not cancel or submit another payout.'
-              : 'The signed transaction signature is safely recorded, but broadcast/confirmation did not finish. Retry confirmation for this same signature; do not cancel or submit another payout.',
+              : e?.code === 'SOLANA_RPC_REJECTED'
+                  ? broadcastRejectionResult?.claim?.status === 'FAILED'
+                    ? 'Solana explicitly rejected the transaction before broadcast. The claim was failed safely and its points were restored.'
+                    : 'The RPC explicitly rejected the broadcast request, but the failure state could not be recorded. The claim remains recoverable; contact support.'
+                : 'The broadcast outcome is uncertain. The signed transaction remains recoverable; do not cancel or submit another payout.',
         })
         setActiveClaimId(null)
         await load()

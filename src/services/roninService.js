@@ -1,4 +1,5 @@
 import { RONIN_MINT } from '../data'
+import { classifySolanaBroadcastRpcError } from './solanaBroadcastOutcome'
 
 export { RONIN_MINT }
 const SOLANA_RPC_PROXY_URL = '/api/solana/rpc'
@@ -76,10 +77,14 @@ async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
       const rpcError = payload.error
       const message = rpcError.message || 'RPC request failed'
       const code = rpcError.code != null ? ` ${rpcError.code}` : ''
+      const error = new Error(`${label} returned RPC${code}: ${message}`)
+      error.code = classifySolanaBroadcastRpcError(rpcError, payload.proxyTransportFailures)
+      error.rpcCode = rpcError.code
       return {
         ok: false,
         label,
-        error: `${label} returned RPC${code}: ${message}`,
+        error: error.message,
+        cause: error,
         diagnostic: {
           endpoint: label,
           httpStatus: response.status,
@@ -129,6 +134,11 @@ async function rpcRequest(method, params) {
     if (attempt.error) {
       failures.push(attempt.error)
       if (attempt.diagnostic) diagnostics.push(redactRpcDiagnostic(attempt.diagnostic))
+      if (attempt.cause?.code === 'SOLANA_RPC_REJECTED') {
+        const error = attempt.cause
+        console.error('[SOLANA RPC DEBUG]', { method, failures: diagnostics })
+        throw error
+      }
     }
   }
 

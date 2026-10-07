@@ -749,6 +749,45 @@ async function handleClaimConfirm(req, res, diagnostic) {
       message: 'The signed transaction is recorded. It is now safe to broadcast this exact transaction.',
     })
   }
+  const broadcastActionStates = {
+    'record-broadcast-attempt': 'ATTEMPTED',
+    'record-broadcast-acknowledgment': 'ACKNOWLEDGED',
+    'record-broadcast-unknown': 'UNKNOWN',
+    'record-broadcast-rejected': 'REJECTED',
+  }
+  if (Object.hasOwn(broadcastActionStates, action)) {
+    setStage('broadcast state persistence')
+    let broadcastResult
+    try {
+      broadcastResult = await callSupabaseRpc('update_reward_claim_broadcast_state', {
+        p_claim_id: claimId,
+        p_claim_tx_signature: signature,
+        p_broadcast_status: broadcastActionStates[action],
+      })
+    } catch (error) {
+      const code = error?.code || error?.message || 'BROADCAST_STATE_UPDATE_FAILED'
+      console.error('[claim-confirm] broadcast state persistence failed', {
+        claimId,
+        signature,
+        requestedState: broadcastActionStates[action],
+        message: error?.message || String(error),
+        code,
+      })
+      return apiError(res, 502, 'BROADCAST_STATE_UPDATE_FAILED',
+        'The broadcast state could not be recorded. The claim remains recoverable; do not cancel or submit another payout.')
+    }
+    return json(res, 200, {
+      success: true,
+      claim_id: claimId,
+      signature,
+      broadcast_status: broadcastResult?.broadcast_status || broadcastActionStates[action],
+      broadcast_attempted_at: broadcastResult?.broadcast_attempted_at || null,
+      broadcast_acknowledged_at: broadcastResult?.broadcast_acknowledged_at || null,
+      claim: broadcastResult?.reversion?.claim || null,
+      reverted: Boolean(broadcastResult?.reversion?.reverted)
+        || broadcastResult?.reversion?.claim?.status === 'FAILED',
+    })
+  }
 
   // -------------------------------------------------------------------
   // STEP 2: Validate the claim row.
