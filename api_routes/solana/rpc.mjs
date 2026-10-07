@@ -97,9 +97,7 @@ export default async function handler(req, res) {
       }
       // Keep JSON-RPC application errors intact. The browser client can show
       // the actual RPC message instead of mistaking it for a transport error.
-      return json(res, 200, failures.length
-        ? { ...payload, proxyTransportFailures: failures }
-        : payload)
+      return json(res, 200, payload)
     } catch (error) {
       failures.push(`${label}: ${error.name === 'AbortError' ? `timed out after ${RPC_TIMEOUT_MS / 1000}s` : error.message || 'request failed'}`)
     }

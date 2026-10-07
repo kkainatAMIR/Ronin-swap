@@ -195,38 +195,6 @@ export async function recordRewardClaimSubmission(claimId, signature, wallet) {
   return body
 }
 
-async function recordRewardClaimBroadcastState(action, claimId, signature, wallet) {
-  if (!claimId) throw new Error('A claimId is required.')
-  if (!signature) throw new Error('A transaction signature is required.')
-  const response = await fetch('/api/rewards/claim-confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, claimId, signature, wallet }),
-  })
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const err = new Error(body?.error || 'The claim broadcast state could not be recorded.')
-    err.code = body?.code || 'BROADCAST_STATE_UPDATE_FAILED'
-    throw err
-  }
-  return body
-}
-
-export function recordRewardClaimBroadcastAttempt(claimId, signature, wallet) {
-  return recordRewardClaimBroadcastState('record-broadcast-attempt', claimId, signature, wallet)
-}
-
-export function recordRewardClaimBroadcastAcknowledgment(claimId, signature, wallet) {
-  return recordRewardClaimBroadcastState('record-broadcast-acknowledgment', claimId, signature, wallet)
-}
-
-export function recordRewardClaimBroadcastOutcome(claimId, signature, wallet, outcome) {
-  if (!['unknown', 'rejected'].includes(outcome)) {
-    throw new Error('A valid broadcast outcome is required.')
-  }
-  return recordRewardClaimBroadcastState(`record-broadcast-${outcome}`, claimId, signature, wallet)
-}
-
 // Step 4: confirm a user-submitted claim transaction.
 //
 // Called after the exact fee-payer signature has been persisted and the
