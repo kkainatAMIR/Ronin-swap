@@ -23,6 +23,24 @@ function rpcEndpointLabel(endpoint) {
   try { return new URL(endpoint, window.location.origin).hostname } catch { return 'configured endpoint' }
 }
 
+function redactRpcDiagnostic(value) {
+  if (typeof value === 'string') {
+    return value
+      .replace(/(https?:\/\/[^?\s"'<>]+)\?[^\s"'<>]*/gi, '$1?[redacted]')
+      .replace(/\b(api[-_]?key|authorization|token|secret)=([^&\s]+)/gi, '$1=[redacted]')
+  }
+  if (Array.isArray(value)) return value.map(redactRpcDiagnostic)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      if (/api[-_]?key|authorization|token|secret|private[-_]?key|signed[-_]?transaction|transaction[-_]?bytes/i.test(key)) {
+        return [key, '[redacted]']
+      }
+      return [key, redactRpcDiagnostic(item)]
+    }))
+  }
+  return value
+}
+
 async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -38,14 +56,40 @@ async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
     if (!response.ok) {
       const errorBody = await response.json().catch(() => null)
       const detail = errorBody?.error ? `: ${errorBody.error}` : ''
-      return { ok: false, label, error: `${label} returned HTTP ${response.status}${detail}` }
+      return {
+        ok: false,
+        label,
+        error: `${label} returned HTTP ${response.status}${detail}`,
+        diagnostic: {
+          endpoint: label,
+          httpStatus: response.status,
+          proxyError: errorBody?.error,
+          attempts: errorBody?.attempts,
+          jsonRpcError: errorBody?.code != null || errorBody?.data != null
+            ? { code: errorBody.code, message: errorBody.message, data: errorBody.data }
+            : undefined,
+        },
+      }
     }
     const payload = await response.json()
     if (payload?.error) {
       const rpcError = payload.error
       const message = rpcError.message || 'RPC request failed'
       const code = rpcError.code != null ? ` ${rpcError.code}` : ''
-      return { ok: false, label, error: `${label} returned RPC${code}: ${message}` }
+      return {
+        ok: false,
+        label,
+        error: `${label} returned RPC${code}: ${message}`,
+        diagnostic: {
+          endpoint: label,
+          httpStatus: response.status,
+          jsonRpcError: {
+            code: rpcError.code,
+            message: rpcError.message,
+            data: rpcError.data,
+          },
+        },
+      }
     }
     return { ok: true, result: payload.result }
   } catch (error) {
@@ -54,6 +98,13 @@ async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
       label,
       error: `${label}: ${error.name === 'AbortError' ? `timed out after ${timeoutMs / 1000}s` : error.message || 'request failed'}`,
       timedOut: error.name === 'AbortError',
+      diagnostic: {
+        endpoint: label,
+        fetchError: {
+          name: error.name,
+          message: error.message || 'request failed',
+        },
+      },
     }
   } finally {
     clearTimeout(timeout)
@@ -62,6 +113,7 @@ async function callRpcEndpoint(endpoint, method, params, timeoutMs) {
 
 async function rpcRequest(method, params) {
   const failures = []
+  const diagnostics = []
   for (const endpoint of SOLANA_RPC_ENDPOINTS) {
     let attempt = await callRpcEndpoint(endpoint, method, params, RPC_TIMEOUT_MS)
     if (attempt.ok) return attempt.result
@@ -74,9 +126,13 @@ async function rpcRequest(method, params) {
       attempt = await callRpcEndpoint(endpoint, method, params, RPC_TIMEOUT_MS)
       if (attempt.ok) return attempt.result
     }
-    if (attempt.error) failures.push(attempt.error)
+    if (attempt.error) {
+      failures.push(attempt.error)
+      if (attempt.diagnostic) diagnostics.push(redactRpcDiagnostic(attempt.diagnostic))
+    }
   }
 
+  console.error('[SOLANA RPC DEBUG]', { method, failures: diagnostics })
   throw new Error(`All Solana RPC endpoints failed for ${method}: ${failures.join('; ')}. Set VITE_SOLANA_RPC_URL to a working HTTPS RPC endpoint.`)
 }
 
@@ -89,7 +145,7 @@ function bytesToBase64(bytes) {
 export async function sendSignedSolanaTransaction(serializedTransaction) {
   const signature = await rpcRequest('sendTransaction', [
     bytesToBase64(serializedTransaction),
-    { encoding: 'base64', skipPreflight: false, maxRetries: 3 },
+    { encoding: 'base64', skipPreflight: false, maxRetries: 3, preflightCommitment: 'confirmed' },
   ])
   if (!signature || typeof signature !== 'string') throw new Error('Solana RPC did not return a transaction signature.')
   return signature

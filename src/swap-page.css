@@ -1712,8 +1712,8 @@
   .app-route-swap .swap-widget { width: 100%; max-width: 520px; margin-inline: auto; }
   .app-route-swap .swap-hero-copy,.app-route-swap .swap-widget,.app-route-swap .swap-reference-side { grid-column: 1; }
   .app-route-swap .swap-hero-copy { grid-row: 1; }
-  .app-route-swap .swap-reference-side { grid-row: 2; }
-  .app-route-swap .swap-widget { grid-row: 3; }
+  .app-route-swap .swap-widget { grid-row: 2; }
+  .app-route-swap .swap-reference-side { grid-row: 3; }
 }
 
 @media (max-width: 900px) {
@@ -1825,6 +1825,343 @@
     padding-inline: 10px;
   }
 }
+
+.app-route-swap .swap-hero-inner {
+  grid-template-columns: minmax(0, 1fr) minmax(350px, 470px);
+  gap: 24px;
+}
+
+.app-route-swap .swap-reference-side {
+  align-content: start;
+}
+
+.app-route-swap .swap-analytics-sticky {
+  position: sticky;
+  top: 80px;
+  z-index: 2;
+}
+
+.app-route-swap .token-analytics-workspace {
+  min-width: 0;
+  overflow: hidden;
+  padding: 18px;
+  border: 1px solid rgba(119, 75, 57, .2);
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse at 92% 0%, rgba(163, 50, 43, .07), transparent 42%),
+    linear-gradient(145deg, #fffdf9, #f7f2e9 78%);
+  color: #342c27;
+  box-shadow: 0 14px 34px rgba(74, 47, 36, .09);
+}
+
+.app-route-swap .token-analytics-workspace-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #725d4e;
+  font: 700 9px var(--mono);
+  letter-spacing: .17em;
+}
+
+.app-route-swap .token-analytics-workspace-heading i {
+  width: 24px;
+  height: 1px;
+  background: #a42b2b;
+}
+
+.app-route-swap .token-analytics-tabs {
+  display: flex;
+  gap: 7px;
+  margin: 14px 0 18px;
+  border-bottom: 1px solid rgba(83, 61, 48, .13);
+}
+
+.app-route-swap .token-analytics-tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 10px 9px;
+  border: 0;
+  background: transparent;
+  color: #756a62;
+  font: 700 11px var(--sans);
+  cursor: pointer;
+}
+
+.app-route-swap .token-analytics-tabs button span {
+  color: #8b7d73;
+  font: 8px var(--mono);
+  letter-spacing: .06em;
+}
+
+.app-route-swap .token-analytics-tabs button.active {
+  color: #8f2928;
+}
+
+.app-route-swap .token-analytics-tabs button.active::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 2px;
+  background: #c33434;
+  content: '';
+}
+
+.app-route-swap .token-analytics-tabs button:focus-visible,
+.app-route-swap .token-analytics-range button:focus-visible {
+  outline: 2px solid #a3322b;
+  outline-offset: 2px;
+}
+
+.app-route-swap .token-analytics-price-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.app-route-swap .token-analytics-token-identity {
+  min-width: 0;
+}
+
+.app-route-swap .token-analytics-token-identity h2 {
+  margin: 0 0 5px;
+  color: #302824;
+  font: 700 20px/1.15 var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.app-route-swap .token-analytics-token-identity span {
+  display: block;
+  color: #776d65;
+  font: 9px/1.4 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.app-route-swap .token-analytics-price {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 5px;
+}
+
+.app-route-swap .token-analytics-price strong {
+  color: #302824;
+  font: 600 17px var(--mono);
+}
+
+.app-route-swap .token-analytics-price span {
+  font: 700 9px var(--mono);
+}
+
+.app-route-swap .token-analytics-price .is-positive { color: #26734b; }
+.app-route-swap .token-analytics-price .is-negative { color: #b3322e; }
+.app-route-swap .token-analytics-price .is-unavailable { color: #756a62; }
+
+.app-route-swap .token-analytics-chart-wrap {
+  display: grid;
+  align-items: start;
+  min-height: 294px;
+  margin: 0;
+  padding: 10px 4px 8px;
+  border-top: 1px solid rgba(83, 61, 48, .13);
+  border-bottom: 1px solid rgba(83, 61, 48, .13);
+  background: linear-gradient(180deg, rgba(116, 81, 55, .025), transparent);
+}
+
+.app-route-swap .token-analytics-chart-stage {
+  display: grid;
+  min-width: 0;
+}
+
+.app-route-swap .token-analytics-chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 12px;
+  min-height: 27px;
+  padding: 0 4px 4px;
+  color: #756a62;
+  font: 8px/1.4 var(--mono);
+}
+
+.app-route-swap .token-analytics-chart-readout span:first-child {
+  margin-right: auto;
+  color: #5d4d42;
+}
+
+.app-route-swap .token-analytics-chart-readout b {
+  color: #342c27;
+  font-weight: 600;
+}
+
+.app-route-swap .token-analytics-chart {
+  display: block;
+  width: 100%;
+  height: 256px;
+  overflow: visible;
+  outline: none;
+  touch-action: pan-y;
+}
+
+.app-route-swap .token-analytics-chart:focus-visible {
+  outline: 1px solid rgba(163, 50, 43, .42);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.app-route-swap .token-analytics-grid-line {
+  stroke: rgba(83, 61, 48, .14);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.app-route-swap .token-analytics-axis-label {
+  fill: #756a62;
+  font: 9px var(--mono);
+}
+
+.app-route-swap .token-analytics-axis-label.is-end {
+  text-anchor: end;
+}
+
+.app-route-swap .token-analytics-area {
+  fill: url(#analytics-price-fill);
+}
+
+.app-route-swap .token-analytics-chart polyline {
+  fill: none;
+  stroke: #a3322b;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.app-route-swap .token-analytics-chart.is-negative polyline { stroke: #b3322e; }
+
+.app-route-swap .token-analytics-chart.is-positive { color: #a3322b; }
+.app-route-swap .token-analytics-chart.is-negative { color: #b3322e; }
+
+.app-route-swap .token-analytics-volume-bar {
+  fill: rgba(163, 50, 43, .22);
+}
+
+.app-route-swap .token-analytics-crosshair {
+  stroke: rgba(83, 61, 48, .48);
+  stroke-dasharray: 3 4;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.app-route-swap .token-analytics-crosshair-point {
+  fill: #fffdf9;
+  stroke: #a3322b;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.app-route-swap .token-analytics-chart-message {
+  display: grid;
+  min-height: 214px;
+  align-content: center;
+  justify-items: center;
+  padding: 16px;
+  color: #756a62;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.app-route-swap .token-analytics-range {
+  display: flex;
+  justify-content: flex-start;
+  gap: 4px;
+  margin: 10px 0 14px;
+}
+
+.app-route-swap .token-analytics-range button {
+  min-width: 39px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #756a62;
+  font: 9px var(--mono);
+  cursor: pointer;
+}
+
+.app-route-swap .token-analytics-range button:hover,
+.app-route-swap .token-analytics-range button.active {
+  border-color: rgba(143, 41, 40, .25);
+  background: rgba(163, 50, 43, .08);
+  color: #8f2928;
+}
+
+.app-route-swap .token-analytics-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px 12px;
+  margin: 0;
+  padding-top: 2px;
+}
+
+.app-route-swap .token-analytics-metrics > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.app-route-swap .token-analytics-metrics dt {
+  color: #756a62;
+  font: 8px var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.app-route-swap .token-analytics-metrics dd {
+  margin: 0;
+  color: #342c27;
+  font: 600 12px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.app-route-swap .token-analytics-unavailable,
+.app-route-swap .token-analytics-empty {
+  margin: 12px 0 0;
+  color: #a3322b;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.app-route-swap .token-analytics-footnote {
+  display: block;
+  margin-top: 14px;
+  color: #7d7167;
+  font: 8px/1.5 var(--mono);
+}
+
+@media (max-width: 900px) {
+  .app-route-swap .swap-analytics-sticky { position: static; }
+}
+
+@media (max-width: 560px) {
+  .app-route-swap .swap-hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .app-route-swap .token-analytics-workspace { padding: 15px; }
+  .app-route-swap .token-analytics-chart-wrap { min-height: 276px; }
+  .app-route-swap .token-analytics-chart { height: 238px; }
+  .app-route-swap .token-analytics-chart-message { min-height: 184px; }
+  .app-route-swap .token-analytics-token-identity h2 { font-size: 18px; }
+  .app-route-swap .token-analytics-price strong { font-size: 15px; }
+  .app-route-swap .token-analytics-metrics { gap: 13px 10px; }
+}
+
 
 .app-route-swap .swap-network-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .app-route-swap .chain-logo { display: block; flex: 0 0 auto; }
@@ -1963,4 +2300,71 @@
 
 @media (max-width: 600px) {
   .swap-reference-mobile-cards { width: min(100% - 28px, 560px); }
+}
+
+@media (min-width: 569.5px) and (max-width: 931px) {
+  .app-route-swap .swap-hero-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+    width: min(100% - 48px, 760px);
+    padding: 28px 0 32px;
+  }
+
+  .app-route-swap .swap-hero-copy {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 16px 0 0;
+  }
+
+  .app-route-swap .swap-widget {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+  }
+
+  .app-route-swap .swap-reference-side {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .app-route-swap .swap-widget-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .app-route-swap .swap-network-switch {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .app-route-swap .swap-network-switch > span {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding-left: 2px;
+  }
+
+  .app-route-swap .swap-network-switch button {
+    min-width: 0;
+    min-height: 36px;
+    gap: 3px;
+    padding: 6px 2px;
+    font-size: 8.5px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  .app-route-swap .swap-help-trigger {
+    width: 100%;
+    min-height: 36px;
+    padding-inline: 10px;
+  }
 }

@@ -31,11 +31,10 @@
 //        h) Recipient's balance increased by at least reward_amount
 //           (with fee tolerance)
 //   6. On success: mark PENDING_PAYOUT → COMPLETED.
-//   7. On positive failure (tx failed / wrong program / wrong recipient /
-//      wrong claim data): revert claim.
-//   8. On ambiguous parsing failure (tx succeeded but parser couldn't
-//      recognize instruction): leave claim untouched for admin
-//      reconciliation. NEVER create the state:
+//   7. Revert only when Solana definitively reports meta.err for this
+//      signature. Any other verification mismatch remains pending for
+//      reconciliation because payout success has not been disproven.
+//   8. NEVER create the state:
 //        SOL paid on-chain + DB points restored.
 //
 // SECURITY:
@@ -47,6 +46,7 @@
 
 import { apiError, json, parseBody, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../../api/_lib/supabaseBackend.mjs'
+import { rewardViewerWalletMatches } from '../../api/_lib/rewardViewerAuth.mjs'
 import {
   getRewardsConnection,
   getTxExplorerUrl,
@@ -148,11 +148,12 @@ async function fetchClaimRow(claimId) {
   return Array.isArray(rows) ? rows[0] || null : rows || null
 }
 
-async function safeRevertFailedClaim(claimId, reason) {
+async function safeRevertFailedClaim(claimId, reason, signature) {
   try {
-    await callSupabaseRpc('revert_failed_reward_claim', {
+    await callSupabaseRpc('revert_verified_failed_reward_claim', {
       p_claim_id: claimId,
       p_failure_reason: String(reason || 'CONFIRM_FAILED').slice(0, 500),
+      p_claim_tx_signature: signature,
     })
     return true
   } catch (error) {
@@ -376,8 +377,8 @@ function decodeClaimRewardInstruction(dataInput) {
 //                   not positively confirm it represents this claim.
 //                   DO NOT revert — leave the claim ENTITLED/PENDING
 //                   for admin reconciliation.
-//     safe: false → positive failure (tx failed, wrong program, wrong
-//                   recipient, wrong claim data). Safe to revert.
+//     safe: false → definite mismatch. It is not sufficient to restore
+//                   points unless Solana reports meta.err for this signature.
 // =====================================================================
 function verifyTxMatchesClaim({
   txInfo,
@@ -640,17 +641,42 @@ function verifyTxMatchesClaim({
 }
 
 export default async function handler(req, res) {
+  const diagnostic = { stage: 'request validation', claimId: null, signature: null }
+  try {
+    return await handleClaimConfirm(req, res, diagnostic)
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('[claim-confirm] unhandled handler exception', {
+        ...diagnostic,
+        errorMessage: error?.message || String(error),
+        errorStack: error?.stack || null,
+        httpResponseSource: 'claim-confirm wrapper (CLAIM_CONFIRM_INTERNAL_ERROR)',
+      })
+    }
+    return apiError(res, 500, 'CLAIM_CONFIRM_INTERNAL_ERROR',
+      'Claim confirmation failed unexpectedly. Keep the transaction signature and retry confirmation or contact support.')
+  }
+}
+
+async function handleClaimConfirm(req, res, diagnostic) {
+  const setStage = (stage) => { diagnostic.stage = stage }
   if (req.method !== 'POST') return apiError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed.')
+  setStage('rate limit')
   if (!(await rateLimitPersistent(req, 'rewards_claim_confirm', 20))) {
     return apiError(res, 429, 'RATE_LIMITED', 'Too many confirm requests. Try again shortly.')
   }
+  setStage('database configuration')
   if (!isSupabaseConfigured()) {
     return apiError(res, 503, 'DATABASE_NOT_CONFIGURED', 'Rewards are not configured on the server.')
   }
 
+  setStage('request parsing')
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {})
   const claimId = String(body?.claimId || body?.claim_id || '').trim()
   const signature = String(body?.signature || '').trim()
+  const action = String(body?.action || '').trim()
+  diagnostic.claimId = claimId
+  diagnostic.signature = signature
 
   if (!isValidClaimId(claimId)) {
     return apiError(res, 400, 'INVALID_CLAIM_ID', 'A valid claimId (8-200 chars, A-Z a-z 0-9 _ -) is required.')
@@ -666,6 +692,7 @@ export default async function handler(req, res) {
   // points claimed, and reward amount. We do NOT trust a `wallet`
   // parameter sent by the frontend beyond using it as a sanity hint.
   // -------------------------------------------------------------------
+  setStage('claim row lookup')
   let claimRow
   try {
     claimRow = await fetchClaimRow(claimId)
@@ -675,6 +702,52 @@ export default async function handler(req, res) {
   }
   if (!claimRow) {
     return apiError(res, 404, 'CLAIM_NOT_FOUND', 'No reward claim was found for that claimId.')
+  }
+  setStage('reward viewer authorization')
+  if (!rewardViewerWalletMatches(req, claimRow.wallet_address)) {
+    return apiError(res, 401, 'REWARD_VIEWER_AUTH_REQUIRED', 'Verify ownership of the claimant wallet before confirming this claim.')
+  }
+
+  // Persist before any transaction can be broadcast. This is idempotent
+  // for the same signature and refuses a different signature for this claim.
+  setStage('signature persistence')
+  let submissionResult
+  try {
+    submissionResult = await callSupabaseRpc('record_reward_claim_submission', {
+      p_claim_id: claimId,
+      p_claim_tx_signature: signature,
+    })
+  } catch (error) {
+    const code = error?.code || error?.message || 'SIGNATURE_PERSIST_FAILED'
+    if (code.includes('CLAIM_SIGNATURE_CONFLICT') || code.includes('CLAIM_SIGNATURE_ALREADY_USED')
+      || error?.status === 409 || error?.body?.code === '23505') {
+      return apiError(res, 409, 'CLAIM_SIGNATURE_CONFLICT',
+        'This claim is already bound to a different transaction signature. Do not submit another payout.')
+    }
+    if (code.includes('CLAIM_OUTCOME_UNCERTAIN') || code.includes('CLAIM_NOT_RESTARTABLE')
+      || code.includes('CLAIM_ALREADY_COMPLETED')) {
+      return apiError(res, 409, code, 'This claim cannot accept a new transaction signature. Use its existing recovery state.')
+    }
+    console.error('[claim-confirm] submitted signature persistence failed', {
+      claimId,
+      signature,
+      message: error?.message || String(error),
+      code,
+    })
+    return apiError(res, 502, 'SIGNATURE_PERSIST_FAILED',
+      'The transaction signature could not be recorded. Do not submit the transaction; retry the same signature or contact support.')
+  }
+  claimRow.claim_tx_signature = signature
+  claimRow.status = 'PENDING_PAYOUT'
+  if (action === 'record-submission') {
+    return json(res, 200, {
+      success: true,
+      idempotent: Boolean(submissionResult?.idempotent),
+      claim_id: claimId,
+      signature,
+      status: 'PENDING_PAYOUT',
+      message: 'The signed transaction is recorded. It is now safe to broadcast this exact transaction.',
+    })
   }
 
   // -------------------------------------------------------------------
@@ -722,10 +795,12 @@ export default async function handler(req, res) {
   // itself — not from a server-side env var. This protects against
   // admin rotation mismatches.
   // -------------------------------------------------------------------
+  setStage('reward program address derivation')
   const [expectedRewardConfigPda] = getRewardConfigPda()
   const [expectedRewardVaultPda] = getRewardVaultPda()
 
   let expectedAdmin
+  setStage('reward program state lookup')
   try {
     const programState = await getRewardsProgramState()
     expectedAdmin = programState.admin
@@ -751,6 +826,7 @@ export default async function handler(req, res) {
   // -------------------------------------------------------------------
   // STEP 4: Poll Solana for the tx (up to 30s).
   // -------------------------------------------------------------------
+  setStage('Solana transaction lookup')
   const connection = getRewardsConnection()
   console.info('[claim-confirm] polling Solana for tx', { claimId, signature, wallet: expectedRecipient })
   const pollResult = await pollTransaction(connection, signature)
@@ -777,6 +853,7 @@ export default async function handler(req, res) {
   // -------------------------------------------------------------------
   // STEP 5: Verify the on-chain tx.
   // -------------------------------------------------------------------
+  setStage('transaction verification')
   const verification = verifyTxMatchesClaim({
     txInfo: pollResult.txInfo,
     expectedRecipient,
@@ -808,18 +885,10 @@ export default async function handler(req, res) {
   if (!verification.ok) {
     // ACCOUNTING SAFETY (requirement #15):
     //
-    //   - If `verification.safe === true` → ambiguous parsing. The tx
-    //     SUCCEEDED on-chain but we could not positively confirm it
-    //     represents this claim. DO NOT revert. Leave the claim
-    //     ENTITLED (or PENDING_PAYOUT if mid-flow) for admin
-    //     reconciliation. NEVER create the state:
-    //       SOL successfully paid on-chain + DB points restored.
-    //
-    //   - If `verification.safe === false` → positive failure. The tx
-    //     either failed on-chain OR clearly does not represent this
-    //     claim (wrong program, wrong recipient, wrong claim data).
-    //     Safe to revert.
-    if (verification.safe) {
+    // Only a transaction explicitly reported failed by Solana is safe to
+    // revert. Any successful-but-mismatched or ambiguously parsed transaction
+    // stays pending for reconciliation; its payout outcome is not disproven.
+    if (verification.safe || verification.reason !== 'TX_FAILED_ON_CHAIN') {
       console.warn('[claim-confirm] AMBIGUOUS verification — leaving claim untouched for reconciliation', {
         claimId,
         signature,
@@ -827,7 +896,7 @@ export default async function handler(req, res) {
         detail: verification.detail,
       })
       return apiError(res, 422, 'TX_VERIFICATION_AMBIGUOUS',
-        `The on-chain transaction succeeded but verification was ambiguous (${verification.reason}). ` +
+        `The transaction could not be safely classified (${verification.reason}). ` +
         `The claim has been left for admin reconciliation — your points were NOT restored and the payout MAY have succeeded. ` +
         `Contact support with this signature: ${signature}`)
     }
@@ -839,18 +908,22 @@ export default async function handler(req, res) {
       reason: verification.reason,
       detail: verification.detail,
     })
-    await safeRevertFailedClaim(
+    const reverted = await safeRevertFailedClaim(
       claimId,
-      `TX_VERIFICATION_FAILED: ${verification.reason} ${verification.detail || ''}`.slice(0, 500)
+      `TX_FAILED_ON_CHAIN: ${verification.detail || ''}`.slice(0, 500),
+      signature
     )
     return apiError(res, 422, 'TX_VERIFICATION_FAILED',
-      `The on-chain transaction did not match the expected claim. Reason: ${verification.reason}. The claim has been reverted.`)
+      reverted
+        ? `The on-chain transaction failed. Reason: ${verification.reason}. The claim was reverted and its points restored.`
+        : `The on-chain transaction failed, but the claim could not be reverted automatically. Its points remain reserved for reconciliation.`)
   }
 
   // -------------------------------------------------------------------
   // STEP 6: Tx confirmed + verified. Transition ENTITLED →
   // PENDING_PAYOUT → COMPLETED.
   // -------------------------------------------------------------------
+  setStage('pending-payout status update')
   console.info('[claim-confirm] tx verified — marking PENDING_PAYOUT', { claimId, signature })
   try {
     await callSupabaseRpc('mark_reward_claim_pending_payout', { p_claim_id: claimId })
@@ -864,6 +937,7 @@ export default async function handler(req, res) {
   }
 
   let completedClaim
+  setStage('completed status update')
   try {
     completedClaim = await callSupabaseRpc('update_reward_claim_status', {
       p_claim_id: claimId,
@@ -890,6 +964,7 @@ export default async function handler(req, res) {
     })
   }
 
+  setStage('success response')
   return json(res, 200, {
     success: true,
     claim_id: claimId,

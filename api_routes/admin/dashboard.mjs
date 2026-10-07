@@ -13,6 +13,34 @@ function validSignature(value) {
   const trimmed = value.trim()
   return /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(trimmed) || /^0x[a-fA-F0-9]{64}$/.test(trimmed)
 }
+
+function validateCampaigns(campaigns) {
+  if (!Array.isArray(campaigns) || campaigns.length > 100) return 'campaigns must be an array with at most 100 entries.'
+  const ids = new Set()
+  const codes = new Set()
+  for (const campaign of campaigns) {
+    if (!campaign || typeof campaign !== 'object' || Array.isArray(campaign)) return 'Each campaign must be an object.'
+    const id = String(campaign.id || '').trim()
+    const promoCode = String(campaign.promoCode ?? campaign.promo_code ?? '').trim().toUpperCase()
+    if (id && (!/^[A-Za-z0-9_-]{1,80}$/.test(id) || ids.has(id))) return 'Campaign IDs must be unique and use letters, numbers, hyphens, or underscores.'
+    if (promoCode && (!id || !/^[A-Z0-9_-]{1,64}$/.test(promoCode) || codes.has(promoCode))) return 'Promo codes require a campaign ID and must be unique, up to 64 letters, numbers, hyphens, or underscores.'
+    if (id) ids.add(id)
+    if (promoCode) codes.add(promoCode)
+    if (campaign.enabled != null && typeof campaign.enabled !== 'boolean') return 'Campaign enabled must be true or false.'
+
+    const multiplier = Number(campaign.multiplier)
+    if (!Number.isFinite(multiplier) || multiplier <= 0 || (promoCode && multiplier < 1)) return 'Campaign multipliers must be positive; promo multipliers must be at least 1.'
+    const startDate = campaign.startDate || campaign.start_at
+    const endDate = campaign.endDate || campaign.end_at
+    if ((startDate && !Number.isFinite(Date.parse(startDate))) || (endDate && !Number.isFinite(Date.parse(endDate)))) return 'Campaign start and end dates must be valid.'
+    if (startDate && endDate && Date.parse(endDate) <= Date.parse(startDate)) return 'Campaign end date must be after its start date.'
+    if (campaign.source && !['SWAP', 'RONIN_BUY', 'RONIN_SELL'].includes(String(campaign.source).toUpperCase())) return 'Campaign source must be SWAP, RONIN_BUY, or RONIN_SELL.'
+    if (campaign.direction && !['any', 'buy', 'sell'].includes(String(campaign.direction).toLowerCase())) return 'Campaign direction must be any, buy, or sell.'
+    if (campaign.chainId != null && campaign.chainId !== '' && (!Number.isInteger(Number(campaign.chainId)) || Number(campaign.chainId) <= 0)) return 'Campaign chain ID must be a positive integer.'
+    for (const key of ['inputMint', 'outputMint']) if (campaign[key] != null && (typeof campaign[key] !== 'string' || campaign[key].length > 128)) return `${key} must be a string no longer than 128 characters.`
+  }
+  return null
+}
 function adminId(req) { return String(req.headers['x-admin-id'] || 'admin').slice(0, 120) }
 
 export default async function handler(req, res) {
@@ -39,11 +67,18 @@ export default async function handler(req, res) {
     }
     const body = parseBody(req) || {}
     if (req.method === 'PATCH' && resource === 'settings') {
-      const allowed = ['points_enabled', 'minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap_enabled', 'transaction_points_cap', 'campaigns', 'swap_enabled', 'sol_rewards_enabled', 'platform_fee_enabled', 'platform_fee_bps', 'reward_asset', 'reward_points_per_unit']
+      const allowed = ['points_enabled', 'minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap_enabled', 'transaction_points_cap', 'effective_multiplier_ceiling', 'ronin_buy_multiplier', 'ronin_sell_multiplier', 'campaigns', 'swap_enabled', 'sol_rewards_enabled', 'platform_fee_enabled', 'platform_fee_bps', 'reward_asset', 'reward_points_per_unit']
       const values = Object.fromEntries(allowed.filter((key) => Object.prototype.hasOwnProperty.call(body, key)).map((key) => [key, body[key]]))
-      const numeric = ['minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap', 'platform_fee_bps', 'reward_points_per_unit']
+      const numeric = ['minimum_qualifying_swap_usd', 'points_per_usd', 'transaction_points_cap', 'ronin_buy_multiplier', 'ronin_sell_multiplier', 'platform_fee_bps', 'reward_points_per_unit']
       for (const key of numeric) if (values[key] != null && (!Number.isFinite(Number(values[key])) || Number(values[key]) < 0)) return apiError(res, 400, 'INVALID_SETTING', `${key} must be non-negative.`)
-      if (values.campaigns != null && !Array.isArray(values.campaigns)) return apiError(res, 400, 'INVALID_CAMPAIGNS', 'campaigns must be an array.')
+      if (Object.prototype.hasOwnProperty.call(values, 'effective_multiplier_ceiling')
+        && (!Number.isFinite(Number(values.effective_multiplier_ceiling)) || Number(values.effective_multiplier_ceiling) <= 0)) {
+        return apiError(res, 400, 'INVALID_SETTING', 'effective_multiplier_ceiling must be a positive number.')
+      }
+      if (values.campaigns != null) {
+        const campaignsError = validateCampaigns(values.campaigns)
+        if (campaignsError) return apiError(res, 400, 'INVALID_CAMPAIGNS', campaignsError)
+      }
       if (values.platform_fee_bps != null && Number(values.platform_fee_bps) > 10_000) return apiError(res, 400, 'INVALID_SETTING', 'platform_fee_bps must not exceed 10000.')
       if (values.reward_points_per_unit != null && Number(values.reward_points_per_unit) <= 0) return apiError(res, 400, 'INVALID_SETTING', 'reward_points_per_unit must be greater than 0.')
       if (values.reward_asset != null && (typeof values.reward_asset !== 'string' || values.reward_asset.trim().length === 0 || values.reward_asset.length > 32)) return apiError(res, 400, 'INVALID_SETTING', 'reward_asset must be a non-empty string (max 32 chars).')

@@ -33,16 +33,16 @@
 //          instruction, not the fee payer)
 //   8. Return base64-serialized partially-signed tx + claim metadata
 //
-// IMPORTANT: This endpoint does NOT mark the claim PENDING_PAYOUT.
-// The transition ENTITLED → PENDING_PAYOUT only happens in the
-// /claim-confirm endpoint after the user has actually submitted
-// the tx via Phantom. If the user never submits (rejects or closes
-// Phantom), the claim stays ENTITLED and can be cleaned up by the
-// orphan-claim cron (scripts/cleanup-orphan-claims.mjs).
+// IMPORTANT: Preparation leaves the claim ENTITLED. After Phantom signs,
+// the client records that exact signature before broadcasting; this
+// atomically transitions ENTITLED → PENDING_PAYOUT. A rejected signature
+// popup therefore remains cancellable, while any signed transaction is
+// conservatively protected from cancellation.
 // =====================================================================
 
 import { apiError, json, parseBody, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../../api/_lib/supabaseBackend.mjs'
+import { rewardViewerWalletMatches } from '../../api/_lib/rewardViewerAuth.mjs'
 import {
   isRewardsAdminConfigured,
   getRewardsProgramState,
@@ -136,14 +136,24 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeParse(req.body) : (req.body || {})
   const wallet = String(body?.wallet || '').trim()
   const claimId = String(body?.claimId || body?.claim_id || '').trim()
+  const seasonId = String(body?.seasonId || body?.season_id || '').trim()
   const pointsToClaimRaw = body?.pointsToClaim ?? body?.points_to_claim
   const pointsToClaim = pointsToClaimRaw == null ? null : Number(pointsToClaimRaw)
 
   if (!isValidSolanaWallet(wallet)) {
     return apiError(res, 400, 'INVALID_WALLET', 'A valid Solana wallet address is required.')
   }
+  if (!rewardViewerWalletMatches(req, wallet)) {
+    return apiError(res, 401, 'REWARD_VIEWER_AUTH_REQUIRED', 'Verify ownership of this wallet before preparing a claim.')
+  }
   if (!isValidClaimId(claimId)) {
     return apiError(res, 400, 'INVALID_CLAIM_ID', 'A valid claimId (8-200 chars, A-Z a-z 0-9 _ -) is required.')
+  }
+  if (seasonId && !/^[A-Za-z0-9_-]{1,80}$/.test(seasonId)) {
+    return apiError(res, 400, 'INVALID_SEASON_ID', 'A valid seasonId is required.')
+  }
+  if (seasonId && pointsToClaim != null) {
+    return apiError(res, 400, 'INVALID_POINTS', 'Season reward claims use the finalized allocation amount.')
   }
   if (pointsToClaim != null && (!Number.isFinite(pointsToClaim) || pointsToClaim <= 0)) {
     return apiError(res, 400, 'INVALID_POINTS', 'pointsToClaim must be a positive number, or null/omitted to claim all available.')
@@ -166,13 +176,19 @@ export default async function handler(req, res) {
   // --- STEP 2: Supabase claim_reward RPC (atomic, idempotent) ---
   let claimResult
   try {
-    claimResult = await callSupabaseRpc('claim_reward', {
-      p_wallet_address: wallet,
-      p_claim_id: claimId,
-      p_points_to_claim: pointsToClaim,
-      p_client_nonce: null,
-      p_metadata: { flow: 'user-pays-fee' },
-    })
+    claimResult = seasonId
+      ? await callSupabaseRpc('claim_finalized_season_reward', {
+        p_wallet_address: wallet,
+        p_season_id: seasonId,
+        p_claim_id: claimId,
+      })
+      : await callSupabaseRpc('claim_reward', {
+        p_wallet_address: wallet,
+        p_claim_id: claimId,
+        p_points_to_claim: pointsToClaim,
+        p_client_nonce: null,
+        p_metadata: { flow: 'user-pays-fee' },
+      })
   } catch (error) {
     // DIAGNOSTIC LOG: log the specific RPC failure code + claim_id +
     // wallet so we can see exactly which exception path fired. Safe
@@ -189,6 +205,23 @@ export default async function handler(req, res) {
         ? JSON.stringify(error.body).slice(0, 500)
         : null,
     })
+    if (!seasonId && error?.code === 'NO_ACTIVE_SEASON') {
+      return apiError(res, 409, 'NO_ACTIVE_SEASON',
+        'There is no active season for a general points claim. Claim finalized rewards from the season reward section.')
+    }
+    if (seasonId) {
+      const seasonErrors = {
+        SEASON_CLAIM_WINDOW_CLOSED: 'The season reward claim window is not open.',
+        NO_SEASON_REWARD_ALLOCATION: 'No claimable allocation exists for this wallet in that season.',
+        SEASON_REWARD_ALREADY_CLAIMED: 'This season reward has already been claimed or is being paid.',
+        REWARDS_DISABLED: 'SOL rewards are currently disabled.',
+        WALLET_EXCLUDED: 'This wallet is not eligible to claim rewards.',
+        SOLANA_REWARD_IDENTITY_NOT_FOUND: 'Link this EVM wallet to its verified Solana reward wallet before claiming.',
+      }
+      if (seasonErrors[error?.code]) {
+        return apiError(res, 409, error.code, seasonErrors[error.code])
+      }
+    }
     return apiError(res, 502, 'CLAIM_RPC_FAILED', error?.code || 'The Supabase claim RPC failed.')
   }
 
@@ -216,8 +249,7 @@ export default async function handler(req, res) {
   }
 
   if (claim.status === 'PENDING_PAYOUT') {
-    // A previous /claim-prepare call for this claim_id is in-flight.
-    // The user should complete or cancel it before starting a new one.
+    // A previous attempt for this claim_id is already outcome-uncertain.
     return json(res, 200, {
       success: false,
       pending_payout: true,
@@ -225,7 +257,7 @@ export default async function handler(req, res) {
       earned_points: Number(claimResult.earned_points || 0),
       claimed_points: Number(claimResult.claimed_points || 0),
       claimable_points: Number(claimResult.claimable_points || 0),
-      message: 'A payout is already in progress for this claim_id. Use /api/rewards/claim-cancel to cancel it first, or complete it via /api/rewards/claim-confirm.',
+      message: 'A payout is already in progress for this claim_id. Retry confirmation for its saved transaction signature; do not start another payout.',
     })
   }
 

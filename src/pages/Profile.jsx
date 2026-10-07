@@ -6,6 +6,7 @@ import { Button, ProgressBar, Sakura, SectionHeading, StatCard, Tag } from '../c
 import Icon from '../components/Icon'
 import RewardClaimPanel from '../components/RewardClaimPanel'
 import WalletLinkPanel from '../components/WalletLinkPanel'
+import ProfileCampaigns from '../components/ProfileCampaigns'
 import './profile.css'
 
 const chainNames = { 101: 'Solana', 1: 'Ethereum', 4663: 'Robinhood Chain' }
@@ -116,23 +117,26 @@ function FrequentSwapRow({ pair, rank }) {
   )
 }
 
-function NotConnected({ onConnectPhantom, onConnectMetaMask, disabled, error }) {
+function NotConnected({ onConnectPhantom, onConnectMetaMask, disabled, error, children }) {
   return (
-    <section className="profile-empty-state">
-      <div className="profile-avatar profile-avatar-muted">侍</div>
-      <h1>CONNECT YOUR WALLET</h1>
-      <p>Connect Phantom for Solana rewards, or MetaMask to view EVM points.</p>
-      <div className="profile-wallet-connect-buttons">
-        <Button icon="wallet" onClick={onConnectPhantom} disabled={disabled}>Connect Phantom</Button>
-        <Button variant="outline" icon="wallet" onClick={onConnectMetaMask} disabled={disabled}>Connect MetaMask</Button>
-      </div>
-      {error && <div className="error-box" role="alert"><Icon name="info" size={16} /><span>{error}</span></div>}
-    </section>
+    <>
+      <section className="profile-empty-state">
+        <div className="profile-avatar profile-avatar-muted">侍</div>
+        <h1>CONNECT YOUR WALLET</h1>
+        <p>Connect Phantom for Solana rewards, or MetaMask to view EVM points.</p>
+        <div className="profile-wallet-connect-buttons">
+          <Button icon="wallet" onClick={onConnectPhantom} disabled={disabled}>Connect Phantom</Button>
+          <Button variant="outline" icon="wallet" onClick={onConnectMetaMask} disabled={disabled}>Connect MetaMask</Button>
+        </div>
+        {error && <div className="error-box" role="alert"><Icon name="info" size={16} /><span>{error}</span></div>}
+      </section>
+      {children}
+    </>
   )
 }
 
 export default function Profile() {
-  const { wallet, profile, walletDataState, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded, connectedEvmWallet, activeProfileWallet, connectionState, error: walletError, connectWallet, connectMetaMaskWallet } = useWallet()
+  const { wallet, profile, openWalletModal, allWalletAddresses, verifiedEvmWallets, solanaPayoutWallet, verifiedIdentityLoaded, connectedEvmWallet, activeProfileWallet, connectionState, error: walletError, connectWallet, connectMetaMaskWallet } = useWallet()
   const [data, setData] = useState(null)
   const [state, setState] = useState('idle')
   const [visibleActivityCount, setVisibleActivityCount] = useState(3)
@@ -251,10 +255,10 @@ export default function Profile() {
   // users view their multi-chain profile even if they don't have Phantom
   // installed.
   const hasAnyWallet = Boolean(activeProfileWallet || wallet) || (allWalletAddresses && allWalletAddresses.length > 0)
-  if (!hasAnyWallet) return <NotConnected onConnectPhantom={connectWallet} onConnectMetaMask={connectMetaMaskWallet} disabled={connectionState === 'connecting'} error={walletError} />
-  if (wallet?.isDemo) return <section className="profile-empty-state"><div className="profile-avatar">侍</div><Tag tone="red">UI PREVIEW</Tag><h1>SAMURAI PROFILE</h1><p>Connect a real wallet to load personal points, verified swaps, rank position, and live balance data.</p><Button variant="outline" icon="wallet" onClick={openWalletModal}>Connect real wallet</Button></section>
-  if (state === 'loading' || walletDataState === 'loading') return <main className="profile-page"><ProfileSkeleton /></main>
-  if (state === 'error') return <section className="profile-empty-state profile-error-state"><div className="profile-avatar profile-avatar-muted"><Icon name="info" size={24} /></div><h1>PROFILE UNAVAILABLE</h1><p>{error}</p><Button icon="refresh" onClick={retry}>Retry</Button></section>
+  if (!hasAnyWallet) return <><NotConnected onConnectPhantom={connectWallet} onConnectMetaMask={connectMetaMaskWallet} disabled={connectionState === 'connecting'} error={walletError} /><main className="profile-page"><ProfileCampaigns /></main></>
+  if (wallet?.isDemo) return <><section className="profile-empty-state"><div className="profile-avatar">侍</div><Tag tone="red">UI PREVIEW</Tag><h1>SAMURAI PROFILE</h1><p>Connect a real wallet to load personal points, verified swaps, rank position, and live balance data.</p><Button variant="outline" icon="wallet" onClick={openWalletModal}>Connect real wallet</Button></section><main className="profile-page"><ProfileCampaigns /></main></>
+  if (state === 'loading') return <main className="profile-page"><ProfileSkeleton /><ProfileCampaigns /></main>
+  if (state === 'error') return <><section className="profile-empty-state profile-error-state"><div className="profile-avatar profile-avatar-muted"><Icon name="info" size={24} /></div><h1>PROFILE UNAVAILABLE</h1><p>{error}</p><Button icon="refresh" onClick={retry}>Retry</Button></section><main className="profile-page"><ProfileCampaigns /></main></>
 
   const stats = data?.walletStats || {}
   const rankProfile = profile || {}
@@ -361,6 +365,7 @@ export default function Profile() {
           resolves linked wallets from the database; the frontend never
           supplies a list. */}
       <RewardClaimPanel wallet={activeProfileWallet?.address || solanaPayoutWallet || wallet?.address || null} expectedEvmWallet={expectedLinkEvmWallet} />
+      <ProfileCampaigns />
 
       {/* Verified Reward Wallets section --------------------------------- */}
       {/* Clearly separates "Connected wallets" (UI convenience from

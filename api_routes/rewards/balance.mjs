@@ -1,6 +1,7 @@
 import { apiError, json, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../../api/_lib/supabaseBackend.mjs'
 import { getRewardsNetwork } from '../../api/_lib/solanaRewardsAdmin.mjs'
+import { rewardViewerWalletMatches } from '../../api/_lib/rewardViewerAuth.mjs'
 
 // In Vite dev SSR, process.env is not reliably populated — the env values
 // are injected via globalThis.__RONIN_LOCAL_ENV__ by vite.config.js's
@@ -31,6 +32,14 @@ export default async function handler(req, res) {
 
   const wallet = String(req.query?.wallet || '').trim()
   if (!isValidWallet(wallet)) return apiError(res, 400, 'INVALID_WALLET', 'A valid wallet address is required.')
+  try {
+    if (!rewardViewerWalletMatches(req, wallet)) {
+      return apiError(res, 401, 'REWARD_VIEWER_AUTH_REQUIRED', 'Verify ownership of this wallet to view reward details.')
+    }
+  } catch (error) {
+    console.error('rewards/balance auth validation failed:', error?.message || error)
+    return apiError(res, 503, 'REWARD_VIEWER_AUTH_UNAVAILABLE', 'Reward access authentication is not available.')
+  }
 
   try {
     const response = await fetch(`${runtimeEnv.SUPABASE_URL}/rest/v1/rpc/get_wallet_reward_balance`, {
@@ -65,8 +74,33 @@ export default async function handler(req, res) {
         active_season_id: null,
         reward_asset: 'SOL',
         reward_points_per_unit: 1000,
+        season_reserved_points: 0,
+        season_reward: { season_rewards: [], reserved_points: 0 },
         recent_claims: [],
       })
+    }
+
+    const seasonRewardResponse = await fetch(`${runtimeEnv.SUPABASE_URL}/rest/v1/rpc/get_wallet_season_reward`, {
+      method: 'POST',
+      headers: {
+        apikey: runtimeEnv.SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${runtimeEnv.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({ p_wallet_address: wallet }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    const seasonRewardText = await seasonRewardResponse.text()
+    let seasonRewardBody
+    try { seasonRewardBody = seasonRewardText ? JSON.parse(seasonRewardText) : null } catch { seasonRewardBody = null }
+    if (!seasonRewardResponse.ok) {
+      console.error('rewards/season balance RPC failed:', seasonRewardResponse.status, seasonRewardText?.slice(0, 200))
+      return apiError(res, 502, 'SEASON_REWARD_BALANCE_ERROR', 'Unable to load season reward details.')
+    }
+    const seasonReward = Array.isArray(seasonRewardBody) ? seasonRewardBody[0] : seasonRewardBody
+    if (!seasonReward) {
+      return apiError(res, 502, 'SEASON_REWARD_BALANCE_ERROR', 'Season reward details were unavailable.')
     }
 
     // Numeric normalization so the frontend never has to deal with strings.
@@ -86,7 +120,8 @@ export default async function handler(req, res) {
       linked_evm_wallets: Array.isArray(result.linked_evm_wallets) ? result.linked_evm_wallets : [],
       is_verified_identity: Boolean(result.is_verified_identity),
       earned_points: Number(result.earned_points || 0),
-      claimed_points: Number(result.claimed_points || 0),
+      claimed_points: Math.max(Number(result.claimed_points || 0) - Number(seasonReward.reserved_points || 0), 0),
+      season_reserved_points: Number(seasonReward.reserved_points || 0),
       claimable_points: Number(result.claimable_points || 0),
       rewards_enabled: Boolean(result.rewards_enabled),
       has_active_season: Boolean(result.has_active_season),
@@ -97,10 +132,42 @@ export default async function handler(req, res) {
       // ('devnet' or 'mainnet-beta'). Used by the frontend to build
       // correct Solana explorer URLs (with ?cluster=devnet on Devnet).
       network: getRewardsNetwork(),
+      season_reward: {
+        ...seasonReward,
+        season_rewards: Array.isArray(seasonReward.season_rewards) ? seasonReward.season_rewards.map((item) => ({
+          ...item,
+          season: item.season ? {
+            ...item.season,
+            reward_pool_amount: Number(item.season.reward_pool_amount || 0),
+            total_eligible_points: Number(item.season.total_eligible_points || 0),
+          } : null,
+          participation: item.participation ? {
+            ...item.participation,
+            samurai_points: Number(item.participation.samurai_points || 0),
+            qualifying_volume: Number(item.participation.qualifying_volume || 0),
+            qualifying_swaps: Number(item.participation.qualifying_swaps || 0),
+            eligibility_status: item.participation.eligibility_status || null,
+            rank: item.participation.rank == null ? null : Number(item.participation.rank),
+            campaigns: Array.isArray(item.participation.campaigns) ? item.participation.campaigns : [],
+          } : null,
+          allocation: item.allocation ? {
+            ...item.allocation,
+            eligible_points: Number(item.allocation.eligible_points || 0),
+            total_eligible_points: Number(item.allocation.total_eligible_points || 0),
+            reward_pool_amount: Number(item.allocation.reward_pool_amount || 0),
+            has_reward: Boolean(item.allocation.has_reward),
+            reward_amount: item.claim?.status === 'COMPLETED' && item.allocation.reward_amount != null
+              ? Number(item.allocation.reward_amount)
+              : null,
+          } : null,
+          claim_window_open: Boolean(item.claim_window_open),
+        })) : [],
+        reserved_points: Number(seasonReward.reserved_points || 0),
+      },
       recent_claims: Array.isArray(result.recent_claims) ? result.recent_claims.map((c) => ({
         ...c,
         points_claimed: Number(c.points_claimed || 0),
-        reward_amount: Number(c.reward_amount || 0),
+        reward_amount: c.status === 'COMPLETED' ? Number(c.reward_amount || 0) : null,
         conversion_rate: Number(c.conversion_rate || 0),
       })) : [],
     })

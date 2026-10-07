@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import { useWallet, getSolanaProvider } from '../context/WalletContext'
 import { getSolBalance, getRoninBalance, getRoninSupply, sendSignedSolanaTransaction, confirmSolanaTransaction } from '../services/roninService'
-import { getJupiterOrder, executeJupiterOrder, getJupiterReferralConfig, JupiterApiError, SOL_MINT, LAMPORTS_PER_SOL, JUPITER_REFERRAL_ACCOUNT, JUPITER_REFERRAL_FEE_BPS, solToLamports } from '../services/jupiterService'
+import { getJupiterOrder, executeJupiterOrder, getJupiterReferralConfig, verifySwapTransaction, recordVerifiedSwap, processSamuraiPoints, JupiterApiError, SOL_MINT, LAMPORTS_PER_SOL, JUPITER_REFERRAL_ACCOUNT, JUPITER_REFERRAL_FEE_BPS, solToLamports } from '../services/jupiterService'
 import { RONIN_MINT, formatNumber } from '../data'
 import Icon from './Icon'
 import { Button, Sakura, ContractVerifyNote } from './Layout'
 import ComingSoon from './ComingSoon'
+import SamuraiPromoCode from './SamuraiPromoCode'
 import { BUY_ENABLED } from '../config/features'
 
 // Minimum SOL kept aside so the wallet always has enough for network /
@@ -128,6 +129,8 @@ export default function BuyRonin() {
   const [txSignature, setTxSignature] = useState('')
   const [receivedAmount, setReceivedAmount] = useState(null)
   const [verification, setVerification] = useState(null)
+  const [pointsError, setPointsError] = useState('')
+  const [promoCode, setPromoCode] = useState('')
   const [referralConfig, setReferralConfig] = useState({ referralAccount: JUPITER_REFERRAL_ACCOUNT, referralFeeBps: JUPITER_REFERRAL_FEE_BPS })
 
   const quoteRequestId = useRef(0)
@@ -150,6 +153,7 @@ export default function BuyRonin() {
     setTxError('')
     setTxSignature('')
     setReceivedAmount(null)
+    setPointsError('')
     setVerification(null)
   }
 
@@ -384,6 +388,7 @@ export default function BuyRonin() {
     setTxError('')
     setTxSignature('')
     setReceivedAmount(null)
+    setPointsError('')
 
     const inputMint = isSell ? RONIN_MINT : SOL_MINT
     const outputMint = isSell ? SOL_MINT : RONIN_MINT
@@ -516,6 +521,41 @@ export default function BuyRonin() {
       setTxSignature(signature)
       loadSolBalance()
       loadRoninBalance()
+
+      try {
+        let transactionVerification = null
+        let transactionVerificationError = null
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            transactionVerification = await verifySwapTransaction({ signature, wallet: wallet.address })
+            transactionVerificationError = null
+          } catch (error) {
+            transactionVerificationError = error
+          }
+          const transient = transactionVerificationError
+            || transactionVerification?.status === 'error'
+            || transactionVerification?.status === 'not_found'
+            || transactionVerification?.status === 'pending'
+            || transactionVerification?.reason === 'RPC_UNAVAILABLE'
+            || transactionVerification?.reason === 'TRANSACTION_NOT_FOUND'
+            || transactionVerification?.reason === 'TRANSACTION_PENDING'
+          if (!transient || attempt === 2) break
+          await new Promise((resolve) => window.setTimeout(resolve, 1500))
+        }
+
+        if (transactionVerificationError) throw transactionVerificationError
+        if (!transactionVerification?.verified) {
+          const reason = transactionVerification?.reason || transactionVerification?.status || 'verification incomplete'
+          setPointsError(`The transaction completed, but could not be verified (${reason}). Samurai Points were not awarded.`)
+          return
+        }
+
+        await recordVerifiedSwap({ signature, wallet: wallet.address, promoCode })
+        await processSamuraiPoints({ signature })
+      } catch (pointsProcessingError) {
+        console.error('Buy/Sell RONIN Samurai Points processing failed:', pointsProcessingError)
+        setPointsError(pointsProcessingError?.message || 'The transaction completed, but Samurai Points could not be processed.')
+      }
     } catch (error) {
       console.error(`${isSell ? 'Sell' : 'Buy'} RONIN swap failed`, error)
       setTxState('error')
@@ -621,6 +661,15 @@ export default function BuyRonin() {
               </div>
             </div>
 
+            <SamuraiPromoCode
+              key={isSell ? 'sell-promo' : 'buy-promo'}
+              value={promoCode}
+              onChange={setPromoCode}
+              chainId={101}
+              inputMint={isSell ? RONIN_MINT : SOL_MINT}
+              outputMint={isSell ? SOL_MINT : RONIN_MINT}
+            />
+
             {quoteState === 'error' && (
               <div className="inline-message"><Icon name="info" size={14} />{quoteError}</div>
             )}
@@ -701,6 +750,7 @@ export default function BuyRonin() {
                 <strong>✓ $RONIN {isSell ? 'SOLD' : 'PURCHASED'}</strong>
                 <p>You received:</p>
                 <p className="buy-result-amount">{formatAmount(receivedAmount)} {outputUnit}</p>
+                {pointsError && <div className="inline-message"><Icon name="info" size={14} />{pointsError}</div>}
                 {verification && (
                   <div className={`buy-verify-box ${verification.active ? '' : 'buy-verify-box-error'}`}>
                     <div className="buy-verify-header"><strong>{verification.active ? 'REFERRAL FEE COLLECTED' : 'REFERRAL FEE NOT COLLECTED'}</strong><span className="status-dot" /></div>

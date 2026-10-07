@@ -22,6 +22,33 @@
   gap: 10px;
 }
 
+.admin-shell .admin-campaign-token-metadata {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--ink);
+}
+
+.admin-shell .admin-campaign-token-metadata img,
+.admin-shell .admin-campaign-token-placeholder {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--line);
+}
+
+.admin-shell .admin-campaign-token-metadata span {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-shell .admin-campaign-token-metadata small {
+  color: var(--muted);
+}
+
 .admin-shell .admin-season-row {
   display: grid;
   grid-template-columns: 1.5fr auto 1fr auto;
@@ -37,7 +64,22 @@
   color: var(--muted);
 }
 
+.admin-shell .admin-season-row .admin-form-grid {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 650px) {
+  .admin-shell .admin-season-navigation {
+    display: flex;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .admin-shell .admin-season-navigation button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .admin-shell .admin-season-row {
     grid-template-columns: 1fr auto;
   }
@@ -45,6 +87,12 @@
   .admin-shell .admin-season-row span,
   .admin-shell .admin-season-row div {
     grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell .admin-season-navigation button {
+    transition: none;
   }
 }
 
@@ -121,6 +169,51 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(185, 28, 28, 0.02);
+}
+
+.admin-shell .admin-season-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 22px;
+  padding: 6px;
+  border: 1px solid rgba(185, 28, 28, 0.14);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(185, 28, 28, 0.055), rgba(255, 255, 255, 0.72));
+  box-shadow: 0 5px 18px rgba(48, 20, 20, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.admin-shell .admin-season-navigation button {
+  min-width: 132px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.admin-shell .admin-season-navigation button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.admin-shell .admin-season-navigation button.active {
+  border-color: rgba(185, 28, 28, 0.2);
+  background: linear-gradient(135deg, #fff 0%, #fff8f5 100%);
+  color: #9f1d1d;
+  box-shadow: 0 3px 9px rgba(88, 20, 20, 0.1), inset 0 1px 0 #fff;
+}
+
+.admin-shell .admin-season-navigation button:focus-visible {
+  outline: 3px solid rgba(185, 28, 28, 0.34);
+  outline-offset: 3px;
 }
 
 .admin-shell .admin-status-grid,
@@ -278,7 +371,236 @@
   color: var(--red);
 }
 
+/* Campaign and season controls use the same warm, high-contrast card
+   treatment as the rest of the application while keeping dense admin
+   forms easy to scan. */
+.admin-shell .admin-form-grid select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.admin-shell .admin-campaigns-panel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  background:
+    linear-gradient(135deg, rgba(185, 28, 28, 0.035), transparent 38%),
+    var(--paper);
+}
+
+.admin-shell .admin-campaign-card {
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.admin-shell .admin-campaign-card legend {
+  padding: 0 10px;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.admin-shell .admin-campaign-card label {
+  align-content: start;
+}
+
+.admin-shell .admin-campaign-card input:not([type=checkbox]),
+.admin-shell .admin-campaign-card select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.admin-shell .admin-campaign-card input[type=datetime-local] {
+  font-size: 12px;
+}
+
+.admin-shell .admin-campaign-card .admin-campaign-enabled {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.admin-shell .admin-campaign-card .admin-campaign-enabled input {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.admin-shell .admin-campaign-card > div {
+  min-width: 0;
+}
+
+.admin-shell .admin-campaign-card > div > label {
+  min-height: 68px;
+}
+
+.admin-shell .admin-campaign-card > div > small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.admin-shell .admin-campaign-card > button {
+  justify-self: start;
+  align-self: end;
+}
+
+.admin-shell .admin-campaign-actions {
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.admin-shell .admin-seasons-panel {
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(185, 28, 28, 0.035), transparent 34%),
+    var(--paper);
+}
+
+.admin-shell .admin-season-create-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 22px 0 12px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.admin-shell .admin-season-create-grid label {
+  align-content: start;
+}
+
+.admin-shell .admin-season-create-grid input {
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.admin-shell .admin-season-create-action {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 28px;
+}
+
+.admin-shell .admin-season-list {
+  gap: 14px;
+}
+
+.admin-shell .admin-season-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-shell .admin-season-card:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-shell .admin-season-card > strong {
+  align-self: center;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.admin-shell .admin-season-card > strong span {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell .admin-season-card > span {
+  grid-column: 1 / -1;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--cream);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.admin-shell .admin-season-card .admin-season-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.admin-shell .admin-season-claim-report {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.admin-shell .admin-season-claim-report > p {
+  margin: 10px 0;
+}
+
+.admin-shell .admin-season-card .admin-form-grid {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+  margin: 2px 0 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--cream);
+}
+
+.admin-shell .admin-season-card .admin-form-grid label {
+  align-content: start;
+}
+
+.admin-shell .admin-season-card .admin-form-grid input {
+  min-height: 42px;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.admin-shell .admin-season-card .admin-form-grid .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 @media (max-width: 900px) {
+  .admin-shell .admin-campaign-card,
+  .admin-shell .admin-season-create-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-shell .admin-season-card .admin-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-shell .admin-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -308,6 +630,23 @@
 
   .admin-shell .admin-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-shell .admin-campaign-card,
+  .admin-shell .admin-season-create-grid,
+  .admin-shell .admin-season-card .admin-form-grid {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .admin-shell .admin-season-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 16px;
+  }
+
+  .admin-shell .admin-season-card .admin-form-grid .btn {
+    grid-column: auto;
+    justify-self: stretch;
   }
 
   .admin-shell .admin-toolbar {

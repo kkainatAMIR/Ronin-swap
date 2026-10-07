@@ -55,6 +55,7 @@ import lifiStatus from '../api_routes/lifi/status.mjs'
 import lifiComplete from '../api_routes/lifi/complete.mjs'
 
 import rewardsBalance from '../api_routes/rewards/balance.mjs'
+import rewardsAuth from '../api_routes/rewards/auth.mjs'
 import rewardsClaim from '../api_routes/rewards/claim.mjs'
 import rewardsClaimPrepare from '../api_routes/rewards/claim-prepare.mjs'
 import rewardsClaimConfirm from '../api_routes/rewards/claim-confirm.mjs'
@@ -71,6 +72,8 @@ import roninShieldContribution from '../api_routes/ronin/shield-contribution.mjs
 
 import samuraiSeason from '../api_routes/samurai/season.mjs'
 import samuraiSeasons from '../api_routes/samurai/seasons.mjs'
+import samuraiCampaigns from '../api_routes/samurai/campaigns.mjs'
+import samuraiPromoValidate from '../api_routes/samurai/promo/validate.mjs'
 
 import solanaRpc from '../api_routes/solana/rpc.mjs'
 import solanaEnhanced from '../api_routes/solana/enhanced.mjs'
@@ -160,6 +163,8 @@ export const ROUTES = {
   'POST /api/lifi/complete': lifiComplete,
 
   // ─── Rewards (claim flow) ───
+  'GET /api/rewards/auth':              rewardsAuth,
+  'POST /api/rewards/auth':             rewardsAuth,
   // Three endpoints implement the USER-PAYS-FEE flow:
   //   1. POST /api/rewards/claim-prepare  — backend creates ENTITLED row,
   //      returns partially-signed tx (admin signs instruction, user is fee payer)
@@ -190,6 +195,8 @@ export const ROUTES = {
   // ─── Samurai seasons (public) ───
   'GET /api/samurai/season/current': samuraiSeason,
   'GET /api/samurai/seasons':        samuraiSeasons,
+  'GET /api/samurai/campaigns':      samuraiCampaigns,
+  'POST /api/samurai/promo/validate': samuraiPromoValidate,
 
   // ─── Solana RPC proxy ───
   'POST /api/solana/rpc': solanaRpc,

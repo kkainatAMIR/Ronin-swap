@@ -17,7 +17,6 @@
 // PDA derivation MUST match the deployed program exactly:
 //   reward_config = findProgramAddressSync(["reward_config"], PROGRAM_ID)
 //   reward_vault  = findProgramAddressSync(["reward_vault"],  PROGRAM_ID)
-//   claim         = findProgramAddressSync(["claim", reward_config, sha256(claim_id_utf8)], PROGRAM_ID)
 //
 // Instruction layout for claim_reward (Anchor discriminator + 3 args):
 //   discriminator: sha256("global:claim_reward")[0..8]
@@ -25,13 +24,14 @@
 //   points_claimed : u64      (8-byte LE)
 //   reward_amount  : u64      (8-byte LE, in lamports)
 //
-// Accounts (in order, must match the deployed instruction):
+// Current deployed instruction accounts (in order):
 //   admin
 //   reward_config
 //   reward_vault
 //   recipient
-//   claim
-//   system_program
+//
+// The current instruction does not create a per-claim PDA; legacy claim
+// PDAs from the previous program version remain on chain untouched.
 // =====================================================================
 
 import {

@@ -5,7 +5,7 @@ import { calculateSamuraiPoints, getEffectivePointsConfiguration } from '../../a
 
 function hash(value) { return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value) }
 
-function formatPoints(points, minimumQualifyingSwapUsd = null) {
+function formatPoints(points, minimumQualifyingSwapUsd = null, calculation = null) {
   if (!points) return {
     qualified: false,
     pointsAwarded: 0,
@@ -19,6 +19,10 @@ function formatPoints(points, minimumQualifyingSwapUsd = null) {
   return {
     ...points,
     minimumQualifyingSwapUsd,
+    campaignId: points.campaign_id || calculation?.campaignId || null,
+    campaignMultiplier: calculation?.campaignMultiplier ?? null,
+    bonusPoints: Number(points.bonus_points ?? calculation?.bonusPoints ?? 0),
+    campaignReason: calculation?.campaignReason || null,
     qualified: points.eligibility_status === 'qualified' || points.qualified === true,
     pointsAwarded: Number(points.points_awarded || points.pointsAwarded || 0),
     qualifyingVolumeUsd: Number(points.qualifying_volume_usd || points.qualifyingVolumeUsd || 0),
@@ -52,11 +56,11 @@ export default async function handler(req, res) {
       const configuration = getEffectivePointsConfiguration(saved, season)
       if (existingPoints) return json(res, 200, { success: true, duplicate: true, swap: existing, points: formatPoints(existingPoints, configuration.minimumQualifyingSwapUsd) })
       console.log('[ETH-POINTS-TRACE] duplicate path calculation input', { signature: transactionHash, volumeUsd: Number(existing.volume_usd ?? 0), input_mint: existing.input_mint, output_mint: existing.output_mint, seasonId: season?.id || null, minimum: configuration.minimumQualifyingSwapUsd, pointsEnabled: configuration.pointsEnabled })
-      const calculation = await calculateSamuraiPoints({ verification_status: existing.verification_status || 'verified', chain_id: Number(existing.chain_id ?? 1), volume_usd: Number(existing.volume_usd ?? 0), timestamp: existing.timestamp, input_mint: existing.input_mint, output_mint: existing.output_mint, input_amount_raw: existing.input_amount_raw, input_decimals: Number(existing.input_decimals ?? 18) }, configuration)
+      const calculation = await calculateSamuraiPoints({ verification_status: existing.verification_status || 'verified', chain_id: Number(existing.chain_id ?? 1), volume_usd: Number(existing.volume_usd ?? 0), timestamp: existing.timestamp, input_mint: existing.input_mint, output_mint: existing.output_mint, input_amount_raw: existing.input_amount_raw, input_decimals: Number(existing.input_decimals ?? 18), requested_promo_code: existing.requested_promo_code }, configuration)
       console.log('[ETH-POINTS-TRACE] duplicate path calculation result', calculation)
       const points = await awardSamuraiPoints({ signature: transactionHash, ...calculation, seasonId: season?.id || null })
       console.log('[ETH-POINTS-TRACE] duplicate path awarded points', points)
-      return json(res, 200, { success: true, duplicate: true, swap: existing, points: formatPoints(points || { eligibility_status: calculation.qualified ? 'qualified' : 'not_qualified', points_awarded: calculation.pointsAwarded || 0, exclusion_reason: calculation.exclusionReason || null, qualifying_volume_usd: calculation.qualifyingVolumeUsd || 0, season_points: 0 }, configuration.minimumQualifyingSwapUsd) })
+      return json(res, 200, { success: true, duplicate: true, swap: existing, points: formatPoints(points || { eligibility_status: calculation.qualified ? 'qualified' : 'not_qualified', points_awarded: calculation.pointsAwarded || 0, exclusion_reason: calculation.exclusionReason || null, qualifying_volume_usd: calculation.qualifyingVolumeUsd || 0, season_points: 0 }, configuration.minimumQualifyingSwapUsd, calculation) })
     }
     console.log('[ETH-POINTS-TRACE] persistEthereumSwap entered', { transactionHash, wallet, sellToken, buyToken, sellAmount, buyAmount, volumeUsd: trustedQuote.volumeUsd })
     const tx = await ethereumRpc('eth_getTransactionByHash', [transactionHash])
@@ -64,14 +68,14 @@ export default async function handler(req, res) {
     if (!tx || !receipt || receipt.status !== '0x1' || String(tx.from).toLowerCase() !== wallet.toLowerCase() || String(tx.to).toLowerCase() !== String(trustedQuote.to).toLowerCase() || String(tx.input || '').toLowerCase() !== String(trustedQuote.data || '').toLowerCase() || BigInt(tx.value || '0x0') !== BigInt(trustedQuote.value || '0') || receipt.blockNumber == null) return apiError(res, 422, 'TRANSACTION_NOT_CONFIRMED', 'The Ethereum transaction was not confirmed successfully.')
     const block = await ethereumRpc('eth_getBlockByNumber', [receipt.blockNumber, false])
     const timestamp = block?.timestamp ? new Date(Number.parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString()
-    const persisted = await persistEthereumSwap({ wallet, transactionHash, sellToken, buyToken, sellAmount, buyAmount, sellDecimals: trustedQuote.sellDecimals, buyDecimals: trustedQuote.buyDecimals, volumeUsd: trustedQuote.volumeUsd, timestamp, blockNumber: receipt.blockNumber })
+    const persisted = await persistEthereumSwap({ wallet, transactionHash, sellToken, buyToken, sellAmount, buyAmount, sellDecimals: trustedQuote.sellDecimals, buyDecimals: trustedQuote.buyDecimals, volumeUsd: trustedQuote.volumeUsd, timestamp, blockNumber: receipt.blockNumber, requestedPromoCode: body.promoCode })
     if (!persisted?.swap?.signature) throw new Error('ETHEREUM_SWAP_INSERT_FAILED')
     console.log('[ETH-POINTS-TRACE] persistEthereumSwap result', { signature: persisted.swap.signature, volumeUsd: persisted.swap.volume_usd, verificationStatus: persisted.swap.verification_status })
     const season = await getSeasonForTimestamp(timestamp)
     const saved = await getAdminSettings().catch(() => null)
     const configuration = getEffectivePointsConfiguration(saved, season)
     console.log('[ETH-POINTS-TRACE] calculateSamuraiPoints entered', { signature: transactionHash, volumeUsd: Number(trustedQuote.volumeUsd), seasonId: season?.id || null, min: configuration.minimumQualifyingSwapUsd, enabled: configuration.pointsEnabled, pointsPerUsd: configuration.pointsPerUsd })
-    const calculation = await calculateSamuraiPoints({ verification_status: 'verified', chain_id: 1, volume_usd: Number(trustedQuote.volumeUsd), timestamp, input_mint: sellToken, output_mint: buyToken, input_amount_raw: sellAmount, input_decimals: trustedQuote.sellDecimals }, configuration)
+    const calculation = await calculateSamuraiPoints({ verification_status: 'verified', chain_id: 1, volume_usd: Number(trustedQuote.volumeUsd), timestamp, input_mint: sellToken, output_mint: buyToken, input_amount_raw: sellAmount, input_decimals: trustedQuote.sellDecimals, requested_promo_code: persisted.swap.requested_promo_code }, configuration)
     console.log('[ETH-POINTS-TRACE] calculation result', calculation)
     let points
     try {
@@ -87,7 +91,7 @@ export default async function handler(req, res) {
       throw error
     }
     console.log('[ETH-POINTS-TRACE] samurai_points row', points)
-    return json(res, 200, { success: true, duplicate: false, swap: persisted.swap, points: formatPoints(points || { eligibility_status: calculation.qualified ? 'qualified' : 'not_qualified', points_awarded: calculation.pointsAwarded || 0, exclusion_reason: calculation.exclusionReason || null, qualifying_volume_usd: calculation.qualifyingVolumeUsd || 0, season_points: 0 }, configuration.minimumQualifyingSwapUsd) })
+    return json(res, 200, { success: true, duplicate: false, swap: persisted.swap, points: formatPoints(points || { eligibility_status: calculation.qualified ? 'qualified' : 'not_qualified', points_awarded: calculation.pointsAwarded || 0, exclusion_reason: calculation.exclusionReason || null, qualifying_volume_usd: calculation.qualifyingVolumeUsd || 0, season_points: 0 }, configuration.minimumQualifyingSwapUsd, calculation) })
   } catch (error) {
     console.error('Ethereum completion failed:', error?.message || error)
     return apiError(res, 502, 'ETHEREUM_COMPLETION_ERROR', 'Ethereum swap completion could not be recorded.')

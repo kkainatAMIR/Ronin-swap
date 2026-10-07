@@ -2,9 +2,77 @@
 // All numbers come back as JS Numbers — never trust a frontend-controlled
 // earned_points / claimed_points / reward_amount value.
 
+const rewardViewerAuthRequests = new Map()
+
+async function signRewardViewerMessage(wallet, message) {
+  if (/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    const injected = window.ethereum
+    const providers = Array.isArray(injected?.providers) ? injected.providers : [injected]
+    for (const provider of providers) {
+      if (!provider?.request) continue
+      const accounts = await provider.request({ method: 'eth_accounts' }).catch(() => [])
+      if (!Array.isArray(accounts) || !accounts.some((account) => account.toLowerCase() === wallet.toLowerCase())) continue
+      const messageHex = `0x${Array.from(new TextEncoder().encode(message), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+      return provider.request({ method: 'personal_sign', params: [messageHex, wallet] })
+    }
+    throw new Error('Connect the EVM wallet whose reward details you want to view.')
+  }
+
+  const provider = window.phantom?.solana || window.solana
+  const providerWallet = provider?.publicKey?.toString?.()
+  if (!provider?.signMessage || providerWallet !== wallet) {
+    throw new Error('Connect the Solana wallet whose reward details you want to view.')
+  }
+  const signed = await provider.signMessage(new TextEncoder().encode(message), 'utf8')
+  const signature = signed?.signature || signed
+  if (!(signature instanceof Uint8Array)) throw new Error('The wallet did not return a valid signature.')
+  return btoa(Array.from(signature, (byte) => String.fromCharCode(byte)).join(''))
+}
+
+async function authenticateRewardViewerRequest(wallet) {
+  const authUrl = `/api/rewards/auth?wallet=${encodeURIComponent(wallet)}`
+  const sessionResponse = await fetch(authUrl, { cache: 'no-store', credentials: 'same-origin' })
+  if (sessionResponse.ok) return
+  if (sessionResponse.status !== 401) {
+    const sessionError = await sessionResponse.json().catch(() => ({}))
+    throw new Error(sessionError?.error || 'Unable to verify reward access.')
+  }
+
+  const challengeResponse = await fetch('/api/rewards/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ action: 'challenge', wallet }),
+  })
+  const challenge = await challengeResponse.json().catch(() => ({}))
+  if (!challengeResponse.ok) throw new Error(challenge?.error || 'Unable to start wallet verification.')
+
+  const signature = await signRewardViewerMessage(wallet, challenge.message)
+  const verifyResponse = await fetch('/api/rewards/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ action: 'verify', wallet, nonce: challenge.nonce, signature }),
+  })
+  const result = await verifyResponse.json().catch(() => ({}))
+  if (!verifyResponse.ok) throw new Error(result?.error || 'Wallet ownership could not be verified.')
+}
+
+function authenticateRewardViewer(wallet) {
+  const existing = rewardViewerAuthRequests.get(wallet)
+  if (existing) return existing
+
+  const request = authenticateRewardViewerRequest(wallet).finally(() => {
+    rewardViewerAuthRequests.delete(wallet)
+  })
+  rewardViewerAuthRequests.set(wallet, request)
+  return request
+}
+
 export async function getRewardBalance(wallet) {
   if (!wallet) throw new Error('A wallet address is required.')
-  const response = await fetch(`/api/rewards/balance?wallet=${encodeURIComponent(wallet)}`, { cache: 'no-store' })
+  await authenticateRewardViewer(wallet)
+  const response = await fetch(`/api/rewards/balance?wallet=${encodeURIComponent(wallet)}`, { cache: 'no-store', credentials: 'same-origin' })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body?.error || 'Unable to load reward balance.')
   return body
@@ -66,8 +134,8 @@ export async function claimReward(wallet, { pointsToClaim = null } = {}) {
 //
 //   Step 1: prepareRewardClaim(wallet, { pointsToClaim? })
 //           → backend creates ENTITLED row + returns partially-signed tx
-//   Step 2: user signs + submits via Phantom (handled in RewardClaimPanel)
-//   Step 3: confirmRewardClaim(claimId, signature)
+//   Step 2: user signs; persist the exact signature before broadcasting
+//   Step 3: submit via Phantom, then confirmRewardClaim(claimId, signature)
 //           → backend verifies tx landed + marks COMPLETED
 //
 // If the user rejects the Phantom popup:
@@ -92,13 +160,13 @@ export async function claimReward(wallet, { pointsToClaim = null } = {}) {
 // The `partiallySignedTx` should be passed to Phantom's signTransaction().
 // Phantom will add the user's signature (as fee payer) and return a
 // fully-signed tx that the frontend submits via connection.sendRawTransaction.
-export async function prepareRewardClaim(wallet, { pointsToClaim = null, claimId: claimIdOverride = null } = {}) {
+export async function prepareRewardClaim(wallet, { pointsToClaim = null, claimId: claimIdOverride = null, seasonId = null } = {}) {
   if (!wallet) throw new Error('A wallet address is required.')
   const claimId = claimIdOverride || newClaimId()
   const response = await fetch('/api/rewards/claim-prepare', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ wallet, claimId, pointsToClaim }),
+    body: JSON.stringify({ wallet, claimId, pointsToClaim, ...(seasonId ? { seasonId } : {}) }),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -110,10 +178,27 @@ export async function prepareRewardClaim(wallet, { pointsToClaim = null, claimId
   return { ...body, claimId }
 }
 
-// Step 3: confirm a user-submitted claim transaction.
+export async function recordRewardClaimSubmission(claimId, signature, wallet) {
+  if (!claimId) throw new Error('A claimId is required.')
+  if (!signature) throw new Error('A transaction signature is required.')
+  const response = await fetch('/api/rewards/claim-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'record-submission', claimId, signature, wallet }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const err = new Error(body?.error || 'The transaction signature could not be recorded.')
+    err.code = body?.code || 'SIGNATURE_PERSIST_FAILED'
+    throw err
+  }
+  return body
+}
+
+// Step 4: confirm a user-submitted claim transaction.
 //
-// Called AFTER the user has signed the partially-signed tx (returned by
-// prepareRewardClaim) in Phantom AND submitted it to Solana.
+// Called after the exact fee-payer signature has been persisted and the
+// signed transaction has been submitted to Solana.
 //
 // Returns {
 //   success,
@@ -178,14 +263,10 @@ export function formatRewardAmount(amount, asset = 'SOL') {
 
 // Helper for the frontend to build a Solana explorer URL for a tx signature.
 //
-// Production is Mainnet-only. Per the mainnet migration spec:
-//   - Use https://explorer.solana.com/tx/<SIGNATURE>
-//   - Do NOT append ?cluster=devnet
-//
-// The `network` parameter is accepted for backward compatibility with
-// RewardClaimPanel.jsx (which passes balance.network), but it is ignored —
-// all reward claim transactions are on Mainnet.
-export function solanaTxExplorerUrl(signature, _network) {
+// Match the rewards RPC network so devnet signatures are not looked up
+// on mainnet (or vice versa).
+export function solanaTxExplorerUrl(signature, network = 'mainnet-beta') {
   if (!signature) return null
-  return `https://explorer.solana.com/tx/${signature}`
+  const cluster = String(network).toLowerCase() === 'devnet' ? '?cluster=devnet' : ''
+  return `https://explorer.solana.com/tx/${signature}${cluster}`
 }

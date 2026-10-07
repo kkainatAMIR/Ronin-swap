@@ -123,7 +123,15 @@ export default async function handler(req, res) {
     // If the handler throws synchronously before its own try/catch,
     // log and return 500. Handlers are expected to have their own
     // error handling — this is a safety net.
-    console.error('API gateway handler error:', error?.message || error, { path: pathname, method: req.method })
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('API gateway handler error:', {
+        path: pathname,
+        method: req.method,
+        errorMessage: error?.message || String(error),
+        errorStack: error?.stack || null,
+        httpResponseSource: 'API gateway (Internal server error.)',
+      })
+    }
     if (!res.headersSent) {
       res.statusCode = 500
       res.setHeader('Content-Type', 'application/json; charset=utf-8')

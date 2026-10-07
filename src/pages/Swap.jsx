@@ -10,6 +10,8 @@ import { useWallet, getSolanaProvider } from '../context/WalletContext'
 import Icon from '../components/Icon'
 import { Button, Sakura } from '../components/Layout'
 import ComingSoon from '../components/ComingSoon'
+import SamuraiPromoCode from '../components/SamuraiPromoCode'
+import TokenAnalyticsPair from '../components/TokenAnalytics'
 import TokenImportRow from '../components/TokenImportRow'
 import { SWAP_ENABLED } from '../config/features'
 import { getChain, SUPPORTED_SWAP_CHAINS } from '../config/chains'
@@ -653,7 +655,7 @@ function SwapCompletedBanner({ visible, subLabel, onDismiss }) {
 // Without this, the trending click handler on Ethereum/Robinhood was
 // a no-op (only Solana worked) — see handleTrendingTokenClick below.
 // =====================================================================
-const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUnverifiedTokenKey, onAcknowledgeUnverifiedToken }, ref) {
+const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUnverifiedTokenKey, onAcknowledgeUnverifiedToken, onAnalyticsTokensChange, promoCode, onPromoCodeChange }, ref) {
   const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [fromToken, setFromToken] = useState(ETHEREUM_SWAP_TOKENS[0])
@@ -675,6 +677,10 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
   // auto-cleared after ~18s by SwapCompletedBanner's setTimeout.
   const [showCompletedBanner, setShowCompletedBanner] = useState(false)
   const executeInFlightRef = useRef(false)
+
+  useEffect(() => {
+    onAnalyticsTokensChange?.({ network: 'ethereum', fromToken, toToken })
+  }, [fromToken, toToken, onAnalyticsTokensChange])
 
   // Internal selectToken — mirrors the Solana panel's selectToken.
   // Exposed to the parent via useImperativeHandle so the dashboard
@@ -737,11 +743,12 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
         // first load (no wallet connected yet), so the USD value next
         // to the input showed '$0.00' even though ETH's price is
         // publicly available.
-        setPrices(await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS))
-      } catch { setAccount(''); setBalances(new Map()); setPrices(new Map()) }
+        const nextPrices = await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS)
+        setPrices((current) => new Map([...current, ...nextPrices]))
+      } catch { setAccount(''); setBalances(new Map()) }
     }
-    const changed = (accounts) => { setAccount(accounts?.[0] || ''); setBalances(new Map()); setPrices(new Map()); setQuote(null); setMessage('Wallet account changed. Request a fresh quote.') }
-    const chainChanged = () => { setBalances(new Map()); setPrices(new Map()); setQuote(null); setMessage('Network changed. Ethereum quotes were cleared.') }
+    const changed = (accounts) => { setAccount(accounts?.[0] || ''); setBalances(new Map()); setQuote(null); setMessage('Wallet account changed. Request a fresh quote.') }
+    const chainChanged = () => { setBalances(new Map()); setQuote(null); setMessage('Network changed. Ethereum quotes were cleared.') }
     refresh(); provider.on?.('accountsChanged', changed); provider.on?.('chainChanged', chainChanged)
     return () => { provider.removeListener?.('accountsChanged', changed); provider.removeListener?.('chainChanged', chainChanged) }
   }, [])
@@ -763,6 +770,14 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
   }, [account])
 
   useEffect(() => {
+    let cancelled = false
+    getEthereumTokenPrices([fromToken]).then((nextPrices) => {
+      if (!cancelled) setPrices((current) => new Map([...current, ...nextPrices]))
+    })
+    return () => { cancelled = true }
+  }, [fromToken])
+
+  useEffect(() => {
     setQuote(null)
     setTxHash('')
     if (status !== 'idle') setStatus('idle')
@@ -775,11 +790,16 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
       if (!nextAccount) return
       setAccount(nextAccount)
       setBalances(await getEthereumTokenBalances(getEthereumProvider(), nextAccount, ETHEREUM_SWAP_TOKENS))
-      setPrices(await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS))
+      const nextPrices = await getEthereumTokenPrices(ETHEREUM_SWAP_TOKENS)
+      setPrices((current) => new Map([...current, ...nextPrices]))
     } catch (error) { setMessage(error.message) }
   }
 
   const balanceLabel = (token) => {
+    const walletEntry = walletTokens.find((item) => (item.address || (item.type === 'native' ? 'native' : '')).toLowerCase() === (token.address || 'native').toLowerCase())
+    if (walletEntry?.rawBalance != null) {
+      return formatEvmAmount(walletEntry.rawBalance, Number(walletEntry.decimals ?? token.decimals ?? 18))
+    }
     const entry = balances.get(token.address || 'native')
     return entry ? formatEvmAmount(entry.raw.toString(), entry.decimals) : '--'
   }
@@ -808,32 +828,43 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
     return amt * price
   }, [amount, fromToken, prices])
 
-  // Gas-safe MAX amount for the input token. For native ETH, leaves
-  // a 0.001 ETH (10^15 wei) reserve so the user can pay for the
-  // swap's gas. For ERC-20 tokens, uses the full token balance
-  // (gas is paid in ETH separately).
-  //
-  // The reserve is intentionally conservative — actual gas cost is
-  // typically much lower (~50k gas * ~20 gwei = ~0.001 ETH on busy
-  // moments). We avoid live eth_gasPrice calls here because the MAX
-  // button should feel instant; if the resulting amount still fails
-  // the gas check at submit time, the existing submit handler's
-  // 'Insufficient ETH for network gas' error fires.
+  // Gas-safe MAX amount for the input token. Native ETH balances come
+  // from the selected chain's wallet-token endpoint when available,
+  // avoiding a wrong-chain wallet RPC read. ERC-20 MAX uses the full
+  // token balance because gas is paid in ETH separately.
   const ETH_GAS_RESERVE_WEI = 10n ** 15n  // 0.001 ETH
-  const fillMaxAmount = () => {
-    const entry = balances.get(fromToken.address || 'native')
+  const fillMaxAmount = async () => {
+    if (fromToken.type === 'native') {
+      try {
+        setMessage('')
+        const provider = getEthereumProvider()
+        if (!provider || !account) throw new Error('Connect MetaMask to read your ETH balance.')
+        const walletEntry = walletTokens.find((item) => item.type === 'native')
+        let balanceRaw = walletEntry?.rawBalance != null ? BigInt(walletEntry.rawBalance) : null
+        if (balanceRaw == null) {
+          const chainId = Number.parseInt(await provider.request({ method: 'eth_chainId' }), 16)
+          if (chainId !== ETHEREUM_CHAIN_ID) throw new Error('Switch MetaMask to Ethereum Mainnet before using MAX.')
+          balanceRaw = BigInt(await provider.request({ method: 'eth_getBalance', params: [account, 'latest'] }))
+        }
+        const safe = balanceRaw - ETH_GAS_RESERVE_WEI
+        setAmount(formatEvmAmountForInput((safe > 0n ? safe : 0n).toString(), 18))
+      } catch (error) {
+        setMessage(error?.message || 'Unable to read your ETH balance.')
+      }
+      return
+    }
+
+    const walletEntry = walletTokens.find((item) => (item.address || (item.type === 'native' ? 'native' : '')).toLowerCase() === (fromToken.address || 'native').toLowerCase())
+    const entry = walletEntry?.rawBalance != null
+      ? { raw: BigInt(walletEntry.rawBalance), decimals: Number(walletEntry.decimals ?? fromToken.decimals ?? 18) }
+      : balances.get(fromToken.address || 'native')
     if (!entry) return
     let rawMax = entry.raw
-    if (fromToken.type === 'native') {
-      // Leave gas reserve for native ETH.
-      const safe = rawMax - ETH_GAS_RESERVE_WEI
-      rawMax = safe > 0n ? safe : 0n
-    }
     if (rawMax <= 0n) {
       setAmount('0')
       return
     }
-    setAmount(formatEvmAmount(rawMax.toString(), entry.decimals))
+    setAmount(formatEvmAmountForInput(rawMax.toString(), entry.decimals))
   }
 
   const loadQuote = async () => {
@@ -917,7 +948,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
       setStatus('confirmed')
       setMessage('Transaction confirmed on Ethereum. Recording swap and Samurai Points...')
       try {
-        const completed = await fetch('/api/evm/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chainId: 1, transactionHash: hash, wallet: account, sellToken: freshQuote.sellToken, buyToken: freshQuote.buyToken, sellAmount: freshQuote.sellAmount, buyAmount: freshQuote.buyAmount, quoteProof: freshQuote.quoteProof }) }).then((response) => response.json().then((body) => { if (!response.ok) throw new Error(body.error || 'Confirmed swap could not be recorded.'); return body }))
+        const completed = await fetch('/api/evm/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chainId: 1, transactionHash: hash, wallet: account, sellToken: freshQuote.sellToken, buyToken: freshQuote.buyToken, sellAmount: freshQuote.sellAmount, buyAmount: freshQuote.buyAmount, quoteProof: freshQuote.quoteProof, promoCode }) }).then((response) => response.json().then((body) => { if (!response.ok) throw new Error(body.error || 'Confirmed swap could not be recorded.'); return body }))
         const pointsRecord = completed?.points ?? completed?.pointsRecord ?? completed?.samuraiPoints ?? null
         const normalizedCompletion = {
           ...completed,
@@ -980,7 +1011,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
         <div className="swap-field-row"><input className="swap-field-input" disabled={busy} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0" inputMode="decimal" aria-label="Amount you pay" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('from')}><TokenMark token={fromToken} /><strong>{fromToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span><span>Balance: {account ? `${balanceLabel(fromToken)} ${fromToken.symbol}` : '--'}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || balanceLabel(fromToken) === '--'}>MAX</button>}</span></div>
+        <div className="swap-field-foot"><span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span><span>Balance: {account ? `${balanceLabel(fromToken)} ${fromToken.symbol}` : '--'}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || (fromToken.type !== 'native' && balanceLabel(fromToken) === '--')}>MAX</button>}</span></div>
       </div>
       <div className="swap-flip-row"><button type="button" className="swap-flip" disabled={busy} onClick={() => { setFromToken(toToken); setToToken(fromToken); setQuote(null) }} aria-label="Reverse Ethereum swap"><Icon name="swapVertical" size={16} /></button></div>
       <div className="swap-field">
@@ -988,6 +1019,7 @@ const EthereumSwapPanel = forwardRef(function EthereumSwapPanel({ acknowledgedUn
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quote ? formatEvmAmount(quote.buyAmount, quote.buyDecimals || 6) : ''} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {account ? `${balanceLabel(toToken)} ${toToken.symbol}` : '--'}</span></div>
       </div>
+      <SamuraiPromoCode key={`ethereum:${fromToken?.address || 'native'}:${toToken?.address || 'native'}`} value={promoCode} onChange={onPromoCodeChange} chainId={1} inputMint={fromToken?.address || 'native'} outputMint={toToken?.address || 'native'} />
       <ImportedTokenSecurityBanner network="ethereum" fromToken={fromToken} toToken={toToken} acknowledgementKey={unverifiedTokenKey} acknowledgedKey={acknowledgedUnverifiedTokenKey} onAcknowledge={onAcknowledgeUnverifiedToken} />
       <button type="button" className="swap-cta" disabled={busy || !importedTokensAcknowledged} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'signing' ? 'CONFIRM IN METAMASK...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       <SwapCompletedBanner
@@ -1130,6 +1162,13 @@ function normalizeRobinhoodUiAmount(value, decimals) {
   const [whole, fraction = ''] = text.split('.')
   if (fraction.length > decimals) return null
   return BigInt(whole) * (10n ** BigInt(decimals)) + BigInt((fraction + '0'.repeat(decimals)).slice(0, decimals))
+}
+
+function formatEvmAmountForInput(value, decimals) {
+  const amount = BigInt(value)
+  const scale = 10n ** BigInt(decimals)
+  const fraction = (amount % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
+  return `${amount / scale}${fraction ? `.${fraction}` : ''}`
 }
 
 function isSuccessfulRobinhoodReceipt(receipt) {
@@ -1275,7 +1314,7 @@ function RobinhoodTokenSelector({ side, selected, other, sections, walletTokens,
   )
 }
 
-const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledgedUnverifiedTokenKey, onAcknowledgeUnverifiedToken }, ref) {
+const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledgedUnverifiedTokenKey, onAcknowledgeUnverifiedToken, onAnalyticsTokensChange, promoCode, onPromoCodeChange }, ref) {
   const { addEvmWallet } = useWallet()
   const [account, setAccount] = useState('')
   const [sections, setSections] = useState({ all: [], tokens: [], memes: [], popular: [] })
@@ -1302,6 +1341,10 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
   // ~18s by SwapCompletedBanner. Same pattern as EthereumSwapPanel.
   const [showCompletedBanner, setShowCompletedBanner] = useState(false)
   const executeInFlightRef = useRef(false)
+
+  useEffect(() => {
+    onAnalyticsTokensChange?.({ network: 'robinhood', fromToken, toToken })
+  }, [fromToken, toToken, onAnalyticsTokensChange])
 
   // Internal selectToken — mirrors the Solana + Ethereum panels.
   // Exposed via useImperativeHandle so the dashboard trending UI can
@@ -1393,6 +1436,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
       // Combine the curated registry tokens (sections.all) with any
       // wallet-discovered tokens so we fetch prices for both.
       const allTokens = [
+        fromToken,
         ...(sections?.all || []),
         ...(walletTokens || []),
       ]
@@ -1413,7 +1457,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
     load()
     const interval = window.setInterval(load, 45_000)
     return () => { cancelled = true; window.clearInterval(interval) }
-  }, [sections, walletTokens])
+  }, [fromToken, sections, walletTokens])
 
   useEffect(() => {
     setQuote(null)
@@ -1463,28 +1507,39 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
     if (status !== 'confirmed') setShowCompletedBanner(false)
   }, [status])
 
-  // Click MAX to fill the input with the wallet's full balance of the
-  // currently-selected fromToken. For native ETH on Robinhood Chain,
-  // leaves a 0.001 ETH gas reserve (matches the Ethereum panel's
-  // behavior). For ERC-20 tokens, uses the full balance since gas
-  // is paid in native ETH separately.
-  const ROBINHOOD_GAS_RESERVE_WEI = 10n ** 15n  // 0.001 ETH
-  const fillMaxAmount = () => {
+  // Click MAX to fill the input with the wallet's balance of the
+  // selected token. Robinhood Chain's much lower gas fees need only a
+  // small native-ETH reserve; ERC-20 tokens use their full balance.
+  const ROBINHOOD_GAS_RESERVE_WEI = 10n ** 13n  // 0.00001 ETH
+  const fillMaxAmount = async () => {
     if (fromToken.type === 'native') {
-      // Native ETH: lookup the wallet's native balance entry (the
-      // walletTokens list includes a native entry with .type==='native').
-      const nativeEntry = walletTokens.find((t) => t.type === 'native')
-      const rawStr = nativeEntry?.balance || nativeEntry?.rawBalance || '0'
-      let raw = BigInt(rawStr)
-      const safe = raw - ROBINHOOD_GAS_RESERVE_WEI
-      raw = safe > 0n ? safe : 0n
-      if (raw <= 0n) { setAmount('0'); return }
-      setAmount(formatEvmAmount(raw.toString(), 18))
+      try {
+        setMessage('')
+        const provider = getEthereumProvider()
+        if (!provider || !account) throw new Error('Connect MetaMask to read your Robinhood ETH balance.')
+        const nativeEntry = walletTokens.find((token) => token.type === 'native')
+        let balanceRaw = nativeEntry ? BigInt(nativeEntry.balance || nativeEntry.rawBalance || '0') : null
+        if (balanceRaw == null) {
+          const chainId = Number.parseInt(await provider.request({ method: 'eth_chainId' }), 16)
+          if (chainId !== 4663) throw new Error('Switch MetaMask to Robinhood Chain before using MAX.')
+          balanceRaw = BigInt(await provider.request({ method: 'eth_getBalance', params: [account, 'latest'] }))
+        }
+        const safe = balanceRaw - ROBINHOOD_GAS_RESERVE_WEI
+        setAmount(formatEvmAmountForInput((safe > 0n ? safe : 0n).toString(), 18))
+      } catch (error) {
+        setMessage(error?.message || 'Unable to read your Robinhood ETH balance.')
+      }
       return
     }
-    // ERC-20: full token balance.
-    const label = balanceLabel(fromToken)
-    if (label && label !== '--') setAmount(label)
+
+    const entry = walletTokensMap.get(String(fromToken.address || '').toLowerCase())
+    const rawValue = entry?.balance || entry?.rawBalance
+    if (!rawValue) return
+
+    let raw = BigInt(rawValue)
+    const decimals = Number(entry.decimals ?? fromToken.decimals ?? 18)
+    if (raw <= 0n) { setAmount('0'); return }
+    setAmount(formatEvmAmountForInput(raw.toString(), decimals))
   }
 
   // USD value of the input amount. Uses the `prices` Map populated by
@@ -1616,6 +1671,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
           toAmount: freshQuote.expectedOutput,
           quoteId: freshQuote.quoteId,
           quoteProof: freshQuote.quoteProof,
+          promoCode,
         }),
       })
       const completionBody = await completionResponse.json().catch(() => ({}))
@@ -1675,7 +1731,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
       <div className="swap-field">
         <span className="swap-field-label">YOU PAY</span>
         <div className="swap-field-row"><input className="swap-field-input" disabled={busy} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0" inputMode="decimal" aria-label="Amount you pay" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('from')}><TokenMark token={fromToken} /><strong>{fromToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
-        <div className="swap-field-foot"><span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || balanceLabel(fromToken) === '--'}>MAX</button>}</span></div>
+        <div className="swap-field-foot"><span className={inputUsdValue != null ? 'swap-usd-value' : 'swap-usd-value is-muted'}>{inputUsdValue != null ? `$${inputUsdValue.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} USD` : '$0.00 USD'}</span><span>Balance: {balanceLabel(fromToken)} {fromToken.symbol}{account && <button type="button" className="swap-max" onClick={fillMaxAmount} disabled={busy || !account || (fromToken.type !== 'native' && balanceLabel(fromToken) === '--')}>MAX</button>}</span></div>
       </div>
       <div className="swap-flip-row"><button type="button" className="swap-flip" disabled={busy} onClick={() => { setFromToken(toToken); setToToken(fromToken); setQuote(null) }} aria-label="Reverse Robinhood swap"><Icon name="swapVertical" size={16} /></button></div>
       <div className="swap-field">
@@ -1683,6 +1739,7 @@ const RobinhoodSwapPanel = forwardRef(function RobinhoodSwapPanel({ acknowledged
         <div className="swap-field-row"><input className="swap-field-input" readOnly value={quoteOutputAmount} placeholder="0.0" aria-label="Amount you receive" /><button type="button" className="swap-token-select" disabled={busy} onClick={() => setPickerSide('to')}><TokenMark token={toToken} /><strong>{toToken.symbol}</strong><Icon name="chevronDown" size={14} /></button></div>
         <div className="swap-field-foot"><span>$0.00</span><span>Balance: {balanceLabel(toToken)} {toToken.symbol}</span></div>
       </div>
+      <SamuraiPromoCode key={`robinhood:${fromToken?.address || 'native'}:${toToken?.address || 'native'}`} value={promoCode} onChange={onPromoCodeChange} chainId={4663} inputMint={robinhoodTokenAddress(fromToken)} outputMint={robinhoodTokenAddress(toToken)} />
       <ImportedTokenSecurityBanner network="robinhood" fromToken={fromToken} toToken={toToken} acknowledgementKey={unverifiedTokenKey} acknowledgedKey={acknowledgedUnverifiedTokenKey} onAcknowledge={onAcknowledgeUnverifiedToken} />
       <button type="button" className="swap-cta" disabled={busy || !importedTokensAcknowledged} onClick={submit}>{!account ? 'CONNECT METAMASK TO SWAP' : status === 'loading' ? 'FINDING BEST ROUTE...' : status === 'approval_pending' ? 'APPROVAL PENDING...' : status === 'pending' ? 'CONFIRMING...' : status === 'confirmed' ? 'SWAP COMPLETE' : status === 'error' ? 'TRY AGAIN' : quote ? 'CONFIRM SWAP' : 'GET LIVE QUOTE'}</button>
       <SwapCompletedBanner
@@ -2131,8 +2188,10 @@ function SwapGuideModal({ network, onClose }) {
 export default function Swap() {
   const { wallet, openWalletModal, liveStats, liveStatsState, addEvmWallet } = useWallet()
   const [network, setNetwork] = useState('solana')
+  const [promoCode, setPromoCode] = useState('')
   const [showSwapGuide, setShowSwapGuide] = useState(false)
   const [acknowledgedUnverifiedTokenKey, setAcknowledgedUnverifiedTokenKey] = useState('')
+  const [panelAnalyticsTokens, setPanelAnalyticsTokens] = useState(null)
   const [tab, setTab] = useState('swap')
   const [fromToken, setFromToken] = useState(TOKEN_BY_MINT[SOL_MINT])
   const [toToken, setToToken] = useState(TOKEN_BY_MINT[RONIN_MINT] || TRUSTED_TOKENS[1])
@@ -2841,7 +2900,7 @@ export default function Swap() {
         setVerificationStatus('verified')
         setPersistenceStatus('saving')
         try {
-          await recordVerifiedSwap({ signature, wallet: wallet.address })
+          await recordVerifiedSwap({ signature, wallet: wallet.address, promoCode })
           setPersistenceStatus('saved')
           try {
             const points = await processSamuraiPoints({ signature })
@@ -2951,7 +3010,7 @@ export default function Swap() {
                 <Icon name="scroll" size={17} /><span>How to use</span>
               </button>
             </div>
-            {network === 'ethereum' ? <EthereumSwapPanel ref={ethereumPanelRef} acknowledgedUnverifiedTokenKey={acknowledgedUnverifiedTokenKey} onAcknowledgeUnverifiedToken={setAcknowledgedUnverifiedTokenKey} /> : network === 'robinhood' ? <RobinhoodSwapPanel ref={robinhoodPanelRef} acknowledgedUnverifiedTokenKey={acknowledgedUnverifiedTokenKey} onAcknowledgeUnverifiedToken={setAcknowledgedUnverifiedTokenKey} /> : <>
+            {network === 'ethereum' ? <EthereumSwapPanel ref={ethereumPanelRef} acknowledgedUnverifiedTokenKey={acknowledgedUnverifiedTokenKey} onAcknowledgeUnverifiedToken={setAcknowledgedUnverifiedTokenKey} onAnalyticsTokensChange={setPanelAnalyticsTokens} promoCode={promoCode} onPromoCodeChange={setPromoCode} /> : network === 'robinhood' ? <RobinhoodSwapPanel ref={robinhoodPanelRef} acknowledgedUnverifiedTokenKey={acknowledgedUnverifiedTokenKey} onAcknowledgeUnverifiedToken={setAcknowledgedUnverifiedTokenKey} onAnalyticsTokensChange={setPanelAnalyticsTokens} promoCode={promoCode} onPromoCodeChange={setPromoCode} /> : <>
             <div className="swap-widget-head">
               <div>
                 <h3>RONIN SWAP</h3>
@@ -3042,6 +3101,8 @@ export default function Swap() {
                 <span>Balance: {toTokenBalance != null ? `${Number(toTokenBalance).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${toToken.symbol}` : '--'}</span>
               </div>
             </div>
+
+            <SamuraiPromoCode key={`solana:${fromToken?.mint}:${toToken?.mint}`} value={promoCode} onChange={setPromoCode} chainId={101} inputMint={fromToken?.mint} outputMint={toToken?.mint} />
 
             <ImportedTokenSecurityBanner network="solana" fromToken={fromToken} toToken={toToken} acknowledgementKey={unverifiedTokenKey} acknowledgedKey={acknowledgedUnverifiedTokenKey} onAcknowledge={setAcknowledgedUnverifiedTokenKey} />
             <button
@@ -3148,6 +3209,13 @@ export default function Swap() {
           </div>
 
           <aside className="swap-reference-side" aria-label="Ronin ecosystem highlights">
+            <div className="swap-analytics-sticky">
+              {network === 'solana'
+                ? <TokenAnalyticsPair network="solana" fromToken={fromToken} toToken={toToken} />
+                : panelAnalyticsTokens?.network === network
+                  ? <TokenAnalyticsPair network={network} fromToken={panelAnalyticsTokens.fromToken} toToken={panelAnalyticsTokens.toToken} />
+                  : null}
+            </div>
             <section className="swap-reference-card swap-reference-chains">
               <div className="swap-reference-card-title"><span className="swap-reference-icon">✦</span><strong>SUPPORTED CHAINS</strong><span className="swap-reference-new">NEW</span></div>
               <div className="swap-reference-chain-list"><span><ChainLogo chain="solana" size={18} /> Solana</span><span><ChainLogo chain="ethereum" size={18} /> Ethereum</span><span><ChainLogo chain="robinhood" size={18} /> Robinhood Chain</span></div>

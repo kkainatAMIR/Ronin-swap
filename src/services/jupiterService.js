@@ -332,13 +332,13 @@ export async function verifySwapTransaction({ signature, wallet, signal }) {
   return body
 }
 
-export async function recordVerifiedSwap({ signature, wallet, signal }) {
+export async function recordVerifiedSwap({ signature, wallet, promoCode, signal }) {
   if (!signature || !wallet) throw new JupiterApiError('A transaction signature and wallet are required for persistence.')
 
   const response = await fetch('/api/swap/record', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signature, wallet }),
+    body: JSON.stringify({ signature, wallet, ...(promoCode ? { promoCode } : {}) }),
     signal,
   })
   const body = await parseJsonSafely(response)

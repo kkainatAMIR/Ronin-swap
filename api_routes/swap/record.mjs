@@ -13,6 +13,9 @@ export default async function handler(req, res) {
   const body = parseBody(req)
   const signature = typeof body?.signature === 'string' ? body.signature.trim() : ''
   const wallet = typeof body?.wallet === 'string' ? body.wallet.trim() : ''
+  const promoCode = typeof body?.promoCode === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.promoCode.trim())
+    ? body.promoCode.trim()
+    : null
   if (!isValidBase58(signature, 32, 88)) return apiError(res, 400, 'INVALID_SIGNATURE', 'A valid transaction signature is required.')
   if (!isValidBase58(wallet, 32, 44)) return apiError(res, 400, 'INVALID_WALLET', 'A valid wallet address is required.')
 
@@ -21,7 +24,7 @@ export default async function handler(req, res) {
   if (!verification.result.input || !verification.result.output) return apiError(res, 422, 'INCOMPLETE_VERIFICATION', 'The verified transaction did not contain complete swap asset data.')
 
   try {
-    const persisted = await persistVerifiedSwap(verification.result)
+    const persisted = await persistVerifiedSwap(verification.result, promoCode)
     return json(res, 200, { persisted: true, verified: true, signature, wallet, walletRecord: persisted.wallet, swap: persisted.swap })
   } catch (error) {
     console.error('verified swap persistence failed:', error?.message || error)

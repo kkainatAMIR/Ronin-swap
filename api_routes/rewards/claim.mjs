@@ -1,5 +1,6 @@
 import { apiError, json, rateLimitPersistent } from '../../api/_lib/roninBackend.mjs'
 import { isSupabaseConfigured } from '../../api/_lib/supabaseBackend.mjs'
+import { rewardViewerWalletMatches } from '../../api/_lib/rewardViewerAuth.mjs'
 import {
   isRewardsAdminConfigured,
   getRewardsProgramState,
@@ -88,6 +89,9 @@ export default async function handler(req, res) {
 
   if (!isValidSolanaWallet(wallet)) {
     return apiError(res, 400, 'INVALID_WALLET', 'A valid Solana wallet address is required.')
+  }
+  if (!rewardViewerWalletMatches(req, wallet)) {
+    return apiError(res, 401, 'REWARD_VIEWER_AUTH_REQUIRED', 'Verify ownership of this wallet before claiming rewards.')
   }
   if (!isValidClaimId(claimId)) {
     return apiError(res, 400, 'INVALID_CLAIM_ID', 'A valid claimId (8-200 chars, A-Z a-z 0-9 _ -) is required.')

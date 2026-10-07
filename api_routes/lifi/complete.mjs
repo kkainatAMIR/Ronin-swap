@@ -25,11 +25,15 @@ function receiptSucceeded(receipt) {
   return status === '0x1' || status === '0x01' || status === 1 || status === '1' || status === true
 }
 
-function pointsView(points, minimumQualifyingSwapUsd = null) {
+function pointsView(points, minimumQualifyingSwapUsd = null, calculation = null) {
   if (!points) return null
   return {
     ...points,
     minimumQualifyingSwapUsd,
+    campaignId: points.campaign_id || calculation?.campaignId || null,
+    campaignMultiplier: calculation?.campaignMultiplier ?? null,
+    bonusPoints: Number(points.bonus_points ?? calculation?.bonusPoints ?? 0),
+    campaignReason: calculation?.campaignReason || null,
     qualified: points.eligibility_status === 'qualified' || points.qualified === true,
     pointsAwarded: Number(points.points_awarded ?? points.pointsAwarded ?? points.final_points ?? points.finalPoints ?? 0),
     qualifyingVolumeUsd: Number(points.qualifying_volume_usd ?? points.qualifyingVolumeUsd ?? 0),
@@ -66,9 +70,9 @@ export default async function handler(req, res) {
       const saved = await getAdminSettings().catch(() => null)
       const configuration = getEffectivePointsConfiguration(saved, season)
       if (existingPoints) return json(res, 200, { success: true, duplicate: true, swap: existing, points: pointsView(existingPoints, configuration.minimumQualifyingSwapUsd) })
-      const calculation = await calculateSamuraiPoints({ verification_status: existing.verification_status || 'verified', chain_id: Number(existing.chain_id ?? fromChain), volume_usd: existing.volume_usd == null ? (proof.volumeUsd == null ? null : Number(proof.volumeUsd)) : Number(existing.volume_usd), timestamp: existing.timestamp || timestamp, input_mint: existing.input_mint || normalizedFromToken, output_mint: existing.output_mint || normalizedToToken, input_amount_raw: existing.input_amount_raw || fromAmount, input_decimals: Number(existing.input_decimals ?? proof.fromDecimals ?? 18) }, configuration)
+      const calculation = await calculateSamuraiPoints({ verification_status: existing.verification_status || 'verified', chain_id: Number(existing.chain_id ?? fromChain), volume_usd: existing.volume_usd == null ? (proof.volumeUsd == null ? null : Number(proof.volumeUsd)) : Number(existing.volume_usd), timestamp: existing.timestamp || timestamp, input_mint: existing.input_mint || normalizedFromToken, output_mint: existing.output_mint || normalizedToToken, input_amount_raw: existing.input_amount_raw || fromAmount, input_decimals: Number(existing.input_decimals ?? proof.fromDecimals ?? 18), requested_promo_code: existing.requested_promo_code }, configuration)
       const points = await awardSamuraiPoints({ signature: transactionHash, ...calculation, seasonId: season?.id || null })
-      return json(res, 200, { success: true, duplicate: true, swap: existing, points: pointsView(points || { eligibility_status: calculation.qualified ? 'qualified' : 'not_qualified', points_awarded: calculation.pointsAwarded || 0, exclusion_reason: calculation.exclusionReason || null, qualifying_volume_usd: calculation.qualifyingVolumeUsd || 0, season_points: 0 }, configuration.minimumQualifyingSwapUsd) })
+      return json(res, 200, { success: true, duplicate: true, swap: existing, points: pointsView(points || { eligibility_status: calculation.qualified ? 'qualified' : 'not_qualified', points_awarded: calculation.pointsAwarded || 0, exclusion_reason: calculation.exclusionReason || null, qualifying_volume_usd: calculation.qualifyingVolumeUsd || 0, season_points: 0 }, configuration.minimumQualifyingSwapUsd, calculation) })
     }
     const [tx, receipt] = await Promise.all([lifiRpc(fromChain, 'eth_getTransactionByHash', [transactionHash]), lifiRpc(fromChain, 'eth_getTransactionReceipt', [transactionHash])])
     if (!tx || !receipt || !receiptSucceeded(receipt) || String(tx.from || '').toLowerCase() !== wallet.toLowerCase() || String(tx.to || '').toLowerCase() !== String(proof.transactionTo || '').toLowerCase() || String(tx.input || '').trim().toLowerCase() !== String(proof.transactionData || '').trim().toLowerCase() || BigInt(tx.value || '0x0') !== BigInt(proof.transactionValue || '0x0') || receipt.blockNumber == null) {
@@ -77,13 +81,13 @@ export default async function handler(req, res) {
       return apiError(res, 422, 'TRANSACTION_NOT_CONFIRMED', 'The LI.FI transaction was not confirmed successfully.')
     }
     const timestamp = new Date().toISOString()
-    const persisted = await persistLifiSwap({ wallet, transactionHash, fromChain, toChain, fromToken: normalizedFromToken, toToken: normalizedToToken, fromAmount, toAmount, volumeUsd: proof.volumeUsd, timestamp, blockNumber: receipt.blockNumber, quoteId, fromDecimals: proof.fromDecimals, toDecimals: proof.toDecimals })
+    const persisted = await persistLifiSwap({ wallet, transactionHash, fromChain, toChain, fromToken: normalizedFromToken, toToken: normalizedToToken, fromAmount, toAmount, volumeUsd: proof.volumeUsd, timestamp, blockNumber: receipt.blockNumber, quoteId, fromDecimals: proof.fromDecimals, toDecimals: proof.toDecimals, requestedPromoCode: body.promoCode })
     const season = await getSeasonForTimestamp(timestamp)
     const saved = await getAdminSettings().catch(() => null)
     const configuration = getEffectivePointsConfiguration(saved, season)
-    const calculation = await calculateSamuraiPoints({ verification_status: 'verified', chain_id: Number(fromChain), volume_usd: proof.volumeUsd == null ? null : Number(proof.volumeUsd), timestamp, input_mint: normalizedFromToken, output_mint: normalizedToToken, input_amount_raw: fromAmount, input_decimals: Number.isInteger(proof.fromDecimals) ? proof.fromDecimals : 18 }, configuration)
+    const calculation = await calculateSamuraiPoints({ verification_status: 'verified', chain_id: Number(fromChain), volume_usd: proof.volumeUsd == null ? null : Number(proof.volumeUsd), timestamp, input_mint: normalizedFromToken, output_mint: normalizedToToken, input_amount_raw: fromAmount, input_decimals: Number.isInteger(proof.fromDecimals) ? proof.fromDecimals : 18, requested_promo_code: persisted.swap.requested_promo_code }, configuration)
     const points = await awardSamuraiPoints({ signature: transactionHash, ...calculation, seasonId: season?.id || null })
-    return json(res, 200, { success: true, duplicate: false, swap: persisted.swap, points: pointsView(points, configuration.minimumQualifyingSwapUsd) })
+    return json(res, 200, { success: true, duplicate: false, swap: persisted.swap, points: pointsView(points, configuration.minimumQualifyingSwapUsd, calculation) })
   } catch (error) {
     console.error('LI.FI completion failed', { chain: Number(fromChain), transactionHash, wallet, fromToken, toToken, normalizedFromToken, normalizedToToken, completionStatus: 'failed', validationFailureReason: error?.message || String(error) })
     return apiError(res, 502, 'LIFI_COMPLETION_ERROR', error?.message || 'LI.FI swap completion could not be recorded.')

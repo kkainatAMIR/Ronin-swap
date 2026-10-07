@@ -1,4 +1,12 @@
-/* Burn dashboard: preserve the artwork, but add the same visible white translucent/glass treatment used by the rest of the site. */
+/* Burn sections use the site's warm paper palette and keep artwork atmospheric. */
+.burn-stats-section.enhanced-section{
+  isolation:isolate;
+  background:
+    radial-gradient(90% 70% at 12% 0%, rgba(185,28,28,.055), transparent 62%),
+    radial-gradient(65% 55% at 92% 24%, rgba(200,169,106,.09), transparent 64%),
+    linear-gradient(180deg, #fffaf3 0%, var(--ivory) 100%);
+}
+
 .burn-stats-section .enhanced-bg,
 .burn-desk-section .enhanced-bg{
   position:absolute;
@@ -6,7 +14,11 @@
   z-index:0;
   background-size:cover;
   background-position:center;
-  opacity:1;
+  opacity:.08;
+}
+
+.burn-stats-section .enhanced-bg{
+  opacity:.08 !important;
 }
 
 .burn-stats-section .enhanced-bg::after,
@@ -14,13 +26,189 @@
   content:'';
   position:absolute;
   inset:0;
-  background:rgba(255,255,255,.58);
-  backdrop-filter:blur(1.5px);
-  -webkit-backdrop-filter:blur(1.5px);
+  background:rgba(251,248,243,.68);
   pointer-events:none;
 }
 
-/* Keep the dashboard content above the translucent layer. */
+/* Keep the stats section bright; older global Burn rules add a dark overlay. */
+.burn-stats-section::after{
+  background:repeating-linear-gradient(
+    0deg,
+    rgba(123,92,63,.014) 0,
+    rgba(123,92,63,.014) 1px,
+    transparent 1px,
+    transparent 5px
+  ) !important;
+}
+
+.burn-stats-section .section-title,
+.burn-stats-section .section-copy,
+.burn-stats-section .burn-stat-grid .stat-label,
+.burn-stats-section .burn-stat-grid .stat-value,
+.burn-stats-section .burn-stat-grid .stat-detail{
+  color:var(--ink) !important;
+  text-shadow:none !important;
+}
+
+.burn-stats-section .section-copy,
+.burn-stats-section .burn-stat-grid .stat-detail{
+  color:var(--muted) !important;
+}
+
+.burn-stats-section .eyebrow,
+.burn-stats-section .ledger-mark{
+  color:var(--red) !important;
+}
+
+.burn-stats-section .ledger-mark span{
+  background:rgba(255,255,255,.56);
+  border-color:rgba(185,28,28,.34);
+}
+
+.burn-stats-section .enhanced-ink{
+  color:rgba(185,28,28,.045);
+  transform:rotate(-7deg);
+}
+
+.burn-stat-grid{
+  gap:12px;
+  border:0;
+}
+
+.burn-stat-grid .stat-card{
+  min-width:0;
+  min-height:132px;
+  padding:22px 18px 18px;
+  border:1px solid rgba(214,200,184,.76) !important;
+  border-top:1px solid rgba(214,200,184,.76) !important;
+  border-radius:var(--radius-sm);
+  background:rgba(255,255,255,.72);
+  box-shadow:0 5px 18px rgba(23,22,26,.035);
+  transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+.burn-stat-grid .stat-card:first-child{
+  border-left:1px solid rgba(214,200,184,.76) !important;
+}
+
+.burn-stat-grid .stat-card:hover{
+  border-color:rgba(185,28,28,.28) !important;
+  box-shadow:0 8px 22px rgba(23,22,26,.07);
+  transform:translateY(-2px);
+}
+
+.burn-stat-grid .stat-value{
+  color:var(--red-dark) !important;
+  text-shadow:none !important;
+}
+
+.burn-desk-section{
+  background:
+    radial-gradient(70% 50% at 100% 10%, rgba(200,169,106,.08), transparent 65%),
+    linear-gradient(180deg, #f8f1e6 0%, #f2ece1 100%);
+}
+
+.burn-desk-section .enhanced-bg{
+  opacity:.07;
+}
+
+.burn-desk-section .enhanced-ink.light{
+  color:rgba(185,28,28,.045);
+  transform:rotate(6deg);
+}
+
+.burn-ornament{
+  color:#9a8060;
+}
+
+.burn-ornament-line{
+  width:48px;
+  background:linear-gradient(90deg, transparent, var(--gold), rgba(185,28,28,.42), transparent);
+}
+
+.burn-stats-section .section-petals,
+.burn-desk-section .section-petals,
+.hall-section .section-petals{
+  opacity:.48;
+}
+
+.hall-section{
+  position:relative;
+  background:
+    radial-gradient(75% 60% at 86% 12%, rgba(200,169,106,.075), transparent 68%),
+    linear-gradient(180deg, #fffaf3 0%, var(--ivory) 100%);
+}
+
+.hall-section::before{
+  content:'';
+  position:absolute;
+  top:0;
+  left:50%;
+  width:min(100% - 48px, 1280px);
+  height:1px;
+  transform:translateX(-50%);
+  background:linear-gradient(90deg, transparent, rgba(200,169,106,.62), rgba(185,28,28,.24), transparent);
+  pointer-events:none;
+}
+
+.hall-section::after{
+  content:'浪';
+  position:absolute;
+  top:5%;
+  right:max(24px,calc((100% - 1280px)/2 + 12px));
+  color:rgba(185,28,28,.035);
+  font-family:serif;
+  font-size:clamp(140px,19vw,260px);
+  font-weight:700;
+  line-height:.8;
+  transform:rotate(7deg);
+  pointer-events:none;
+  z-index:0;
+}
+
+.hall-section .enhanced-bg{
+  opacity:.035;
+}
+
+.hall-section .burn-table{
+  border-color:#e9dece;
+  box-shadow:0 12px 32px rgba(23,22,26,.055);
+}
+
+.hall-section .table-head{
+  background:linear-gradient(90deg, rgba(242,236,225,.8), rgba(255,250,243,.8));
+  color:var(--red-dark);
+}
+
+.hall-section .table-row{
+  transition:background-color .18s ease;
+}
+
+.hall-section .table-row:hover{
+  background:rgba(185,28,28,.035);
+}
+
+.hall-section .hall-line{
+  background:linear-gradient(90deg, rgba(200,169,106,.62), transparent);
+}
+
+@media (max-width: 860px){
+  .burn-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .burn-stat-grid .stat-card{min-height:120px;padding:18px 14px}
+  .burn-layout{grid-template-columns:minmax(0,1fr)}
+  .burn-layout>*{min-width:0}
+}
+
+@media (max-width: 560px){
+  .burn-stat-grid{gap:8px}
+  .burn-stat-grid .stat-card{min-height:0;padding:16px 14px}
+  .burn-ornament{gap:8px;font-size:8px;letter-spacing:.08em}
+  .burn-ornament-line{width:22px}
+  .hall-section::after{top:2%;right:10px;font-size:140px}
+  .hall-section::before{width:calc(100% - 32px)}
+}
+
+/* Keep the section content above the atmospheric background layer. */
 .burn-stats-section > .container,
 .burn-desk-section > .container{
   position:relative;
