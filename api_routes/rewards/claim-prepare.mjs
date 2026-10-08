@@ -158,6 +158,10 @@ export default async function handler(req, res) {
   if (pointsToClaim != null && (!Number.isFinite(pointsToClaim) || pointsToClaim <= 0)) {
     return apiError(res, 400, 'INVALID_POINTS', 'pointsToClaim must be a positive number, or null/omitted to claim all available.')
   }
+  if (!seasonId) {
+    return apiError(res, 409, 'SEASON_ALLOCATION_REQUIRED',
+      'Points-to-SOL claims are disabled. Claim rewards from a finalized season allocation.')
+  }
 
   // --- STEP 1: Pre-flight program state check ---
   let programState

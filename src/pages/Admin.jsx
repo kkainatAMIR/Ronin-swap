@@ -127,6 +127,9 @@ export default function Admin() {
   const [adminView, setAdminView] = useState(() => window.location.hash === '#history' ? 'history' : 'active')
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyStatus, setHistoryStatus] = useState('ALL')
+  const [visibleHistoryCampaignCount, setVisibleHistoryCampaignCount] = useState(1)
+  const [visibleHistorySeasonCount, setVisibleHistorySeasonCount] = useState(1)
+  const [showSeasonCreateForm, setShowSeasonCreateForm] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now())
 
   const api = useAdminApi(authenticated)
@@ -235,9 +238,16 @@ export default function Admin() {
     getStatus: (season) => season.status || 'UNKNOWN',
     getSearchText: (season) => `${season.name || ''} ${season.id || ''}`,
   })
+  const historyTimestamp = (record) => [record.created_at, record.startDate, record.start_at, record.endDate, record.end_at]
+    .map((value) => Date.parse(value || ''))
+    .find(Number.isFinite) ?? 0
+  const newestFirst = (first, second) => historyTimestamp(second) - historyTimestamp(first)
+  const newestCampaigns = [...filteredCampaigns].sort((first, second) => newestFirst(first.campaign, second.campaign))
+  const newestSeasons = [...filteredSeasons].sort(newestFirst)
   const campaignEntriesToManage = adminView === 'history'
-    ? filteredCampaigns
+    ? newestCampaigns.slice(0, visibleHistoryCampaignCount)
     : activeCampaignEntries
+  const seasonsToManage = newestSeasons.slice(0, visibleHistorySeasonCount)
 
   const saveSettings = async () => {
     setError(''); setNotice('')
@@ -473,6 +483,9 @@ export default function Admin() {
     else setAdminView(view)
     setHistoryQuery('')
     setHistoryStatus('ALL')
+    setVisibleHistoryCampaignCount(1)
+    setVisibleHistorySeasonCount(1)
+    setShowSeasonCreateForm(false)
   }
 
   return <main className="admin-shell">
@@ -530,15 +543,24 @@ export default function Admin() {
       </>
     ) : (
       <section className="surface-card admin-panel admin-history-filters">
-        <SectionHeading eyebrow="Management archive" title="Campaign & Season History" text="Draft, upcoming, ended, frozen, finalized, archived, disabled, and other non-active records remain manageable here." />
-        <div className="admin-history-controls">
-          <label>Search<input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Search season or campaign name / ID" /></label>
-          <label>Status<select value={historyStatus} onChange={(event) => setHistoryStatus(event.target.value)}>
+        <div className="admin-history-heading-row">
+          <div className="admin-history-heading-copy">
+            <Eyebrow icon="history">Management archive</Eyebrow>
+            <h2>Campaign &amp; Season History</h2>
+            <p>Browse non-active records, newest first. Expand campaign and season history independently to see more.</p>
+          </div>
+          <div className="admin-history-counts" aria-label="History record counts">
+            <div className="admin-history-count"><strong>{filteredCampaigns.length}</strong><span>Campaigns</span></div>
+            <div className="admin-history-count"><strong>{filteredSeasons.length}</strong><span>Seasons</span></div>
+          </div>
+        </div>
+        <div className="admin-history-toolbar">
+          <label className="admin-history-search"><span>Search records</span><span className="admin-history-search-input"><Icon name="search" size={16} /><input value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setVisibleHistoryCampaignCount(1); setVisibleHistorySeasonCount(1) }} placeholder="Search by name or ID" /></span></label>
+          <label className="admin-history-status"><span>Status</span><select value={historyStatus} onChange={(event) => { setHistoryStatus(event.target.value); setVisibleHistoryCampaignCount(1); setVisibleHistorySeasonCount(1) }}>
             <option value="ALL">All non-active statuses</option>
             {[...new Set([...campaignStatuses, ...seasonStatuses])].sort().map((status) => <option key={status} value={status}>{status}</option>)}
           </select></label>
         </div>
-        <small>{filteredCampaigns.length} campaigns · {filteredSeasons.length} seasons</small>
       </section>
     )}
     <section className="admin-grid">
@@ -573,6 +595,13 @@ export default function Admin() {
           </fieldset>
         ))}
         {campaignEntriesToManage.length === 0 && <p>{adminView === 'history' ? 'No campaigns match the selected history filters.' : 'There are no currently active campaigns.'}</p>}
+        {adminView === 'history' && campaignEntriesToManage.length < filteredCampaigns.length && (
+          <div className="admin-history-more">
+            <Button variant="outline" onClick={() => setVisibleHistoryCampaignCount((count) => count + 1)}>
+              View more campaigns ({filteredCampaigns.length - campaignEntriesToManage.length} remaining)
+            </Button>
+          </div>
+        )}
         <div className="admin-toolbar admin-campaign-actions"><Button variant="outline" onClick={() => addCampaign(adminView !== 'history')}>Add campaign</Button><Button icon="save" onClick={saveSettings}>Save campaigns</Button></div>
       </div>
     </section>
@@ -586,7 +615,14 @@ export default function Admin() {
     {adminView === 'history' && (
       <>
     <section className="surface-card admin-panel admin-seasons-panel">
-      <SectionHeading eyebrow="Seasons" title="Lifecycle management." text="Create draft seasons and manage their lifecycle. Only one season can be active at a time." />
+      <SectionHeading eyebrow="Seasons" title="Season history." text="The latest non-active season is shown first. Expand the list to manage earlier seasons." />
+      <div className="admin-season-create-action">
+        <Button variant="outline" icon={showSeasonCreateForm ? 'close' : 'plus'} onClick={() => setShowSeasonCreateForm((show) => !show)}>
+          {showSeasonCreateForm ? 'Hide season form' : 'Create new season'}
+        </Button>
+      </div>
+      {showSeasonCreateForm && (
+        <>
       <div className="admin-form-grid admin-season-create-grid">
         <label>Season ID<input value={seasonDraft.id} onChange={(event) => setSeasonDraft({ ...seasonDraft, id: event.target.value })} placeholder="season-2026-01" /></label>
         <label>Season name<input value={seasonDraft.name} onChange={(event) => setSeasonDraft({ ...seasonDraft, name: event.target.value })} placeholder="Season 1" /></label>
@@ -598,8 +634,10 @@ export default function Admin() {
         <label>Reward claim window ends<input type="datetime-local" value={seasonDraft.claimWindowEnd} onChange={(event) => setSeasonDraft({ ...seasonDraft, claimWindowEnd: event.target.value })} /></label>
       </div>
       <div className="admin-season-create-action"><Button icon="save" onClick={createSeasonRecord}>Create draft season</Button></div>
+        </>
+      )}
       <div className="admin-season-list">
-        {filteredSeasons.map((season) => (
+        {seasonsToManage.map((season) => (
           <div id={`season-${season.id}`} className="admin-season-row admin-season-card" key={season.id}>
             <strong>{season.name} <span>({season.id})</span></strong>
             <Tag tone={season.status === 'ACTIVE' ? 'green' : 'neutral'}>{season.status}</Tag>
@@ -741,6 +779,13 @@ export default function Admin() {
         ))}
         {filteredSeasons.length === 0 && <p>{allSeasons.length === 0 ? 'No seasons have been created.' : 'No seasons match the selected history filters.'}</p>}
       </div>
+      {seasonsToManage.length < filteredSeasons.length && (
+        <div className="admin-history-more">
+          <Button variant="outline" onClick={() => setVisibleHistorySeasonCount((count) => count + 1)}>
+            View more seasons ({filteredSeasons.length - seasonsToManage.length} remaining)
+          </Button>
+        </div>
+      )}
     </section>
     <section className="surface-card admin-panel admin-disabled-controls"><div><Eyebrow>On-chain payouts</Eyebrow><h2>SOL payouts are server-controlled.</h2><p>SOL rewards are {settings.sol_rewards_enabled ? 'ENABLED — users can claim from the Profile page' : 'currently OFF'} and platform fees are {settings.platform_fee_enabled ? 'enabled by configuration' : 'OFF'}. The backend signs the on-chain payout transaction with the admin keypair configured via SOLANA_REWARDS_ADMIN_KEYPAIR / SOLANA_REWARDS_ADMIN_SECRET_KEY; no private key is exposed to the browser.</p></div><Tag tone={settings.sol_rewards_enabled ? 'green' : 'neutral'}>{settings.sol_rewards_enabled ? 'REWARDS LIVE' : 'SERVER CONTROLLED'}</Tag></section>
       </>

@@ -8,7 +8,7 @@ const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
 const HELIUS_ENHANCED = 'https://api.helius.xyz/v0'
 const BURN_PAGE_SIZE = 100
 const MAX_BURN_PAGES = Math.max(1, Number(runtimeEnv.RONIN_BURN_MAX_PAGES || 10))
-const BURN_REQUEST_TIMEOUT_MS = 8_000
+const BURN_REQUEST_TIMEOUT_MS = 20_000
 
 function json(res, status, body) {
   res.status(status).setHeader('Cache-Control', 'no-store, max-age=0')

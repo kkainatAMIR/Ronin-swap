@@ -14,3 +14,10 @@ export async function getCurrentSeason() {
   if (!response.ok) throw new Error(body?.error || 'Unable to load current season.')
   return body.season
 }
+
+export async function getSeasons() {
+  const response = await fetch('/api/samurai/seasons')
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body?.error || 'Unable to load seasons.')
+  return Array.isArray(body?.seasons) ? body.seasons : []
+}

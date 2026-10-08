@@ -139,6 +139,12 @@ export default function Burn() {
       setHistoryMeta(null)
       return
     }
+    if (liveStats.burnsComplete === false) {
+      setHistoryState('error')
+      setHistoryEvents([])
+      setHistoryMeta(null)
+      return
+    }
     setHistoryEvents(liveStats.burnHistory || [])
     setHistoryMeta({ source: liveStats.source, scanned: liveStats.burnHistory?.length || 0 })
     setHistoryState('ready')
@@ -358,7 +364,7 @@ export default function Burn() {
           <div className="burn-stat-grid">
             <StatCard stat={{ label: 'ACCUMULATED BURNED', value: burnedLive != null ? formatCompact(burnedLive) : liveStatsState === 'loading' ? '…' : '—', suffix: burnedLive != null ? 'RONIN • global on-chain' : liveStatsState === 'loading' ? 'Fetching global on-chain data' : 'Global on-chain data unavailable', icon: 'flame' }} />
             <StatCard stat={{ label: 'CURRENT SUPPLY', value: supplyLive ? formatCompact(supplyLive) : '—', suffix: 'RONIN • Solana RPC', icon: 'coins' }} />
-            <StatCard stat={{ label: 'RECENT VERIFIED BURN', value: recentBurn ? formatRoninAmount(recentBurn.amount) : historyState === 'loading' ? '…' : '—', suffix: recentBurn ? 'RONIN • on-chain' : 'None found in scan', icon: 'trend' }} />
+            <StatCard stat={{ label: 'RECENT VERIFIED BURN', value: recentBurn ? formatRoninAmount(recentBurn.amount) : historyState === 'loading' ? '…' : '—', suffix: recentBurn ? 'RONIN • on-chain' : historyState === 'loading' ? 'Scanning global history' : historyState === 'error' ? 'Global history unavailable' : 'None found in scan', icon: 'trend' }} />
             <StatCard stat={{ label: 'VERIFIED BURNS (LATEST)', value: historyState === 'ready' ? String(historyEvents.length) : historyState === 'loading' ? '…' : '—', suffix: historyState === 'ready' ? 'global Helius history' : historyState === 'loading' ? 'Reading global history' : 'Global data unavailable', icon: 'chart' }} />
           </div>
           <div className="burn-ornament">
@@ -459,7 +465,7 @@ export default function Burn() {
                     {(liveStats?.largestAccounts || []).slice(0, 3).map((acc, i) => (
                       <div key={i}><span>{i + 1}. {acc.address ? shortAddr(acc.address) : '—'}</span><strong>{acc.uiAmountString || acc.amount} RONIN</strong></div>
                     ))}
-                    {!liveStats?.largestAccounts?.length && <div><span>Loading live holders...</span></div>}
+                    {!liveStats?.largestAccounts?.length && <div><span>{liveStatsState === 'loading' ? 'Loading live holders...' : 'Live holder data unavailable'}</span></div>}
                   </div>
                 </div>
                 <div className="surface-card enhanced-mini burn-next">
@@ -475,7 +481,7 @@ export default function Burn() {
                   ) : (
                     <>
                       <div className="burn-next-ring"><span>—</span></div>
-                      <span className="muted-caption">{historyState === 'loading' ? 'Scanning global on-chain burns...' : 'No verified burns found in the global history yet.'}</span>
+                      <span className="muted-caption">{historyState === 'loading' ? 'Scanning global on-chain burns...' : historyState === 'error' ? 'Global burn history is unavailable. Try again later.' : 'No verified burns found in the global history yet.'}</span>
                       <div style={{ marginTop: '10px' }}>
                         <a className="btn btn-outline" href={RONIN_TOKEN_URL} target="_blank" rel="noreferrer">Verify on Solscan <Icon name="external" size={14} /></a>
                       </div>

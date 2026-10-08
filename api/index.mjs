@@ -33,6 +33,10 @@
 // lives in the handler modules under api_routes/.
 // =====================================================================
 
+export const config = {
+  maxDuration: 60,
+}
+
 // Use DYNAMIC import() for the route table so that any module-load failure
 // (a top-level throw inside one of the 40 handler modules, a missing
 // dependency, a malformed env var, etc.) is caught here and surfaced as a

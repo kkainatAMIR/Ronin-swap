@@ -510,6 +510,158 @@
   gap: 14px;
 }
 
+.admin-shell .admin-history-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.admin-shell .admin-history-filters {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(20px, 3vw, 30px);
+  border-color: rgba(185, 28, 28, 0.14);
+  box-shadow: 0 16px 40px rgba(48, 20, 20, 0.07);
+  background:
+    radial-gradient(ellipse at 92% 0%, rgba(185, 28, 28, 0.1), transparent 36%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), var(--paper) 70%);
+}
+
+.admin-shell .admin-history-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.admin-shell .admin-history-heading-copy {
+  min-width: 0;
+}
+
+.admin-shell .admin-history-heading-copy .eyebrow {
+  margin-bottom: 10px;
+}
+
+.admin-shell .admin-history-heading-copy h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+.admin-shell .admin-history-heading-copy p {
+  max-width: 640px;
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.admin-shell .admin-history-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(104px, 1fr));
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.admin-shell .admin-history-count {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-width: 104px;
+  padding: 14px 16px;
+  border: 1px solid rgba(185, 28, 28, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 5px 16px rgba(48, 20, 20, 0.04);
+}
+
+.admin-shell .admin-history-count strong {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.admin-shell .admin-history-count span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.admin-shell .admin-history-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.38fr);
+  align-items: end;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-shell .admin-history-toolbar label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-shell .admin-history-search-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--muted);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.admin-shell .admin-history-search-input:focus-within {
+  border-color: rgba(185, 28, 28, 0.48);
+  box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.08);
+}
+
+.admin-shell .admin-history-search-input input,
+.admin-shell .admin-history-status select {
+  box-sizing: border-box;
+  min-height: 46px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  font-size: 14px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.admin-shell .admin-history-search-input input {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.admin-shell .admin-history-search-input input:focus {
+  box-shadow: none;
+}
+
+.admin-shell .admin-history-status select {
+  width: 100%;
+}
+
 .admin-shell .admin-season-card {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px 16px;
@@ -611,6 +763,24 @@
 }
 
 @media (max-width: 650px) {
+  .admin-shell .admin-history-heading-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .admin-shell .admin-history-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-shell .admin-history-count {
+    min-width: 0;
+  }
+
+  .admin-shell .admin-history-toolbar {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
   .admin-shell {
     padding: 28px 16px;
   }

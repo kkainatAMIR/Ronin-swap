@@ -288,27 +288,11 @@ export async function getDexScreenerStats() {
   }
 }
 
-async function getVerifiedBurnHistory() {
-  try {
-    const response = await fetch('/api/ronin/burn-history', { cache: 'no-store' })
-    if (!response.ok) throw new Error(`Burn history API returned ${response.status}.`)
-    const data = await response.json()
-    if (!data || data.error) throw new Error(data?.error || 'Verified burn history was not returned.')
-    return Array.isArray(data.events) ? data.events : []
-  } catch (error) {
-    console.warn('Verified RONIN burn history fetch failed:', error)
-    return null
-  }
-}
-
 export async function getLiveRoninStats() {
   try {
-    // Fetch the global stats and the lightweight verified-burn ledger in
-    // parallel. The burn ledger no longer makes the whole dashboard wait for
-    // the old global-history scan.
-    const [statsResponse, verifiedBurnHistory] = await Promise.all([
+    const [statsResponse, largestAccounts] = await Promise.all([
       fetch('/api/ronin/stats', { cache: 'no-store' }),
-      getVerifiedBurnHistory(),
+      getTokenLargestAccounts(),
     ])
     if (!statsResponse.ok) throw new Error(`Live RONIN stats API returned ${statsResponse.status}.`)
     const data = await statsResponse.json()
@@ -318,7 +302,7 @@ export async function getLiveRoninStats() {
       // The stats endpoint is the single source for global dashboard data.
       // Wallet-specific reads stay in getRoninBalance() and never contribute
       // to this object.
-      largestAccounts: [],
+      largestAccounts,
       holdersCount: data.holdersCount ?? null,
       holders: null,
       burned: data.burnsComplete === false ? null : data.burned,
@@ -327,9 +311,8 @@ export async function getLiveRoninStats() {
       burnWalletBalance: data.burnWalletBalance ?? null,
       burnWalletAddress: data.burnWalletAddress || null,
       burnsComplete: data.burnsComplete !== false,
-      // Prefer the dedicated verified ledger. If it is temporarily unavailable,
-      // preserve the existing backend history rather than breaking the page.
-      burnHistory: verifiedBurnHistory ?? data.burnHistory ?? [],
+      // Use the same global Helius scan that backs the accumulated burn total.
+      burnHistory: Array.isArray(data.burnHistory) ? data.burnHistory : [],
       dex: data.dex || null,
       updatedAt: data.updatedAt || Date.now(),
       source: data.source || 'global on-chain RONIN burn data',

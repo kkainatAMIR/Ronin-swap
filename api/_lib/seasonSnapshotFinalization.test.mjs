@@ -23,6 +23,7 @@ const leaderboard = sqlFunction(versioningMigration, 'get_samurai_leaderboard')
 const walletStats = sqlFunction(versioningMigration, 'get_samurai_wallet_stats')
 const restart = sqlFunction(versioningMigration, 'restart_finalized_samurai_season')
 const claim = sqlFunction(claimsMigration, 'claim_finalized_season_reward')
+const claimPrepare = await readFile(new URL('../../api_routes/rewards/claim-prepare.mjs', import.meta.url), 'utf8')
 
 test('freeze locks the season and writes a unique canonical snapshot for its version', () => {
   assert.match(freeze, /where id = p_id\s+for update/i)
@@ -102,4 +103,47 @@ test('claims consume the persisted allocation for the active finalized version',
   assert.match(claim, /s\.reward_pool_status = 'FINALIZED'/i)
   assert.match(claim, /now\(\) >= s\.claim_window_start/i)
   assert.match(claim, /now\(\) < s\.claim_window_end/i)
+})
+
+test('proportional allocation is fixed from each wallet share of that season pool', () => {
+  assert.match(finalize, /season_row\.reward_pool_amount \* ss\.eligible_points\s+\/ nullif\(total_points, 0\)/i)
+  assert.match(finalize, /floor\([\s\S]*?\* 1000000000\s*\)\s*\/ 1000000000/i)
+  assert.match(finalize, /reward_amount,[\s\S]*?season_row\.reward_pool_amount,[\s\S]*?floor\(/i)
+})
+
+test('finalization is season- and snapshot-version-isolated', () => {
+  assert.match(freeze, /where sp\.season_id = p_id/i)
+  assert.match(finalize, /where ss\.season_id = p_id\s+and ss\.snapshot_version = allocation_version_value/i)
+  assert.match(finalize, /where a\.season_id = p_id\s+and a\.allocation_version = allocation_version_value/i)
+})
+
+test('claim order and timing cannot change a finalized allocation', () => {
+  assert.match(claim, /allocation\.reward_amount/)
+  assert.match(claim, /allocation\.eligible_points, 'SOL', allocation\.reward_amount/i)
+  assert.doesNotMatch(finalize, /reward_claims|vault_balance/i)
+  assert.doesNotMatch(claim, /vault_balance|reward_pool_amount\s*\*|eligible_points\s*\/\s*total_eligible_points/i)
+})
+
+test('an insufficient vault blocks the fixed claim instead of reducing its amount', () => {
+  assert.match(claimPrepare, /programState\.vaultBalanceLamports < rewardAmountLamports/)
+  assert.match(claimPrepare, /safeRevertFailedClaim\(claimId, 'VAULT_INSUFFICIENT_BALANCE'\)/)
+  assert.match(claimPrepare, /'VAULT_INSUFFICIENT_BALANCE'/)
+  assert.match(claim, /allocation\.reward_amount/)
+  assert.doesNotMatch(claimPrepare, /rewardAmountLamports\s*=\s*Math\.min|rewardAmountSol\s*=\s*Math\.min/i)
+})
+
+test('claim-window expiry gates claiming without changing the proportional formula', () => {
+  assert.match(claim, /now\(\) >= s\.claim_window_start/)
+  assert.match(claim, /now\(\) < s\.claim_window_end/)
+  assert.match(claim, /raise exception 'SEASON_CLAIM_WINDOW_CLOSED'/)
+  assert.match(claim, /allocation\.reward_amount/)
+  assert.doesNotMatch(claim, /claim_window[\s\S]{0,500}reward_amount\s*=/i)
+})
+
+test('repeated finalization preserves saved allocations and returns the finalized version', () => {
+  assert.match(finalize, /if season_row\.reward_pool_status = 'FINALIZED' then/i)
+  assert.match(finalize, /'idempotent', true/i)
+  assert.match(finalize, /on conflict \(season_id, wallet_id, allocation_version\) do nothing/i)
+  assert.match(restart, /allocation_version = coalesce\(allocation_version, 0\) \+ 1/i)
+  assert.doesNotMatch(restart, /\b(delete\s+from|truncate)\b/i)
 })

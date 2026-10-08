@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { recordRewardClaimSubmission } from '../../src/services/rewardsService.js'
+import bs58 from 'bs58'
+import { confirmRewardClaim, recordRewardClaimSubmission } from '../../src/services/rewardsService.js'
+import { decodeClaimRewardInstruction } from '../../api_routes/rewards/claim-confirm.mjs'
 
 const migration = await readFile(new URL('../../supabase/migrations/20261013000000_reward_claim_submission_safety.sql', import.meta.url), 'utf8')
 const panel = await readFile(new URL('../../src/components/RewardClaimPanel.jsx', import.meta.url), 'utf8')
@@ -50,6 +53,22 @@ test('submission persistence client sends the exact claim and signature using a 
   assert.equal(result.success, true)
 })
 
+test('confirmation errors preserve the server failure stage for diagnostics', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    error: 'Claim confirmation failed unexpectedly.',
+    code: 'CLAIM_CONFIRM_INTERNAL_ERROR',
+    stage: 'transaction verification',
+    diagnostic_error: 'fixture verifier exception',
+  }, { status: 500 }))
+
+  await assert.rejects(
+    confirmRewardClaim(claimFixture.claim_id, testSignature, 'wallet-fixture'),
+    (error) => error.code === 'CLAIM_CONFIRM_INTERNAL_ERROR'
+      && error.stage === 'transaction verification'
+      && error.diagnostic === 'fixture verifier exception',
+  )
+})
+
 test('conflicting signature persistence returns a deterministic conflict to the client', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => Response.json({
     error: 'This claim is already bound to a different transaction signature.',
@@ -83,6 +102,38 @@ test('confirmation completes the same claim without constructing or submitting a
   assert.match(sqlFunction(migration, 'update_reward_claim_status'), /claim_row\.status = 'COMPLETED' and p_status = 'COMPLETED'[\s\S]*return to_jsonb\(claim_row\)/)
   assert.doesNotMatch(confirmRoute, /sendSignedSolanaTransaction|buildClaimRewardInstruction/)
   assert.match(panel, /confirmRewardClaim\(claimId, signature, effectiveWallet\)/)
+})
+
+test('unexpected confirmation errors expose the failing stage without exposing stack traces', () => {
+  assert.match(confirmRoute, /stage: diagnostic\.stage/)
+  assert.match(confirmRoute, /errorStack: process\.env\.NODE_ENV === 'production' \? undefined/)
+  assert.match(confirmRoute, /diagnostic_error: process\.env\.NODE_ENV === 'production'/)
+})
+
+test('claim instruction decoding accepts RPC byte arrays without Buffer prototype coupling', () => {
+  const claimId = 'claim-test-lifecycle-001'
+  const claimIdBytes = Buffer.from(claimId, 'utf8')
+  const discriminator = createHash('sha256').update('global:claim_reward').digest().subarray(0, 8)
+  const claimIdLength = Buffer.alloc(4)
+  claimIdLength.writeUInt32LE(claimIdBytes.length)
+  const data = Buffer.concat([
+    discriminator,
+    claimIdLength,
+    claimIdBytes,
+    Buffer.from([125, 0, 0, 0, 0, 0, 0, 0]),
+    Buffer.from([64, 66, 15, 0, 0, 0, 0, 0]),
+  ])
+
+  assert.deepEqual(decodeClaimRewardInstruction(Uint8Array.from(data)), {
+    claimId,
+    pointsClaimed: 125,
+    rewardAmountLamports: 1_000_000,
+  })
+  assert.deepEqual(decodeClaimRewardInstruction(bs58.encode(data)), {
+    claimId,
+    pointsClaimed: 125,
+    rewardAmountLamports: 1_000_000,
+  })
 })
 
 test('a confirm failure after persistence remains pending and does not trigger cancellation', () => {

@@ -492,7 +492,13 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       setRetrySignatureInput('')
       await load()
     } catch (e) {
-      console.error('[RewardClaimPanel] retry confirm failed', { claimId, message: e?.message, code: e?.code })
+      console.error('[RewardClaimPanel] retry confirm failed', {
+        claimId,
+        message: e?.message,
+        code: e?.code,
+        stage: e?.stage,
+        diagnostic: e?.diagnostic,
+      })
       setRetryError(e?.message || 'Could not verify the transaction. Make sure the signature is correct and the transaction landed on Solana.')
     } finally {
       setRetryingClaimId(null)
@@ -660,21 +666,17 @@ export default function RewardClaimPanel({ wallet, expectedEvmWallet }) {
       </div>
 
       <div className="profile-rewards-action-row">
-        <Button
-          variant="primary"
-          icon="gift"
-          onClick={showEvmClaimNotice ? () => { setShowLinkPanel(true); setError('Connect Phantom, then link this MetaMask wallet to your Solana reward identity. After linking, claimable SOL rewards will be paid to your Solana wallet.') } : () => handleClaim()}
-          disabled={showEvmClaimNotice ? false : claimable <= 0 || !rewardsEnabled || !hasActiveSeason || state !== 'idle'}
-        >
-          {showEvmClaimNotice ? 'Switch to Phantom to claim' : (state !== 'idle' ? stateLabel : hasActiveSeason ? 'Claim all claimable points' : 'No active season')}
-        </Button>
+        {showEvmClaimNotice && (
+          <Button
+            variant="primary"
+            icon="gift"
+            onClick={() => { setShowLinkPanel(true); setError('Connect Phantom, then link this MetaMask wallet to your Solana reward identity. After linking, claimable SOL rewards will be paid to your Solana wallet.') }}
+          >
+            Switch to Phantom to claim
+          </Button>
+        )}
         <Button variant="outline" icon="refresh" onClick={load} disabled={state === 'loading' || state !== 'idle'}>Refresh</Button>
       </div>
-      {!hasActiveSeason && claimable > 0 && (
-        <p className="profile-rewards-fee-note">
-          General points claims require an active season. Claim finalized season rewards from that season&apos;s reward card below.
-        </p>
-      )}
 
       <section className="profile-participated-seasons">
         <SectionHeading

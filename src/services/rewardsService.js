@@ -222,6 +222,8 @@ export async function confirmRewardClaim(claimId, signature, wallet) {
   if (!response.ok) {
     const err = new Error(body?.error || 'The reward claim could not be confirmed.')
     err.code = body?.code || 'CLAIM_CONFIRM_FAILED'
+    err.stage = body?.stage || null
+    err.diagnostic = body?.diagnostic_error || null
     throw err
   }
   return body

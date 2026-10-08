@@ -306,7 +306,7 @@ function resolveInstructionAccountIndices(ix, accountKeys) {
 // Returns null if the discriminator does not match claim_reward OR if
 // the buffer is too short to contain all expected fields.
 // =====================================================================
-function decodeClaimRewardInstruction(dataInput) {
+export function decodeClaimRewardInstruction(dataInput) {
   if (!dataInput) return null
 
   let buf
@@ -329,8 +329,9 @@ function decodeClaimRewardInstruction(dataInput) {
 
   if (buf.length < 8) return null
 
-  // Discriminator check — must equal the Anchor claim_reward discriminator.
-  if (!buf.subarray(0, 8).equals(CLAIM_REWARD_DISCRIMINATOR)) return null
+  // Compare bytes directly so RPC-provided Uint8Array/Buffer implementations
+  // do not have to share Buffer's prototype for discriminator validation.
+  if (CLAIM_REWARD_DISCRIMINATOR.some((byte, index) => buf[index] !== byte)) return null
 
   let offset = 8
 
@@ -645,16 +646,20 @@ export default async function handler(req, res) {
   try {
     return await handleClaimConfirm(req, res, diagnostic)
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[claim-confirm] unhandled handler exception', {
-        ...diagnostic,
-        errorMessage: error?.message || String(error),
-        errorStack: error?.stack || null,
-        httpResponseSource: 'claim-confirm wrapper (CLAIM_CONFIRM_INTERNAL_ERROR)',
-      })
-    }
-    return apiError(res, 500, 'CLAIM_CONFIRM_INTERNAL_ERROR',
-      'Claim confirmation failed unexpectedly. Keep the transaction signature and retry confirmation or contact support.')
+    console.error('[claim-confirm] unhandled handler exception', {
+      ...diagnostic,
+      errorMessage: error?.message || String(error),
+      errorStack: process.env.NODE_ENV === 'production' ? undefined : error?.stack || null,
+      httpResponseSource: 'claim-confirm wrapper (CLAIM_CONFIRM_INTERNAL_ERROR)',
+    })
+    return json(res, 500, {
+      error: 'Claim confirmation failed unexpectedly. Keep the transaction signature and retry confirmation or contact support.',
+      code: 'CLAIM_CONFIRM_INTERNAL_ERROR',
+      stage: diagnostic.stage,
+      diagnostic_error: process.env.NODE_ENV === 'production'
+        ? undefined
+        : String(error?.message || error).slice(0, 300),
+    })
   }
 }
 

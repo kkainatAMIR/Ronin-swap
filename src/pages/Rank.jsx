@@ -3,7 +3,7 @@ import { formatCompact, formatNumber, getCurrentRank, getNextRank, getRankProgre
 import { useWallet } from '../context/WalletContext'
 import Icon from '../components/Icon'
 import { Button, Eyebrow, PageHero, ProgressBar, SectionHeading, Tag } from '../components/Layout'
-import { getCurrentSeason, getLeaderboard } from '../services/leaderboardService'
+import { getCurrentSeason, getLeaderboard, getSeasons } from '../services/leaderboardService'
 import { getEthereumProvider } from '../services/ethereumService'
 
 const iconForRank = (id) => {
@@ -29,6 +29,9 @@ export default function Rank() {
   const [leaderboard, setLeaderboard] = useState({ entries: [], pagination: { total: 0 }, wallet: null })
   const [leaderboardState, setLeaderboardState] = useState('idle')
   const [currentSeason, setCurrentSeason] = useState(null)
+  const [seasons, setSeasons] = useState([])
+  const [selectedSeasonId, setSelectedSeasonId] = useState('')
+  const [seasonsState, setSeasonsState] = useState('loading')
   const [ethereumWallet, setEthereumWallet] = useState('')
   const leaderboardWallet = wallet?.address || ethereumWallet
   const isGashiraWallet = wallet?.address === '3xfHXYiPMJQUYqF23cHJUMPkQEjoQ6W2f9L5i1XPXb7r'
@@ -66,10 +69,43 @@ export default function Rank() {
 
   useEffect(() => {
     let cancelled = false
+    Promise.allSettled([getCurrentSeason(), getSeasons()])
+      .then(([currentResult, seasonsResult]) => {
+        if (cancelled) return
+        const currentSeasonResult = currentResult.status === 'fulfilled' ? currentResult.value : null
+        const availableSeasons = seasonsResult.status === 'fulfilled' && Array.isArray(seasonsResult.value)
+          ? [...seasonsResult.value]
+          : []
+        if (currentSeasonResult && !availableSeasons.some((season) => season.id === currentSeasonResult.id)) {
+          availableSeasons.push(currentSeasonResult)
+        }
+        const defaultSeason = currentSeasonResult || availableSeasons.find((season) => season.status === 'ACTIVE') || availableSeasons[0]
+        setCurrentSeason(defaultSeason || null)
+        setSeasons(availableSeasons)
+        setSelectedSeasonId((selected) => {
+          if (selected && availableSeasons.some((season) => season.id === selected)) return selected
+          return defaultSeason?.id || ''
+        })
+        if (availableSeasons.length) {
+          setSeasonsState('ready')
+        } else {
+          setSeasonsState('error')
+          setLeaderboardState('error')
+        }
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (seasonsState !== 'ready') return undefined
+    let cancelled = false
     setLeaderboardState('loading')
-    getCurrentSeason().then((season) => {
-      if (!cancelled) setCurrentSeason(season)
-      return getLeaderboard({ period: leaderboardPeriod, page: 1, limit: 100, wallet: leaderboardWallet, seasonId: season?.id })
+    getLeaderboard({
+      period: leaderboardPeriod,
+      page: 1,
+      limit: 100,
+      wallet: leaderboardWallet,
+      seasonId: selectedSeasonId || currentSeason?.id,
     }).then((result) => {
         if (!cancelled) {
           setLeaderboard(result)
@@ -80,8 +116,9 @@ export default function Rank() {
         if (!cancelled) setLeaderboardState('error')
       })
     return () => { cancelled = true }
-  }, [leaderboardPeriod, leaderboardWallet])
+  }, [leaderboardPeriod, leaderboardWallet, selectedSeasonId, currentSeason?.id, seasonsState])
 
+  const selectedSeason = seasons.find((season) => season.id === selectedSeasonId) || currentSeason
   const selectedRank = useMemo(() => ranks.find((rank) => rank.id === selectedId) || ranks[1], [selectedId])
   const isSelectedCurrent = currentRank?.id === selectedRank.id
   const hasNextThreshold = typeof nextRank?.minBalance === 'number'
@@ -130,9 +167,17 @@ export default function Rank() {
 
       <section className="section" id="samurai-leaderboard">
         <div className="section-row" style={{ alignItems: 'end', gap: '20px' }}>
-          <SectionHeading eyebrow="Verified activity" title="Samurai leaderboard." text={currentSeason ? `${currentSeason.name} · ${new Date(currentSeason.startAt).toLocaleDateString()} → ${new Date(currentSeason.endAt).toLocaleDateString()}.` : 'Ranks are calculated from verified database activity. Featured-token status does not affect normal points.'} />
-          <div className="swap-widget-tabs" role="tablist" aria-label="Leaderboard period" style={{ flexShrink: 0 }}>
-            {[['daily', 'DAILY'], ['weekly', 'WEEKLY'], ['monthly', 'MONTHLY'], ['season', 'CURRENT SEASON'], ['all-time', 'ALL TIME']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={leaderboardPeriod === value} className={leaderboardPeriod === value ? 'active' : ''} onClick={() => setLeaderboardPeriod(value)}>{label}</button>)}
+          <SectionHeading eyebrow="Verified activity" title="Samurai leaderboard." text={selectedSeason ? `${selectedSeason.name} · ${new Date(selectedSeason.startAt).toLocaleDateString()} → ${new Date(selectedSeason.endAt).toLocaleDateString()}${selectedSeason.status === 'ENDED' && !selectedSeason.frozenAt ? ' · Snapshot pending; showing current verified data.' : selectedSeason.frozenAt ? ' · Frozen snapshot.' : ''}` : 'Ranks are calculated from verified database activity. Featured-token status does not affect normal points.'} />
+          <div style={{ display: 'grid', gap: '12px', justifyItems: 'end', flexShrink: 0 }}>
+            <label style={{ display: 'grid', gap: '5px', color: 'var(--muted)', fontSize: '11px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>
+              <span>Season</span>
+              <select value={selectedSeasonId} disabled={seasonsState !== 'ready' || !seasons.length} onChange={(event) => setSelectedSeasonId(event.target.value)} aria-label="Select leaderboard season">
+                {seasons.map((season) => <option key={season.id} value={season.id}>{season.name} · {season.status}</option>)}
+              </select>
+            </label>
+            <div className="swap-widget-tabs" role="tablist" aria-label="Leaderboard period" style={{ flexShrink: 0 }}>
+              {[['daily', 'DAILY'], ['weekly', 'WEEKLY'], ['monthly', 'MONTHLY'], ['season', 'SEASON'], ['all-time', 'ALL TIME']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={leaderboardPeriod === value} className={leaderboardPeriod === value ? 'active' : ''} onClick={() => setLeaderboardPeriod(value)}>{label}</button>)}
+            </div>
           </div>
         </div>
         {wallet && <div className="surface-card leaderboard-stats-card" style={{ marginTop: '24px', padding: '18px', display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: '12px' }}>
