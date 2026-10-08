@@ -102,8 +102,8 @@ function buildMessage({ evmWallet, solanaWallet, which }) {
   const lines = [
     'RoninSwap Wallet Link',
     '',
-    `Domain: ronin-swap6.vercel.app`,
-    `URI: https://ronin-swap6.vercel.app`,
+    `Domain: ronin-swap01.vercel.app`,
+    `URI: https://ronin-swap01.vercel.app`,
     'Purpose: Link EVM wallet to RoninSwap Solana reward identity',
     '',
     'I authorize linking the following wallets for Samurai Points rewards:',
@@ -356,7 +356,7 @@ test('Origin: missing Origin header → allowed (wallet in-app browsers)', () =>
   assert.ok(validateWalletLinkOrigin(req), 'missing Origin should be allowed')
 })
 test('Origin: production origin → allowed', () => {
-  const req = { headers: { origin: 'https://ronin-swap6.vercel.app' } }
+  const req = { headers: { origin: 'https://ronin-swap01.vercel.app' } }
   assert.ok(validateWalletLinkOrigin(req), 'production origin should be allowed')
 })
 test('Origin: localhost → allowed (dev)', () => {

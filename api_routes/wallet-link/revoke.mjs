@@ -50,7 +50,7 @@ function buildRevokeMessage({ solanaWallet, evmWallet, nonce, issuedAt, expiresA
   // walletLinkAuth.mjs). We duplicate it here rather than importing
   // the internal constant — keeping the revoke handler self-contained.
   const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
-  const domain = String(runtimeEnv.WALLET_LINK_ALLOWED_ORIGIN || 'https://ronin-swap6.vercel.app')
+  const domain = String(runtimeEnv.WALLET_LINK_ALLOWED_ORIGIN || 'https://ronin-swap01.vercel.app')
     .replace(/^https?:\/\//, '').replace(/\/$/, '')
   const uri = `https://${domain}`
   return [

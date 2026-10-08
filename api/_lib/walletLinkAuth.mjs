@@ -42,8 +42,8 @@ const runtimeEnv = globalThis.__RONIN_LOCAL_ENV__ || process.env
 // and tricks the user into signing the wallet-link message there).
 //
 // Configurable via WALLET_LINK_ALLOWED_ORIGIN env var; defaults to the
-// production Vercel deployment.
-const WALLET_LINK_DOMAIN = String(runtimeEnv.WALLET_LINK_ALLOWED_ORIGIN || 'https://ronin-swap6.vercel.app')
+// current production Vercel deployment.
+const WALLET_LINK_DOMAIN = String(runtimeEnv.WALLET_LINK_ALLOWED_ORIGIN || 'https://ronin-swap01.vercel.app')
   .replace(/^https?:\/\//, '')  // strip protocol — store as bare domain
   .replace(/\/$/, '')           // strip trailing slash
 const WALLET_LINK_URI = `https://${WALLET_LINK_DOMAIN}`
@@ -125,7 +125,7 @@ export function validateWalletLinkOrigin(req) {
   // Allow Vercel preview deployments IF the env var explicitly allows it
   // (off by default — preview deployments are not trusted for wallet-link)
   const allowPreview = String(runtimeEnv.WALLET_LINK_ALLOW_PREVIEW || '').toLowerCase() === 'true'
-  const isVercelPreview = allowPreview && origin.match(/^https:\/\/ronin-swap6-[a-z0-9]+\.vercel\.app$/)
+  const isVercelPreview = allowPreview && origin.match(/^https:\/\/ronin-swap01-[a-z0-9]+\.vercel\.app$/)
 
   if (isLocalhost || isProduction || isVercelPreview) {
     return true
